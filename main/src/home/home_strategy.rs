@@ -1,7 +1,6 @@
 use crate::home_tab::HomePage;
 use gpui::{Context, Window};
 use one_core::storage::{ConnectionType, StoredConnection, Workspace};
-use remote_desktop::RemoteDesktopProtocol;
 
 pub(crate) trait ConnectionOpenStrategy {
     fn open(self: Box<Self>, home: &mut HomePage, window: &mut Window, cx: &mut Context<HomePage>);
@@ -12,7 +11,10 @@ pub(crate) fn build_connection_open_strategy(
     workspace: Option<Workspace>,
 ) -> Box<dyn ConnectionOpenStrategy> {
     match connection.connection_type {
-        ConnectionType::SshSftp => Box::new(SshOpenStrategy { connection }),
+        ConnectionType::SshSftp => Box::new(SshOpenStrategy {
+            connection,
+            workspace,
+        }),
         ConnectionType::Database => Box::new(DatabaseOpenStrategy {
             connection,
             workspace,
@@ -27,25 +29,18 @@ pub(crate) fn build_connection_open_strategy(
         }),
         ConnectionType::Serial => Box::new(SerialOpenStrategy { connection }),
         ConnectionType::PortForwarding => Box::new(PortForwardingOpenStrategy { connection }),
-        ConnectionType::Rdp => Box::new(RemoteDesktopOpenStrategy {
-            connection,
-            protocol: RemoteDesktopProtocol::Rdp,
-        }),
-        ConnectionType::Vnc => Box::new(RemoteDesktopOpenStrategy {
-            connection,
-            protocol: RemoteDesktopProtocol::Vnc,
-        }),
         _ => Box::new(NoopOpenStrategy),
     }
 }
 
 struct SshOpenStrategy {
     connection: StoredConnection,
+    workspace: Option<Workspace>,
 }
 
 impl ConnectionOpenStrategy for SshOpenStrategy {
     fn open(self: Box<Self>, home: &mut HomePage, window: &mut Window, cx: &mut Context<HomePage>) {
-        home.open_ssh_terminal(self.connection, window, cx);
+        home.open_ssh_terminal(self.connection, self.workspace, window, cx);
     }
 }
 
@@ -63,20 +58,6 @@ impl ConnectionOpenStrategy for DatabaseOpenStrategy {
         extension_runtime::database_driver_install::open_database_connection_with_driver_guard(
             home, connection, workspace, window, cx,
         );
-    }
-}
-
-impl extension_runtime::remote_desktop_provider_install::RemoteDesktopConnectionOpener
-    for HomePage
-{
-    fn open_remote_desktop_connection(
-        &mut self,
-        connection: &StoredConnection,
-        protocol: RemoteDesktopProtocol,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.open_remote_desktop(connection.clone(), protocol, window, cx);
     }
 }
 
@@ -141,23 +122,6 @@ struct PortForwardingOpenStrategy {
 impl ConnectionOpenStrategy for PortForwardingOpenStrategy {
     fn open(self: Box<Self>, home: &mut HomePage, window: &mut Window, cx: &mut Context<HomePage>) {
         home.open_port_forwarding(self.connection, window, cx);
-    }
-}
-
-struct RemoteDesktopOpenStrategy {
-    connection: StoredConnection,
-    protocol: RemoteDesktopProtocol,
-}
-
-impl ConnectionOpenStrategy for RemoteDesktopOpenStrategy {
-    fn open(self: Box<Self>, home: &mut HomePage, window: &mut Window, cx: &mut Context<HomePage>) {
-        let RemoteDesktopOpenStrategy {
-            connection,
-            protocol,
-        } = *self;
-        extension_runtime::remote_desktop_provider_install::open_remote_desktop_connection_with_provider_guard(
-            home, connection, protocol, window, cx,
-        );
     }
 }
 

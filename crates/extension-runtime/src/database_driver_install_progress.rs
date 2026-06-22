@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::extension_downloader::{DownloadProgress, DownloadProgressCallback};
 use gpui::{
     App, AsyncApp, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled,

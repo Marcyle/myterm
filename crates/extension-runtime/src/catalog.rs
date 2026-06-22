@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use db_view::extension_menu::DbTreeExtensionMenuRegistry;
 use one_core::{
     command_registry::{CommandHandler, CommandRegistry},
     contributions::SlotRegistry,
@@ -12,8 +11,7 @@ use crate::extension::manifest::{Manifest, WasmRuntimeKind};
 
 use super::registration::load_installed_composite_manifests;
 use super::types::{
-    ExtensionRuntimeError, RegisteredDbTreeMenuContribution, RegisteredKeybindingContribution,
-    WasmRuntimeBinding,
+    ExtensionRuntimeError, RegisteredKeybindingContribution, WasmRuntimeBinding,
 };
 
 static WASM_CATALOG_LOG_KEYS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -22,7 +20,6 @@ static WASM_CATALOG_LOG_KEYS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new()
 pub struct ExtensionRuntimeCatalog {
     pub(super) commands: CommandRegistry,
     pub(super) wasm_runtimes: BTreeMap<String, WasmRuntimeBinding>,
-    pub(super) db_tree_menus: Vec<RegisteredDbTreeMenuContribution>,
     pub(super) toolbar_slots: SlotRegistry,
     pub(super) menu_slots: SlotRegistry,
     pub(super) keybindings: Vec<RegisteredKeybindingContribution>,
@@ -48,7 +45,6 @@ impl ExtensionRuntimeCatalog {
         Self {
             commands: CommandRegistry::new(),
             wasm_runtimes: BTreeMap::new(),
-            db_tree_menus: Vec::new(),
             toolbar_slots: SlotRegistry::default(),
             menu_slots: SlotRegistry::default(),
             keybindings: Vec::new(),
@@ -89,14 +85,6 @@ impl ExtensionRuntimeCatalog {
             );
         }
         Ok(ExtensionRuntimeCatalogLoadReport { catalog, loaded })
-    }
-
-    pub fn db_tree_menu_registry(&self) -> DbTreeExtensionMenuRegistry {
-        let mut registry = DbTreeExtensionMenuRegistry::default();
-        for menu in &self.db_tree_menus {
-            registry.add(menu.position.clone(), menu.item.clone());
-        }
-        registry
     }
 
     pub fn component_permissions_for_command(

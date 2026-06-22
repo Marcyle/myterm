@@ -53,7 +53,6 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::setting_tab;
-use db::GlobalDbState;
 use one_core::storage::{ConnectionRepository, GlobalStorageState};
 
 fn activate_tab_by_number(number: usize, cx: &mut App) {
@@ -161,9 +160,6 @@ pub fn init(cx: &mut App) {
     setting_tab::init_settings(cx);
     one_core::init(cx);
     one_ui::init(cx);
-    db_view::search_shortcut::init(cx);
-    db_view::sql_editor_view::init(cx);
-    db_view::chatdb::agents::init(cx);
     crate::auth::init(cx);
     crate::license::init(cx);
     {
@@ -174,15 +170,9 @@ pub fn init(cx: &mut App) {
             .set_proxy_settings(&AppSettings::global(cx).global_proxy)
             .expect("LLM 代理初始化失败");
     }
-    db::init_cache(cx);
-    // 启动后台磁盘缓存清理任务
-    if let Some(cache) = cx.try_global::<db::GlobalNodeCache>() {
-        cache.start_cleanup_task(cx);
-    }
     terminal_view::init(cx);
     redis_view::init(cx);
     mongodb_view::init(cx);
-    remote_desktop_view::init(cx);
     crate::home_tab::init(cx);
     cx.bind_keys(init_keybindings(cx));
     init_action_handlers(cx);
@@ -192,21 +182,15 @@ pub fn init(cx: &mut App) {
 
     let storage_state = cx.global::<GlobalStorageState>();
     let conn_repo = storage_state.storage.get::<ConnectionRepository>();
-    let db_state = GlobalDbState::with_connection_repository(conn_repo);
-    db_state.start_cleanup_task(cx);
-    cx.set_global(db_state);
-    db_view::init_ask_ai_notifier(cx);
+    let _ = conn_repo;
     cx.activate(true);
 }
 
 pub fn refresh_keybindings(cx: &mut App) {
     cx.bind_keys(refreshable_keybindings(cx));
     crate::home_tab::refresh_keybindings(cx);
-    db_view::search_shortcut::refresh_keybindings(cx);
-    db_view::sql_editor_view::refresh_keybindings(cx);
     terminal_view::refresh_keybindings(cx);
     redis_view::refresh_keybindings(cx);
-    remote_desktop_view::refresh_keybindings(cx);
     one_ui::refresh_keybindings(cx);
     remote_file_editor::refresh_keybindings(cx);
 }

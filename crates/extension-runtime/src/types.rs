@@ -1,7 +1,6 @@
 #[cfg(feature = "wasm-components")]
 use std::path::PathBuf;
 
-use db_view::extension_menu::DbTreeExtensionMenuItem;
 use one_core::{
     command_registry::{CommandDescriptor, CommandHandler, CommandRegistryError},
     contributions::{ContributionProvenance, SlotItem},
@@ -19,12 +18,6 @@ pub struct RegisteredKeybindingContribution {
     pub linux: Option<String>,
     pub windows: Option<String>,
     pub when_clause: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct RegisteredDbTreeMenuContribution {
-    pub position: String,
-    pub item: DbTreeExtensionMenuItem,
 }
 
 #[derive(Debug, Clone)]

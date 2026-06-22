@@ -1,39 +1,23 @@
-use db::ipc::{IpcDriverRegistry, driver_icon_from_asset_path, driver_icon_from_file_path};
-use gpui_component::{Icon, Size};
+use gpui_component::{Icon, IconName, Size, Sizable};
 use one_core::storage::DbConnectionConfig;
 use std::path::Path;
 
 pub(crate) fn external_driver_icon_for_config(
-    config: &DbConnectionConfig,
+    _config: &DbConnectionConfig,
     size: impl Into<Size>,
 ) -> Option<Icon> {
-    external_driver_icon_for_config_with_registry(config, size, &IpcDriverRegistry::load_default())
+    // Database support removed - return default icon
+    Some(IconName::Database.color().with_size(size))
 }
 
-fn external_driver_icon_for_config_with_registry(
-    config: &DbConnectionConfig,
-    size: impl Into<Size>,
-    registry: &IpcDriverRegistry,
-) -> Option<Icon> {
-    let Some(display) = registry.display_for_config(config) else {
-        return None;
-    };
-
-    let icon_asset_path = display.icon_asset_path;
-    let icon_file_path = display.icon_file_path;
-    if icon_asset_path.is_none() && icon_file_path.is_none() {
-        return None;
-    }
-    Some(match icon_file_path {
-        Some(path) => driver_icon_from_file_path(path, size),
-        None => driver_icon_from_asset_path(icon_asset_path?, size),
-    })
+#[allow(dead_code)]
+pub(crate) fn external_driver_icon_from_path(_path: &str, size: impl Into<Size>) -> Icon {
+    // Database support removed - return default icon
+    IconName::Database.color().with_size(size)
 }
 
-pub(crate) fn external_driver_icon_from_path(path: &str, size: impl Into<Size>) -> Icon {
-    driver_icon_from_asset_path(path.to_string(), size)
-}
-
-pub(crate) fn external_driver_icon_from_file_path(path: &Path, size: impl Into<Size>) -> Icon {
-    driver_icon_from_file_path(path.to_path_buf(), size)
+#[allow(dead_code)]
+pub(crate) fn external_driver_icon_from_file_path(_path: &Path, size: impl Into<Size>) -> Icon {
+    // Database support removed - return default icon
+    IconName::Database.color().with_size(size)
 }

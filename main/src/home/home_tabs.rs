@@ -1,15 +1,12 @@
 use crate::home_tab::HomePage;
 use crate::setting_tab::{AppSettings, DatabaseOpenMode, SettingsPanel};
-use db_view::chatdb::chat_panel::ChatPanel;
-use db_view::database_tab::DatabaseTabView;
 use gpui::AppContext;
 use gpui::{App, Context, Window};
+use gpui_component::WindowExt;
 use mongodb_view::MongoTabView;
 use one_core::storage::{ConnectionType, StoredConnection, Workspace};
 use one_core::tab_container::TabItem;
 use redis_view::RedisTabView;
-use remote_desktop::{RemoteDesktopConnectionOptions, RemoteDesktopProtocol};
-use remote_desktop_view::{RemoteDesktopView, RemoteDesktopViewConfig};
 use sftp_view::{SftpView, SftpViewEvent};
 use terminal::LocalConfig;
 use terminal_view::{
@@ -124,6 +121,7 @@ impl HomePage {
     pub(crate) fn open_ssh_terminal(
         &mut self,
         conn: StoredConnection,
+        _workspace: Option<Workspace>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -319,58 +317,6 @@ impl HomePage {
         });
     }
 
-    pub(crate) fn open_remote_desktop(
-        &mut self,
-        conn: StoredConnection,
-        protocol: RemoteDesktopProtocol,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(options) = remote_desktop_options(&conn, protocol) else {
-            tracing::warn!(
-                connection_id = ?conn.id,
-                connection_name = %conn.name,
-                "failed to parse remote desktop connection params"
-            );
-            return;
-        };
-        let conn_id = conn.id.unwrap_or(0);
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        let tab_kind = remote_desktop_tab_kind(protocol);
-        let tab_id = format!("{tab_kind}-{conn_id}-{timestamp}");
-        let prefix = format!("{tab_kind}-{conn_id}-");
-        let existing_count = self
-            .tab_container
-            .read(cx)
-            .tabs()
-            .iter()
-            .filter(|tab| tab.id().starts_with(&prefix))
-            .count();
-        let tab_index = if existing_count > 0 {
-            Some(existing_count + 1)
-        } else {
-            None
-        };
-        let title = conn.name.clone();
-        let view = cx.new(|cx| {
-            RemoteDesktopView::new(
-                RemoteDesktopViewConfig {
-                    options,
-                    title,
-                    tab_index,
-                },
-                cx,
-            )
-        });
-        self.tab_container.update(cx, |tc, cx| {
-            let tab = TabItem::new(tab_id, tab_kind, view);
-            tc.add_and_activate_tab_with_focus(tab, window, cx);
-        });
-    }
-
     pub(crate) fn open_redis_tab(
         &mut self,
         conn: StoredConnection,
@@ -546,103 +492,22 @@ impl HomePage {
         });
     }
 
-    pub(crate) fn add_ai_chat_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let tab_container = self.tab_container.clone();
-        window.defer(cx, move |window, cx| {
-            tab_container.update(cx, |tc, cx| {
-                tc.activate_or_add_tab_lazy(
-                    "ai-chat",
-                    |win, cx| {
-                        let ai_chat = cx.new(|x| ChatPanel::new(win, x));
-                        TabItem::new("ai-chat", "home", ai_chat)
-                    },
-                    window,
-                    cx,
-                );
-            });
-        });
+    pub(crate) fn add_ai_chat_tab(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        // AI chat support removed
     }
 
     pub(crate) fn add_item_to_tab(
         &mut self,
-        conn: &StoredConnection,
-        workspace: Option<Workspace>,
+        _conn: &StoredConnection,
+        _workspace: Option<Workspace>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // 根据设置中的数据库打开方式决定如何打开
-        let open_mode = if cx.has_global::<AppSettings>() {
-            AppSettings::global(cx).database_open_mode
-        } else {
-            DatabaseOpenMode::default()
-        };
-
-        // 在 defer 之前准备所有需要的数据，避免在 HomePage 更新期间
-        // 触发 on_deactivate 导致双重借用 panic
-        let workspace_id = workspace.as_ref().and_then(|w| w.id);
-        let conn_clone = conn.clone();
-        let connections: Vec<StoredConnection> = match open_mode {
-            DatabaseOpenMode::Workspace if workspace_id.is_some() => self
-                .connections
-                .iter()
-                .filter(|c| c.workspace_id == workspace_id)
-                .filter(|c| c.connection_type == ConnectionType::Database)
-                .cloned()
-                .collect(),
-            _ => vec![conn.clone()],
-        };
-
-        let tab_container = self.tab_container.clone();
-        window.defer(cx, move |window, cx| {
-            tab_container.update(cx, |tc, cx| match open_mode {
-                DatabaseOpenMode::Single => {
-                    let tab_id = format!("database-tab-{}", conn_clone.id.unwrap_or(0));
-                    tc.activate_or_add_tab_lazy(
-                        tab_id.clone(),
-                        move |window, cx| {
-                            let db_view = cx.new(|cx| {
-                                DatabaseTabView::new_with_active_conn(
-                                    None,
-                                    vec![conn_clone.clone()],
-                                    conn_clone.id,
-                                    window,
-                                    cx,
-                                )
-                            });
-                            TabItem::new(tab_id.clone(), "home", db_view)
-                        },
-                        window,
-                        cx,
-                    );
-                }
-                DatabaseOpenMode::Workspace => {
-                    let tab_id = if workspace_id.is_some() {
-                        format!("workspace-database-tab-{}", workspace_id.unwrap_or(0))
-                    } else {
-                        format!("database-tab-{}", conn_clone.id.unwrap_or(0))
-                    };
-
-                    let active_conn_id = conn_clone.id;
-                    tc.activate_or_add_tab_lazy(
-                        tab_id.clone(),
-                        move |window, cx| {
-                            let db_view = cx.new(|cx| {
-                                DatabaseTabView::new_with_active_conn(
-                                    workspace,
-                                    connections,
-                                    active_conn_id,
-                                    window,
-                                    cx,
-                                )
-                            });
-                            TabItem::new(tab_id.clone(), "home", db_view)
-                        },
-                        window,
-                        cx,
-                    );
-                }
-            });
-        });
+        // Database support removed - show notification
+        window.push_notification(
+            gpui_component::notification::Notification::error("数据库连接已禁用".to_string()),
+            cx,
+        );
     }
 
     /// 复制当前活动标签并打开
@@ -680,7 +545,7 @@ impl HomePage {
                                 .find(|c| c.id == Some(conn_id))
                                 .cloned()
                             {
-                                self.open_ssh_terminal(conn, window, cx);
+                                self.open_ssh_terminal(conn, None, window, cx);
                             }
                         }
                     }
@@ -707,27 +572,5 @@ impl HomePage {
                 // 其他类型暂不支持复制
             }
         }
-    }
-}
-
-fn remote_desktop_options(
-    conn: &StoredConnection,
-    protocol: RemoteDesktopProtocol,
-) -> Option<RemoteDesktopConnectionOptions> {
-    let params = conn.to_remote_desktop_params().ok()?;
-    Some(RemoteDesktopConnectionOptions {
-        protocol,
-        destination: format!("{}:{}", params.host, params.port),
-        username: params.username,
-        password: params.password,
-        domain: params.domain,
-        read_only: params.read_only,
-    })
-}
-
-fn remote_desktop_tab_kind(protocol: RemoteDesktopProtocol) -> &'static str {
-    match protocol {
-        RemoteDesktopProtocol::Rdp => "rdp",
-        RemoteDesktopProtocol::Vnc => "vnc",
     }
 }

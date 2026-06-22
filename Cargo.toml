@@ -15,8 +15,6 @@ members = [
     "examples/webview",
     "examples/system_monitor",
     "examples/focus_trap",
-    "crates/db",
-    "crates/db_view",
     "crates/extension-runtime",
     "crates/extension_view",
     "crates/extension-protocol",
@@ -31,8 +29,6 @@ members = [
     "crates/port_forwarding",
     "crates/port_forwarding_view",
     "crates/process-util",
-    "crates/remote_desktop",
-    "crates/remote_desktop_view",
     "main", "crates/ssh", "crates/sftp", "crates/sftp_view", "crates/one_ui", "crates/redis_view", "crates/license_tool", "crates/mongodb_view", "crates/remote_file_editor"]
 resolver = "2"
 
@@ -83,8 +79,6 @@ tracing = "0.1.41"
 
 
 reqwest_client = { path = "crates/reqwest_client" }
-db = { path = "crates/db" }
-db_view = { path = "crates/db_view" }
 redis_view = { path = "crates/redis_view" }
 one-ui = { path = "crates/one_ui" }
 ssh = { path = "crates/ssh" }
@@ -94,8 +88,6 @@ terminal_view = { path = "crates/terminal_view" }
 port_forwarding = { path = "crates/port_forwarding" }
 port_forwarding_view = { path = "crates/port_forwarding_view" }
 process-util = { path = "crates/process-util" }
-remote_desktop = { path = "crates/remote_desktop" }
-remote_desktop_view = { path = "crates/remote_desktop_view" }
 sftp_view = { path = "crates/sftp_view" }
 one-core = { path = "crates/core" }
 mongodb_view = {path = "crates/mongodb_view"}

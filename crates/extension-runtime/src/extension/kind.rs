@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 pub enum ExtensionKind {
     Language,
     DatabaseDriver,
-    RemoteDesktopProvider,
     Composite,
 }
 
@@ -14,17 +13,11 @@ impl ExtensionKind {
         match self {
             Self::Language => "languages",
             Self::DatabaseDriver => "database_drivers",
-            Self::RemoteDesktopProvider => "remote_desktop_providers",
             Self::Composite => "composite",
         }
     }
 
     pub fn all() -> &'static [Self] {
-        &[
-            Self::Language,
-            Self::DatabaseDriver,
-            Self::RemoteDesktopProvider,
-            Self::Composite,
-        ]
+        &[Self::Language, Self::DatabaseDriver, Self::Composite]
     }
 }

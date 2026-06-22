@@ -1,11 +1,9 @@
-use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::path::Path;
 #[cfg(feature = "wasm-components")]
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
-use db_view::extension_menu::DbTreeExtensionMenuItem;
 use serde_json::Value;
 
 use crate::extension::manifest::{
@@ -14,8 +12,8 @@ use crate::extension::manifest::{
 
 use super::catalog::ExtensionRuntimeCatalog;
 use super::types::{
-    ExtensionRuntimeError, RegisteredDbTreeMenuContribution, RegisteredKeybindingContribution,
-    WasmRuntimeBinding, command_descriptor, runtime_key, slot_item_from_menu,
+    ExtensionRuntimeError, RegisteredKeybindingContribution, WasmRuntimeBinding, command_descriptor,
+    runtime_key, slot_item_from_menu,
 };
 
 static WASM_REGISTRATION_LOG_KEYS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -30,7 +28,6 @@ impl ExtensionRuntimeCatalog {
         self.register_menu_slots(&manifest);
         self.register_toolbar_slots(&manifest);
         self.register_keybindings(&manifest);
-        self.register_db_tree_menus(&manifest);
         Ok(())
     }
 
@@ -161,34 +158,6 @@ impl ExtensionRuntimeCatalog {
                 }
             }));
     }
-
-    fn register_db_tree_menus(&mut self, manifest: &Manifest) {
-        let command_titles = command_titles(manifest);
-        for (position, menus) in &manifest.contributes.menus {
-            if !position.starts_with("db.tree.") {
-                continue;
-            }
-            for menu in menus {
-                let command_id = menu.command.id.clone();
-                let label = menu
-                    .label
-                    .clone()
-                    .or_else(|| command_titles.get(command_id.as_str()).cloned())
-                    .unwrap_or_else(|| command_id.clone());
-                self.db_tree_menus.push(RegisteredDbTreeMenuContribution {
-                    position: position.clone(),
-                    item: DbTreeExtensionMenuItem {
-                        extension_id: manifest.id.clone(),
-                        command_id,
-                        label,
-                        group: menu.group.clone(),
-                        when_clause: menu.when.clone(),
-                        requires_active: menu.requires_active,
-                    },
-                });
-            }
-        }
-    }
 }
 
 #[cfg(feature = "wasm-components")]
@@ -265,13 +234,4 @@ fn is_candidate_composite_dir(entry: &std::fs::DirEntry) -> bool {
         return false;
     };
     file_type.is_dir() && !entry.file_name().to_string_lossy().starts_with('_')
-}
-
-fn command_titles(manifest: &Manifest) -> BTreeMap<&str, String> {
-    manifest
-        .contributes
-        .commands
-        .iter()
-        .map(|command| (command.id.as_str(), command.title.clone()))
-        .collect()
 }

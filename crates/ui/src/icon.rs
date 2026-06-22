@@ -203,8 +203,6 @@ pub enum IconName {
     SettingColor,
     SerialPort,
     Monitor,
-    Rdp,
-    Vnc,
     DuckDB,
 }
 
@@ -397,8 +395,6 @@ impl IconNamed for IconName {
             Self::SettingColor => "icons/setting_color.svg",
             Self::SerialPort => "icons/serial_port.svg",
             Self::Monitor => "icons/monitor.svg",
-            Self::Rdp => "icons/rdp.svg",
-            Self::Vnc => "icons/vnc.svg",
             Self::DuckDB => "icons/duckdb.svg",
         }
         .into()

@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use db_view::connection_form_window::{ConnectionFormWindow, ConnectionFormWindowConfig};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, AsyncApp, Context, ElementId, Entity, EventEmitter, FocusHandle,
@@ -34,10 +33,8 @@ use one_core::license::Feature;
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 use one_core::storage::traits::Repository;
 use one_core::storage::{
-    ActiveConnections, ConnectionRepository, ConnectionType, DatabaseType, GlobalStorageState,
-    PendingCloudDeletionRepository, RedisMode, RemoteDesktopParams,
-    RemoteDesktopProtocol as StoredRemoteDesktopProtocol, StoredConnection, Workspace,
-    WorkspaceRepository,
+    ActiveConnections, ConnectionRepository, ConnectionType, GlobalStorageState,
+    PendingCloudDeletionRepository, RedisMode, StoredConnection, Workspace, WorkspaceRepository,
 };
 use one_core::tab_container::{TabContainer, TabContent, TabContentEvent};
 use port_forwarding::{
@@ -57,9 +54,6 @@ use crate::home::home_strategy::build_connection_open_strategy;
 use crate::home::home_workspace_filter::{WorkspaceFilterDelegate, show_workspace_dialog};
 use crate::license::{get_license_service, is_feature_enabled, show_upgrade_dialog};
 use crate::new_connection::NewConnectionWindow;
-use crate::new_connection::remote_desktop_form::{
-    RemoteDesktopFormWindow, RemoteDesktopFormWindowConfig,
-};
 use crate::setting_tab::GlobalCurrentUser;
 use crate::user_avatar::render_user_avatar;
 
@@ -170,94 +164,6 @@ pub struct HomePage {
     port_forwarding_runtime: Arc<tokio::sync::Mutex<PortForwardingRuntime>>,
 }
 
-fn external_driver_id_for_connection_form(
-    db_type: &DatabaseType,
-    editing_conn: Option<&StoredConnection>,
-) -> Option<String> {
-    db_type
-        .external_driver_id()
-        .map(str::to_string)
-        .or_else(|| {
-            editing_conn
-                .and_then(|connection| connection.to_db_connection().ok())
-                .and_then(|config| {
-                    config
-                        .database_type
-                        .external_driver_id()
-                        .map(str::to_string)
-                })
-        })
-}
-
-#[cfg(test)]
-mod external_driver_form_tests {
-    use super::*;
-    use one_core::storage::DbConnectionConfig;
-
-    fn stored_external_connection(driver_id: &str) -> StoredConnection {
-        StoredConnection::new_database(
-            "demo".to_string(),
-            DbConnectionConfig {
-                id: String::new(),
-                database_type: DatabaseType::external(driver_id),
-                name: "demo".to_string(),
-                host: "localhost".to_string(),
-                port: 0,
-                username: String::new(),
-                password: String::new(),
-                database: None,
-                service_name: None,
-                sid: None,
-                workspace_id: None,
-                extra_params: std::collections::HashMap::new(),
-            },
-            None,
-        )
-    }
-
-    #[test]
-    fn external_driver_id_for_connection_form_uses_editing_connection() {
-        let connection = stored_external_connection("dm");
-
-        assert_eq!(
-            Some("dm".to_string()),
-            external_driver_id_for_connection_form(&DatabaseType::MySQL, Some(&connection))
-        );
-    }
-
-    #[test]
-    fn remote_desktop_connection_info_uses_remote_desktop_params() {
-        let params = RemoteDesktopParams {
-            protocol: StoredRemoteDesktopProtocol::Rdp,
-            host: "10.0.0.8".to_string(),
-            port: 3389,
-            username: Some("administrator".to_string()),
-            password: None,
-            domain: None,
-            read_only: false,
-        };
-
-        assert_eq!(
-            "administrator@10.0.0.8:3389",
-            remote_desktop_connection_info(&params)
-        );
-    }
-
-    #[test]
-    fn remote_desktop_connection_info_omits_missing_username() {
-        let params = RemoteDesktopParams {
-            protocol: StoredRemoteDesktopProtocol::Vnc,
-            host: "10.0.0.9".to_string(),
-            port: 5900,
-            username: None,
-            password: None,
-            domain: None,
-            read_only: false,
-        };
-
-        assert_eq!("10.0.0.9:5900", remote_desktop_connection_info(&params));
-    }
-}
 
 impl HomePage {
     pub fn new(
@@ -974,33 +880,6 @@ impl HomePage {
         });
     }
 
-    fn confirm_edit_connection(
-        &mut self,
-        conn_id: i64,
-        conn_name: String,
-        db_type: Option<DatabaseType>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let is_active = cx.global::<ActiveConnections>().is_active(conn_id);
-
-        if is_active {
-            window.open_dialog(cx, move |dialog, _window, _cx| {
-                dialog
-                    .title(t!("Connection.in_use_title").to_string().into_any_element())
-                    .child(
-                        t!("Connection.in_use_cannot_edit", conn_name = conn_name)
-                            .to_string()
-                            .into_any_element(),
-                    )
-                    .alert()
-            });
-        } else if let Some(db_type) = db_type {
-            self.editing_connection_id = Some(conn_id);
-            self.show_connection_form(db_type, window, cx);
-        }
-    }
-
     /// 复制连接，创建一个副本
     fn duplicate_connection(
         &mut self,
@@ -1480,69 +1359,6 @@ impl HomePage {
         .detach();
     }
 
-    pub(crate) fn show_connection_form(
-        &mut self,
-        db_type: DatabaseType,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
-            return;
-        }
-
-        let editing_conn = self
-            .editing_connection_id
-            .and_then(|id| self.connections.iter().find(|c| c.id == Some(id)).cloned());
-        if let Some(driver_id) =
-            external_driver_id_for_connection_form(&db_type, editing_conn.as_ref())
-        {
-            if db::ipc::IpcDriverRegistry::load_default()
-                .find(&driver_id)
-                .is_none()
-            {
-                let connection_name = editing_conn
-                    .as_ref()
-                    .map(|connection| connection.name.clone())
-                    .unwrap_or_else(|| driver_id.clone());
-                extension_runtime::database_driver_install::prompt_install_database_driver(
-                    driver_id,
-                    connection_name,
-                    window,
-                    cx,
-                );
-                return;
-            }
-        }
-        let ssh_connections = self
-            .connections
-            .iter()
-            .filter(|connection| connection.connection_type == ConnectionType::SshSftp)
-            .cloned()
-            .collect();
-
-        let config = ConnectionFormWindowConfig {
-            db_type: db_type.clone(),
-            external_driver_id: None,
-            editing_connection: editing_conn,
-            workspaces: self.workspaces.clone(),
-            teams: get_cached_team_options(cx),
-            ssh_connections,
-        };
-
-        self.editing_connection_id = None;
-
-        open_popup_window(
-            PopupWindowOptions::new(if config.editing_connection.is_some() {
-                t!("Connection.edit", db_type = db_type.as_str()).to_string()
-            } else {
-                t!("Connection.new", db_type = db_type.as_str()).to_string()
-            })
-            .size(700.0, 650.0),
-            move |window, cx| cx.new(|cx| ConnectionFormWindow::new(config, window, cx)),
-            cx,
-        );
-    }
-
     pub(crate) fn show_ssh_form(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
             return;
@@ -1824,45 +1640,6 @@ impl HomePage {
             push_notification_on_active_window(message, cx);
         })
         .detach();
-    }
-
-    pub(crate) fn show_remote_desktop_form(
-        &mut self,
-        protocol: StoredRemoteDesktopProtocol,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
-            return;
-        }
-
-        let connection_type = protocol.connection_type();
-        let editing_conn = self.editing_connection_id.and_then(|id| {
-            self.connections
-                .iter()
-                .find(|c| c.id == Some(id) && c.connection_type == connection_type)
-                .cloned()
-        });
-
-        let config = RemoteDesktopFormWindowConfig {
-            protocol,
-            editing_connection: editing_conn,
-            workspaces: self.workspaces.clone(),
-            teams: get_cached_team_options(cx),
-        };
-
-        self.editing_connection_id = None;
-
-        open_popup_window(
-            PopupWindowOptions::new(if config.editing_connection.is_some() {
-                t!("RemoteDesktopForm.title_edit", protocol = protocol.label()).to_string()
-            } else {
-                t!("RemoteDesktopForm.title_new", protocol = protocol.label()).to_string()
-            })
-            .size(700.0, 560.0),
-            move |window, cx| cx.new(|cx| RemoteDesktopFormWindow::new(config, window, cx)),
-            cx,
-        );
     }
 
     pub(crate) fn ensure_master_key_ready_for_new_connection(
@@ -2570,23 +2347,6 @@ impl HomePage {
                     }
                 }
             }
-            ConnectionType::Rdp | ConnectionType::Vnc => {
-                if let Ok(params) = conn.to_ssh_params() {
-                    if params.host.to_lowercase().contains(query) {
-                        return true;
-                    }
-                    if params.port.to_string().contains(query) {
-                        return true;
-                    }
-                    if params.username.to_lowercase().contains(query) {
-                        return true;
-                    }
-                    let conn_str = format!("{}@{}:{}", params.username, params.host, params.port);
-                    if conn_str.to_lowercase().contains(query) {
-                        return true;
-                    }
-                }
-            }
             ConnectionType::Redis => {
                 if let Ok(params) = conn.to_redis_params() {
                     if params.host.to_lowercase().contains(query) {
@@ -2877,7 +2637,6 @@ impl HomePage {
         let sftp_hover_conn = conn.clone();
         let edit_conn = conn.clone();
         let edit_conn_type = conn.connection_type;
-        let edit_conn_name = conn.name.clone();
         let duplicate_conn = conn.clone();
         let delete_conn_id = conn.id;
         let delete_conn_name = conn.name.clone();
@@ -2997,20 +2756,13 @@ impl HomePage {
                                 move |this, _, window, cx| {
                                     cx.stop_propagation();
                                     if let Some(conn_id) = edit_conn.id {
-                                        let conn_name = edit_conn_name.clone();
                                         match edit_conn_type {
                                             ConnectionType::SshSftp => {
                                                 this.editing_connection_id = Some(conn_id);
                                                 this.show_ssh_form(window, cx);
                                             }
                                             ConnectionType::Database => {
-                                                let db_type = edit_conn
-                                                    .to_db_connection()
-                                                    .ok()
-                                                    .map(|p| p.database_type);
-                                                this.confirm_edit_connection(
-                                                    conn_id, conn_name, db_type, window, cx,
-                                                );
+                                                // Database support removed
                                             }
                                             ConnectionType::Redis => {
                                                 this.editing_connection_id = Some(conn_id);
@@ -3027,22 +2779,6 @@ impl HomePage {
                                             ConnectionType::PortForwarding => {
                                                 this.editing_connection_id = Some(conn_id);
                                                 this.show_port_forwarding_form(window, cx);
-                                            }
-                                            ConnectionType::Rdp => {
-                                                this.editing_connection_id = Some(conn_id);
-                                                this.show_remote_desktop_form(
-                                                    StoredRemoteDesktopProtocol::Rdp,
-                                                    window,
-                                                    cx,
-                                                );
-                                            }
-                                            ConnectionType::Vnc => {
-                                                this.editing_connection_id = Some(conn_id);
-                                                this.show_remote_desktop_form(
-                                                    StoredRemoteDesktopProtocol::Vnc,
-                                                    window,
-                                                    cx,
-                                                );
                                             }
                                             _ => {}
                                         }
@@ -3116,14 +2852,6 @@ impl HomePage {
                                     .color()
                                     .with_size(px(40.0))
                                     .text_color(gpui::white()),
-                                ConnectionType::Rdp => IconName::Rdp
-                                    .color()
-                                    .with_size(px(40.0))
-                                    .text_color(gpui::white()),
-                                ConnectionType::Vnc => IconName::Vnc
-                                    .color()
-                                    .with_size(px(40.0))
-                                    .text_color(gpui::white()),
                                 _ => IconName::Server
                                     .color()
                                     .with_size(px(40.0))
@@ -3173,45 +2901,6 @@ impl HomePage {
                                         )
                                     })
                             })
-                            .when(conn.connection_type == ConnectionType::Database, |this| {
-                                if let Ok(params) = conn.to_db_connection() {
-                                    let conn_info = if matches!(
-                                        params.database_type,
-                                        DatabaseType::SQLite | DatabaseType::DuckDB
-                                    ) {
-                                        params.host.clone()
-                                    } else {
-                                        let database = match params.database {
-                                            Some(database) => format!("/{}", database),
-                                            None => "".to_string(),
-                                        };
-                                        format!(
-                                            "{}@{}:{}{}",
-                                            params.username, params.host, params.port, database
-                                        )
-                                    };
-                                    let tooltip_text: SharedString = conn_info.clone().into();
-                                    this.child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "conn-info-{}",
-                                                conn.id.unwrap_or(0)
-                                            )))
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .max_w_full()
-                                            .tooltip(move |window, cx| {
-                                                Tooltip::new(tooltip_text.clone()).build(window, cx)
-                                            })
-                                            .child(conn_info),
-                                    )
-                                } else {
-                                    this
-                                }
-                            })
                             .when(conn.connection_type == ConnectionType::SshSftp, |this| {
                                 if let Ok(params) = conn.to_ssh_params() {
                                     let conn_info = format!(
@@ -3240,38 +2929,6 @@ impl HomePage {
                                     this
                                 }
                             })
-                            .when(
-                                matches!(
-                                    conn.connection_type,
-                                    ConnectionType::Rdp | ConnectionType::Vnc
-                                ),
-                                |this| {
-                                    if let Ok(params) = conn.to_remote_desktop_params() {
-                                        let conn_info = remote_desktop_connection_info(&params);
-                                        let tooltip_text: SharedString = conn_info.clone().into();
-                                        this.child(
-                                            div()
-                                                .id(SharedString::from(format!(
-                                                    "conn-info-{}",
-                                                    conn.id.unwrap_or(0)
-                                                )))
-                                                .text_xs()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .whitespace_nowrap()
-                                                .max_w_full()
-                                                .tooltip(move |window, cx| {
-                                                    Tooltip::new(tooltip_text.clone())
-                                                        .build(window, cx)
-                                                })
-                                                .child(conn_info),
-                                        )
-                                    } else {
-                                        this
-                                    }
-                                },
-                            )
                             .when(conn.connection_type == ConnectionType::Redis, |this| {
                                 if let Ok(params) = conn.to_redis_params() {
                                     let conn_info = match params.mode {
@@ -3431,13 +3088,6 @@ impl HomePage {
             );
 
         card.into_any_element()
-    }
-}
-
-fn remote_desktop_connection_info(params: &RemoteDesktopParams) -> String {
-    match params.username.as_deref() {
-        Some(username) => format!("{}@{}:{}", username, params.host, params.port),
-        None => format!("{}:{}", params.host, params.port),
     }
 }
 
