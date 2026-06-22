@@ -44,8 +44,6 @@ use gpui::px;
 
 use gpui_component::dock::{ClosePanel, ToggleZoom};
 use gpui_component::{ActiveTheme, Root};
-use one_core::llm::manager::GlobalProviderState;
-use one_core::settings::AppSettings;
 use one_core::storage::manager::get_config_dir;
 use one_core::tab_container::{TabContainer, TabContentRegistry, TabItem};
 #[cfg(unix)]
@@ -160,16 +158,6 @@ pub fn init(cx: &mut App) {
     setting_tab::init_settings(cx);
     one_core::init(cx);
     one_ui::init(cx);
-    crate::auth::init(cx);
-    crate::license::init(cx);
-    {
-        let auth_service = crate::auth::get_auth_service(cx);
-        let global_provider_state = cx.global::<GlobalProviderState>().clone();
-        global_provider_state.set_cloud_client(auth_service.cloud_client());
-        global_provider_state
-            .set_proxy_settings(&AppSettings::global(cx).global_proxy)
-            .expect("LLM 代理初始化失败");
-    }
     terminal_view::init(cx);
     crate::home_tab::init(cx);
     cx.bind_keys(init_keybindings(cx));

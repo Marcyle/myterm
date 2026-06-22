@@ -2,18 +2,14 @@
 
 rust_i18n::i18n!("locales", fallback = "en");
 
-mod auth;
-
 mod app_init;
 mod external_driver_display;
 mod home;
 mod home_tab;
-mod license;
 pub mod new_connection;
 mod onetcli_app;
 mod setting_tab;
 mod settings;
-mod update;
 mod user_avatar;
 
 use crate::onetcli_app::OnetCliApp;
@@ -23,17 +19,12 @@ use gpui_component::Root;
 use gpui_component_assets::Assets;
 
 fn main() {
-    if update::handle_update_command() {
-        return;
-    }
-
     let app = Application::new()
         .with_assets(Assets)
         .with_quit_mode(QuitMode::LastWindowClosed);
 
     app.run(move |cx| {
         onetcli_app::init(cx);
-        extension_runtime::init(cx);
 
         let mut window_size = size(px(1600.0), px(1200.0));
         if let Some(display) = cx.primary_display() {
@@ -63,7 +54,6 @@ fn main() {
             cx.open_window(options, |window, cx| {
                 window.activate_window();
                 app_init::init_window_systems(window, cx);
-                update::schedule_update_check(window, cx);
                 let view = cx.new(|cx| OnetCliApp::new(window, cx));
                 cx.new(|cx| Root::new(view, window, cx))
             })?;

@@ -20,15 +20,10 @@ use gpui_component::{
     tooltip::Tooltip,
     v_flex,
 };
-use one_core::cloud_sync::{
-    CloudApiClient, CloudSyncService, ConflictResolution, SyncConflict, SyncEngine, UserInfo,
-    can_edit_connection, get_cached_team_options,
-};
 use one_core::connection_notifier::{ConnectionDataEvent, emit_connection_event, get_notifier};
 use one_core::crypto;
 use one_core::key_storage;
 use one_core::keybindings::{action_id, rebind_keybindings, shortcuts_for};
-use one_core::license::Feature;
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 use one_core::storage::traits::Repository;
 use one_core::storage::{
@@ -44,14 +39,10 @@ use port_forwarding_view::{PortForwardingFormWindow, PortForwardingFormWindowCon
 use rust_i18n::t;
 use terminal_view::{SshFormWindow, SshFormWindowConfig};
 
-use crate::auth::{AuthService, show_auth_dialog};
 use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_strategy::build_connection_open_strategy;
 use crate::home::home_workspace_filter::{WorkspaceFilterDelegate, show_workspace_dialog};
-use crate::license::{get_license_service, is_feature_enabled, show_upgrade_dialog};
 use crate::new_connection::NewConnectionWindow;
-use crate::setting_tab::GlobalCurrentUser;
-use crate::user_avatar::render_user_avatar;
 
 actions!(home_tab, [OpenConnectionQuickOpen, NewConnectionShortcut]);
 
@@ -135,28 +126,6 @@ pub struct HomePage {
     pub(crate) workspace_filter_open: bool,
     workspace_filter_list: Option<Entity<ListState<WorkspaceFilterDelegate>>>,
     pub(crate) _subscriptions: Vec<Subscription>,
-    /// 云同步服务
-    cloud_sync_service: Arc<std::sync::RwLock<CloudSyncService>>,
-    /// 云端加载错误信息
-    cloud_error: Option<String>,
-    /// 是否正在同步
-    syncing: bool,
-    /// 同步期间收到的新同步请求
-    sync_requested: bool,
-    /// 待处理的同步冲突
-    pending_conflicts: Vec<SyncConflict>,
-    /// 认证服务
-    auth_service: Arc<AuthService>,
-    /// 当前登录用户
-    current_user: Option<UserInfo>,
-    /// 是否正在登录
-    logging_in: bool,
-    /// 认证错误消息（登录/注册失败时设置）
-    auth_error: Option<String>,
-    /// 启动恢复主密钥失败后，在首帧延迟弹出解锁对话框。
-    master_key_unlock_prompt_pending: bool,
-    /// 防止主密钥对话框被启动提示和用户点击重复打开。
-    master_key_dialog_open: bool,
     port_forwarding_runtime: Arc<tokio::sync::Mutex<PortForwardingRuntime>>,
 }
 
@@ -205,17 +174,6 @@ impl HomePage {
             workspace_filter_open: false,
             workspace_filter_list: None,
             _subscriptions: Vec::new(),
-            cloud_sync_service: Arc::new(std::sync::RwLock::new(CloudSyncService::new())),
-            cloud_error: None,
-            syncing: false,
-            sync_requested: false,
-            pending_conflicts: Vec::new(),
-            auth_service: crate::auth::get_auth_service(cx),
-            current_user: None,
-            logging_in: false,
-            auth_error: None,
-            master_key_unlock_prompt_pending: false,
-            master_key_dialog_open: false,
             port_forwarding_runtime: Arc::new(
                 tokio::sync::Mutex::new(PortForwardingRuntime::new()),
             ),
@@ -224,25 +182,10 @@ impl HomePage {
         // 异步加载工作区
         page.load_workspaces(cx);
 
-        // 尝试从存储后端恢复主密钥
-        let key_restored = crypto::try_restore_master_key();
-        if key_restored {
-            tracing::info!("已恢复主密钥");
-        } else if crypto::has_repo_password_set() {
-            // 有验证文件但恢复失败，提示用户需要重新输入密钥
-            tracing::warn!("密钥恢复失败，需要用户重新输入主密钥");
-            page.master_key_unlock_prompt_pending = true;
-        } else {
-            tracing::info!("首次使用，需要设置主密钥");
-        }
-
-        // 在恢复主密钥后再加载连接，避免解密阶段出现空密码
+        // 加载连接
         page.load_connections(cx);
 
-        // 尝试恢复登录会话
-        page.try_restore_session(cx);
-
-        // 订阅全局连接事件，当连接创建/更新时刷新列表并自动同步
+        // 订阅全局连接事件，当连接创建/更新时刷新列表
         if let Some(notifier) = get_notifier(cx) {
             cx.subscribe(
                 &notifier,
@@ -253,11 +196,6 @@ impl HomePage {
                         cx.notify();
                         // 然后异步重新加载以确保数据一致性
                         this.load_connections(cx);
-                        // 如果已登录且密钥已解锁，自动触发同步
-                        if this.current_user.is_some() && crypto::has_master_key() {
-                            tracing::info!("连接数据变化，自动触发云同步");
-                            this.trigger_sync(cx);
-                        }
                     }
                     ConnectionDataEvent::ConnectionUpdated { connection } => {
                         // 立即更新列表中的连接，避免异步加载的时序问题
@@ -272,11 +210,6 @@ impl HomePage {
                         cx.notify();
                         // 然后异步重新加载以确保数据一致性
                         this.load_connections(cx);
-                        // 如果已登录且密钥已解锁，自动触发同步
-                        if this.current_user.is_some() && crypto::has_master_key() {
-                            tracing::info!("连接数据变化，自动触发云同步");
-                            this.trigger_sync(cx);
-                        }
                     }
                     ConnectionDataEvent::ConnectionDeleted { connection_id } => {
                         // 立即从列表中移除连接
@@ -284,21 +217,11 @@ impl HomePage {
                         cx.notify();
                         // 然后异步重新加载以确保数据一致性
                         this.load_connections(cx);
-                        // 如果已登录且密钥已解锁，自动触发同步
-                        if this.current_user.is_some() && crypto::has_master_key() {
-                            tracing::info!("连接数据变化，自动触发云同步");
-                            this.trigger_sync(cx);
-                        }
                     }
                     ConnectionDataEvent::WorkspaceCreated { .. }
                     | ConnectionDataEvent::WorkspaceUpdated { .. }
                     | ConnectionDataEvent::WorkspaceDeleted { .. } => {
                         this.load_workspaces(cx);
-                        // 如果已登录且密钥已解锁，自动触发同步
-                        if this.current_user.is_some() && crypto::has_master_key() {
-                            tracing::info!("工作区数据变化，自动触发云同步");
-                            this.trigger_sync(cx);
-                        }
                     }
                     ConnectionDataEvent::SchemaChanged { .. } => {
                         // SchemaChanged 由 db_tree_view 处理，此处无需操作

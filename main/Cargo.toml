@@ -25,8 +25,6 @@ base64 = { workspace = true }
 dirs = {workspace = true}
 futures = { workspace = true }
 smol = { workspace = true }
-extension-runtime = { workspace = true }
-extension_view = { workspace = true }
 terminal = { workspace = true }
 terminal_view = { workspace = true }
 port_forwarding = { workspace = true }
@@ -52,11 +50,7 @@ gpui = { workspace = true, features = ["test-support"] }
 tempfile = "3"
 
 [features]
-default = ["wasm-components"]
-github-distribution = ["github-updates", "github-marketplace"]
-github-marketplace = ["extension-runtime/github-marketplace"]
-github-updates = []
-wasm-components = ["extension-runtime/wasm-components"]
+default = []
 
 [lints]
 workspace = true
