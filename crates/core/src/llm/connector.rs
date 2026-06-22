@@ -128,9 +128,9 @@ fn client_from_config(config: &ProviderConfig, proxy_url: Option<&str>) -> Resul
             &config.name,
             proxy_url,
         ),
-        ProviderType::OnetCli => {
+        ProviderType::MyTerm => {
             anyhow::bail!(
-                "OnetCli provider should be created via ProviderManager, not LlmConnector"
+                "MyTerm provider should be created via ProviderManager, not LlmConnector"
             )
         }
     }

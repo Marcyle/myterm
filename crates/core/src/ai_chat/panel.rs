@@ -420,7 +420,7 @@ impl AiChatPanel {
                     Err(_) => Vec::new(),
                 };
                 if is_logged_in {
-                    if let Ok(onet) = repo.ensure_onetcli_provider() {
+                    if let Ok(onet) = repo.ensure_myterm_provider() {
                         if !list.iter().any(|p| p.id == onet.id) {
                             list.insert(0, onet);
                         }

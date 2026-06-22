@@ -5,12 +5,12 @@
                 <p class="eyebrow">Pure Rust · GPUI · GPU Rendered · No WebView</p>
                 <h1>纯 Rust 构建的高性能一体化运维工作台</h1>
                 <p class="hero-description">
-                    OnetCli 基于 GPUI 与 Rust 原生技术栈开发，走 GPU 加速渲染路线，不依赖 WebView。
+                    MyTerm 基于 GPUI 与 Rust 原生技术栈开发，走 GPU 加速渲染路线，不依赖 WebView。
                     数据库、Redis、MongoDB、SSH/SFTP、终端会话、远程桌面（RDP/VNC）和 AI 助手，在一个高性能桌面工作台里连续完成。
                 </p>
                 <div class="hero-actions">
-                    <a class="primary-action" href="https://github.com/feigeCode/onetcli/releases" target="_blank" rel="noreferrer">
-                        <span>下载 OnetCli</span>
+                    <a class="primary-action" href="https://github.com/feigeCode/myterm/releases" target="_blank" rel="noreferrer">
+                        <span>下载 MyTerm</span>
                     </a>
                     <a class="secondary-action" :href="withBase('/guide')">
                         <span>查看文档</span>
@@ -29,11 +29,11 @@
             </div>
 
             <div class="product-shell">
-                <img :src="heroImage" alt="OnetCli 主应用工作台总览" />
+                <img :src="heroImage" alt="MyTerm 主应用工作台总览" />
             </div>
         </section>
 
-        <section class="metrics" aria-label="OnetCli product highlights">
+        <section class="metrics" aria-label="MyTerm product highlights">
             <article>
                 <strong>1 个</strong>
                 <span>统一工作台覆盖数据库、远程连接、文件传输和终端</span>
@@ -55,11 +55,11 @@
         <section class="section-block">
             <div class="section-heading">
                 <h2>用户第一眼就能看到真实产品，而不是抽象概念</h2>
-                <p>页面大部分面积用于展示实际界面。每张图都对应一个明确场景，用户扫一眼就知道 OnetCli 能解决什么问题。</p>
+                <p>页面大部分面积用于展示实际界面。每张图都对应一个明确场景，用户扫一眼就知道 MyTerm 能解决什么问题。</p>
             </div>
             <div class="image-grid">
                 <article class="shot large">
-                    <img :src="databaseImage" alt="OnetCli 数据库对象浏览与 SQL 助手" />
+                    <img :src="databaseImage" alt="MyTerm 数据库对象浏览与 SQL 助手" />
                     <div class="caption">
                         <h3>数据库对象浏览 + SQL 助手</h3>
                         <p>
@@ -69,14 +69,14 @@
                     </div>
                 </article>
                 <article class="shot">
-                    <img :src="sshImage" alt="OnetCli SSH 远程终端与 AI 助手" />
+                    <img :src="sshImage" alt="MyTerm SSH 远程终端与 AI 助手" />
                     <div class="caption">
                         <h3>远程终端排查</h3>
                         <p>SSH 会话与 AI 助手并排，适合查看磁盘、日志、进程、服务状态等日常运维动作。</p>
                     </div>
                 </article>
                 <article class="shot">
-                    <img :src="chatdbImage" alt="OnetCli 查询结果分析界面" />
+                    <img :src="chatdbImage" alt="MyTerm 查询结果分析界面" />
                     <div class="caption">
                         <h3>查询结果分析</h3>
                         <p>让 AI 围绕查询结果输出结论、图表和下一步建议，把数据分析放回实际数据库工作流。</p>
@@ -88,7 +88,7 @@
         <section class="section-block">
             <div class="section-heading">
                 <h2>把高频工具合成一条原生工作路径</h2>
-                <p>OnetCli 的重点不是用网页壳堆功能，而是用 Rust 与 GPUI 做真正的桌面体验，让常见任务从连接到执行都保持上下文和性能。</p>
+                <p>MyTerm 的重点不是用网页壳堆功能，而是用 Rust 与 GPUI 做真正的桌面体验，让常见任务从连接到执行都保持上下文和性能。</p>
             </div>
             <div class="feature-grid">
                 <article class="feature-card"><span>DB</span><h3>数据库连接管理</h3><p>按项目或环境组织连接，快速进入 MySQL、PostgreSQL、SQLite、SQL Server、Oracle、ClickHouse、DuckDB 等数据库工作区。</p></article>
@@ -110,7 +110,7 @@
                 <div class="spotlight-copy">
                     <h2>不是网页套壳，是原生 Rust 应用</h2>
                     <p>
-                        OnetCli 使用 GPUI 构建界面，沿用 Zed 生态的高性能原生 UI 路线。
+                        MyTerm 使用 GPUI 构建界面，沿用 Zed 生态的高性能原生 UI 路线。
                         桌面端通过 GPU 加速渲染，而不是把一个 Web 应用塞进 WebView。
                     </p>
                     <div class="check-list">
@@ -120,7 +120,7 @@
                     </div>
                 </div>
                 <article class="shot">
-                    <img :src="monitorImage" alt="OnetCli 原生渲染监控图表" />
+                    <img :src="monitorImage" alt="MyTerm 原生渲染监控图表" />
                     <div class="caption">
                         <h3>原生渲染图表与监控</h3>
                         <p>内置简易服务器监控和原生渲染图表，用桌面应用的方式呈现运行状态和关键指标。</p>
@@ -136,17 +136,17 @@
             </div>
             <div class="split-gallery">
                 <article class="shot">
-                    <img :src="redisImage" alt="OnetCli Redis 管理界面" />
+                    <img :src="redisImage" alt="MyTerm Redis 管理界面" />
                     <div class="caption">
                         <h3>Redis Key 浏览与值查看</h3>
                         <p>用于缓存排查、Key 检索、值检查和集群场景管理，和数据库、SSH 工作流共用同一个桌面入口。</p>
                     </div>
                 </article>
                 <article class="shot">
-                    <img :src="mongodbImage" alt="OnetCli MongoDB 管理界面" />
+                    <img :src="mongodbImage" alt="MyTerm MongoDB 管理界面" />
                     <div class="caption">
                         <h3>MongoDB 集合与文档浏览</h3>
-                        <p>浏览集合、查看文档、执行查询，让 NoSQL 数据源和关系型数据库一起纳入 OnetCli 的统一工作台。</p>
+                        <p>浏览集合、查看文档、执行查询，让 NoSQL 数据源和关系型数据库一起纳入 MyTerm 的统一工作台。</p>
                     </div>
                 </article>
             </div>
@@ -159,14 +159,14 @@
             </div>
             <div class="split-gallery">
                 <article class="shot">
-                    <img :src="sftpImage" alt="OnetCli SFTP 文件管理界面" />
+                    <img :src="sftpImage" alt="MyTerm SFTP 文件管理界面" />
                     <div class="caption">
                         <h3>SFTP 文件管理</h3>
                         <p>远程目录浏览、文件传输和服务器排查可以放在同一套连接上下文里完成。</p>
                     </div>
                 </article>
                 <article class="shot">
-                    <img :src="sftpSidebarImage" alt="OnetCli 终端内置 SFTP 侧栏" />
+                    <img :src="sftpSidebarImage" alt="MyTerm 终端内置 SFTP 侧栏" />
                     <div class="caption">
                         <h3>终端内置 SFTP 侧栏</h3>
                         <p>终端操作时可以直接打开 SFTP 侧栏，并支持文件拖拽上传，排查和传输不再割裂。</p>
@@ -178,21 +178,21 @@
         <section class="section-block">
             <div class="image-grid">
                 <article class="shot large">
-                    <img :src="remoteEditorImage" alt="OnetCli 远程文件编辑器" />
+                    <img :src="remoteEditorImage" alt="MyTerm 远程文件编辑器" />
                     <div class="caption">
                         <h3>远程文件直接编辑</h3>
                         <p>从应用内打开远程文件，支持语法高亮和自动补全。对配置文件、脚本和日志片段的处理更接近完整 IDE 体验。</p>
                     </div>
                 </article>
                 <article class="shot">
-                    <img :src="erImage" alt="OnetCli ER Diagram" />
+                    <img :src="erImage" alt="MyTerm ER Diagram" />
                     <div class="caption">
                         <h3>ER Diagram</h3>
                         <p>通过 ER 图理解表关系，适合接手新系统、梳理业务数据结构和沟通数据库设计。</p>
                     </div>
                 </article>
                 <article class="shot">
-                    <img :src="monitorImage" alt="OnetCli 服务器监控界面" />
+                    <img :src="monitorImage" alt="MyTerm 服务器监控界面" />
                     <div class="caption">
                         <h3>服务器监控</h3>
                         <p>查看基础服务器状态和趋势图，把远程连接后的常见检查动作产品化。</p>
@@ -235,8 +235,8 @@
                 <p>在首屏和截图之后继续消除疑虑：支持什么、怎么开始、AI 在哪里发挥作用。</p>
             </div>
             <div class="faq-grid">
-                <article><h3>OnetCli 是数据库客户端吗？</h3><p>它包含数据库客户端能力，但定位更大：数据库、Redis、MongoDB、SSH/SFTP、终端和 AI 工作流统一在一个桌面工作台里。</p></article>
-                <article><h3>为什么强调 Rust 和无 WebView？</h3><p>这说明 OnetCli 不是网页套壳。它基于 GPUI 构建，走 GPU 加速的原生桌面渲染路线，更适合追求性能和长期稳定使用的用户。</p></article>
+                <article><h3>MyTerm 是数据库客户端吗？</h3><p>它包含数据库客户端能力，但定位更大：数据库、Redis、MongoDB、SSH/SFTP、终端和 AI 工作流统一在一个桌面工作台里。</p></article>
+                <article><h3>为什么强调 Rust 和无 WebView？</h3><p>这说明 MyTerm 不是网页套壳。它基于 GPUI 构建，走 GPU 加速的原生桌面渲染路线，更适合追求性能和长期稳定使用的用户。</p></article>
                 <article><h3>AI 会不会喧宾夺主？</h3><p>不会。AI 作为辅助层贴近 SQL、查询结果和终端排查场景，核心操作仍然围绕真实工程任务。</p></article>
             </div>
         </section>
@@ -250,7 +250,7 @@
                     </p>
                 </div>
                 <div class="download-actions">
-                    <a class="primary-action" href="https://github.com/feigeCode/onetcli/releases" target="_blank" rel="noreferrer">
+                    <a class="primary-action" href="https://github.com/feigeCode/myterm/releases" target="_blank" rel="noreferrer">
                         <span>前往 GitHub Releases</span>
                     </a>
                     <a class="secondary-action" :href="withBase('/guide')">
@@ -284,12 +284,12 @@ const structuredData = JSON.stringify(
         {
             "@context": "https://schema.org",
             "@type": "SoftwareApplication",
-            name: "OnetCli",
+            name: "MyTerm",
             applicationCategory: "DeveloperApplication",
             operatingSystem: "macOS, Windows, Linux",
             description:
-                "OnetCli 是一个纯 Rust 构建、基于 GPUI 和 GPU 渲染的一体化运维工作台，用于统一管理数据库、Redis、MongoDB、SSH/SFTP、终端与 AI 工作流。",
-            downloadUrl: "https://github.com/feigeCode/onetcli/releases",
+                "MyTerm 是一个纯 Rust 构建、基于 GPUI 和 GPU 渲染的一体化运维工作台，用于统一管理数据库、Redis、MongoDB、SSH/SFTP、终端与 AI 工作流。",
+            downloadUrl: "https://github.com/feigeCode/myterm/releases",
             featureList: [
                 "Pure Rust GPUI desktop application",
                 "GPU rendered native UI without WebView",
@@ -308,10 +308,10 @@ const structuredData = JSON.stringify(
             mainEntity: [
                 {
                     "@type": "Question",
-                    name: "OnetCli 是数据库客户端吗？",
+                    name: "MyTerm 是数据库客户端吗？",
                     acceptedAnswer: {
                         "@type": "Answer",
-                        text: "OnetCli 包含数据库客户端能力，但定位更大：数据库、Redis、MongoDB、SSH/SFTP、终端和 AI 工作流统一在一个桌面工作台里。",
+                        text: "MyTerm 包含数据库客户端能力，但定位更大：数据库、Redis、MongoDB、SSH/SFTP、终端和 AI 工作流统一在一个桌面工作台里。",
                     },
                 },
                 {
@@ -319,15 +319,15 @@ const structuredData = JSON.stringify(
                     name: "为什么强调 Rust 和无 WebView？",
                     acceptedAnswer: {
                         "@type": "Answer",
-                        text: "OnetCli 基于 GPUI 构建，走 GPU 加速的原生桌面渲染路线，不依赖 WebView，更适合追求性能和长期稳定使用的用户。",
+                        text: "MyTerm 基于 GPUI 构建，走 GPU 加速的原生桌面渲染路线，不依赖 WebView，更适合追求性能和长期稳定使用的用户。",
                     },
                 },
                 {
                     "@type": "Question",
-                    name: "OnetCli 是否支持 Redis 和 MongoDB？",
+                    name: "MyTerm 是否支持 Redis 和 MongoDB？",
                     acceptedAnswer: {
                         "@type": "Answer",
-                        text: "支持。OnetCli 提供 Redis Key 浏览、值查看、集群场景支持，也提供 MongoDB 集合浏览、文档查看和查询能力。",
+                        text: "支持。MyTerm 提供 Redis Key 浏览、值查看、集群场景支持，也提供 MongoDB 集合浏览、文档查看和查询能力。",
                     },
                 },
                 {
@@ -335,7 +335,7 @@ const structuredData = JSON.stringify(
                     name: "是否支持国产数据库和远程桌面？",
                     acceptedAnswer: {
                         "@type": "Answer",
-                        text: "支持。OnetCli 通过扩展市场提供达梦 DM、金仓 KingbaseES、GBase 8s、OceanBase、openGauss、Apache IoTDB 等国产与特色数据库驱动，并可打开 RDP 和 VNC 远程桌面会话，远程操作与数据库、终端工作流共用同一个桌面工作台。",
+                        text: "支持。MyTerm 通过扩展市场提供达梦 DM、金仓 KingbaseES、GBase 8s、OceanBase、openGauss、Apache IoTDB 等国产与特色数据库驱动，并可打开 RDP 和 VNC 远程桌面会话，远程操作与数据库、终端工作流共用同一个桌面工作台。",
                     },
                 },
             ],

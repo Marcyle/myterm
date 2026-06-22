@@ -7,11 +7,11 @@ mod external_driver_display;
 mod home;
 mod home_tab;
 pub mod new_connection;
-mod onetcli_app;
+mod myterm_app;
 mod setting_tab;
 mod settings;
 
-use crate::onetcli_app::OnetCliApp;
+use crate::myterm_app::MyApp;
 use gpui::*;
 
 use gpui_component::Root;
@@ -23,7 +23,7 @@ fn main() {
         .with_quit_mode(QuitMode::LastWindowClosed);
 
     app.run(move |cx| {
-        onetcli_app::init(cx);
+        myterm_app::init(cx);
 
         let mut window_size = size(px(1600.0), px(1200.0));
         if let Some(display) = cx.primary_display() {
@@ -53,7 +53,7 @@ fn main() {
             cx.open_window(options, |window, cx| {
                 window.activate_window();
                 app_init::init_window_systems(window, cx);
-                let view = cx.new(|cx| OnetCliApp::new(window, cx));
+                let view = cx.new(|cx| MyApp::new(window, cx));
                 cx.new(|cx| Root::new(view, window, cx))
             })?;
 

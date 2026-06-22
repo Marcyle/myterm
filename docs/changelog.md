@@ -1,11 +1,11 @@
 ---
 title: 更新日志
-description: 基于本地 git tag 和提交历史整理 OnetCli 最近版本与关键能力更新
+description: 基于本地 git tag 和提交历史整理 MyTerm 最近版本与关键能力更新
 ---
 
 # 更新日志
 
-本页基于当前仓库的本地 `git tag` 和提交历史整理，适合在官网中展示最近版本的产品变化。完整发布包、安装文件和历史版本仍以 [GitHub Releases](https://github.com/feigeCode/onetcli/releases) 为准。
+本页基于当前仓库的本地 `git tag` 和提交历史整理，适合在官网中展示最近版本的产品变化。完整发布包、安装文件和历史版本仍以 [GitHub Releases](https://github.com/feigeCode/myterm/releases) 为准。
 
 ## v0.5.0
 
@@ -97,4 +97,4 @@ description: 基于本地 git tag 和提交历史整理 OnetCli 最近版本与�
 
 ## 更多版本
 
-更早版本请查看本地 tag 或 [GitHub Releases](https://github.com/feigeCode/onetcli/releases)。
+更早版本请查看本地 tag 或 [GitHub Releases](https://github.com/feigeCode/myterm/releases)。

@@ -465,13 +465,13 @@ pub fn resolve_local_working_dir(working_dir: Option<String>) -> Option<PathBuf>
 
 /// 准备本地终端的 Shell Integration 环境
 ///
-/// 将 `shell_integration.sh` 写入进程级临时目录 `/tmp/onetcli-<pid>/`，
+/// 将 `shell_integration.sh` 写入进程级临时目录 `/tmp/myterm-<pid>/`，
 /// 仅对当前 OnetCli 进程内的终端会话生效，不污染全局配置。
 /// 返回 `(额外环境变量, shell 额外参数)`。
 #[cfg(not(target_os = "windows"))]
 fn prepare_shell_integration(shell: Option<&str>) -> (Vec<(String, String)>, Vec<String>) {
     // 使用进程级临时目录，确保不影响其他会话或工具
-    let session_dir = std::env::temp_dir().join(format!("onetcli-{}", std::process::id()));
+    let session_dir = std::env::temp_dir().join(format!("myterm-{}", std::process::id()));
     if fs::create_dir_all(&session_dir).is_err() {
         tracing::warn!(
             "无法创建临时目录 {}，跳过 Shell Integration",
@@ -488,7 +488,7 @@ fn prepare_shell_integration(shell: Option<&str>) -> (Vec<(String, String)>, Vec
     }
 
     let mut extra_env: Vec<(String, String)> =
-        vec![("ONETCLI_SHELL_INTEGRATION".into(), "1".into())];
+        vec![("MYTERM_SHELL_INTEGRATION".into(), "1".into())];
     let mut extra_args: Vec<String> = Vec::new();
 
     // 判断 shell 类型：优先用显式参数，否则读 $SHELL
@@ -507,20 +507,20 @@ fn prepare_shell_integration(shell: Option<&str>) -> (Vec<(String, String)>, Vec
         let script = integration_path.display();
 
         // .zshenv — 恢复原始 ZDOTDIR 并 source 用户的 .zshenv
-        let zshenv = "ZDOTDIR=\"${_ONETCLI_ORIG_ZDOTDIR:-$HOME}\"\n\
+        let zshenv = "ZDOTDIR=\"${_MYTERM_ORIG_ZDOTDIR:-$HOME}\"\n\
                        [[ -f \"$ZDOTDIR/.zshenv\" ]] && source \"$ZDOTDIR/.zshenv\"\n";
         let _ = fs::write(zsh_dir.join(".zshenv"), zshenv);
 
         // .zshrc — 恢复 ZDOTDIR，source 用户 .zshrc，再 source 集成脚本
         let zshrc = format!(
-            "ZDOTDIR=\"${{_ONETCLI_ORIG_ZDOTDIR:-$HOME}}\"\n\
+            "ZDOTDIR=\"${{_MYTERM_ORIG_ZDOTDIR:-$HOME}}\"\n\
              [[ -f \"$ZDOTDIR/.zshrc\" ]] && source \"$ZDOTDIR/.zshrc\"\n\
              source \"{script}\"\n"
         );
         let _ = fs::write(zsh_dir.join(".zshrc"), zshrc);
 
         let orig = std::env::var("ZDOTDIR").unwrap_or_default();
-        extra_env.push(("_ONETCLI_ORIG_ZDOTDIR".into(), orig));
+        extra_env.push(("_MYTERM_ORIG_ZDOTDIR".into(), orig));
         extra_env.push(("ZDOTDIR".into(), zsh_dir.display().to_string()));
 
         tracing::debug!(
@@ -593,7 +593,7 @@ fn build_remote_history_load_command() -> String {
         "sh -lc",
         "'",
         "if [ -f \"$HOME/.bash_history\" ]; then tail -n 512 \"$HOME/.bash_history\" 2>/dev/null || true; fi;",
-        "printf \"\\n__ONETCLI_HISTORY_SPLIT__\\n\";",
+        "printf \"\\n__MYTERM_HISTORY_SPLIT__\\n\";",
         "if [ -f \"$HOME/.zsh_history\" ]; then tail -n 512 \"$HOME/.zsh_history\" 2>/dev/null || true; fi",
         "'",
     ]
@@ -602,7 +602,7 @@ fn build_remote_history_load_command() -> String {
 
 fn parse_remote_history_output(output: &str) -> Vec<String> {
     let (bash_history, zsh_history) = output
-        .split_once("\n__ONETCLI_HISTORY_SPLIT__\n")
+        .split_once("\n__MYTERM_HISTORY_SPLIT__\n")
         .unwrap_or((output, ""));
 
     let mut commands = parse_shell_history(bash_history, ShellHistoryFormat::Bash);
@@ -1852,7 +1852,7 @@ mod tests {
     #[test]
     fn resolve_default_windows_shell_prefers_pwsh_from_path() {
         let temp_dir =
-            std::env::temp_dir().join(format!("onetcli-terminal-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("myterm-terminal-test-{}", std::process::id()));
         fs::create_dir_all(&temp_dir).expect("应创建临时目录");
 
         let pwsh = temp_dir.join("pwsh.exe");
@@ -1874,7 +1874,7 @@ mod tests {
     #[test]
     fn resolve_default_windows_shell_falls_back_to_comspec() {
         let temp_dir = std::env::temp_dir().join(format!(
-            "onetcli-terminal-test-comspec-{}",
+            "myterm-terminal-test-comspec-{}",
             std::process::id()
         ));
         fs::create_dir_all(&temp_dir).expect("应创建临时目录");
@@ -1891,7 +1891,7 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn prepare_shell_integration_writes_lf_only_script() {
-        let session_dir = std::env::temp_dir().join(format!("onetcli-{}", std::process::id()));
+        let session_dir = std::env::temp_dir().join(format!("myterm-{}", std::process::id()));
         let integration_path = session_dir.join("shell_integration.sh");
         let _ = fs::remove_dir_all(&session_dir);
 

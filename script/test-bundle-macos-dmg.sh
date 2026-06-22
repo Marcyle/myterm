@@ -4,10 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TARGET="retry-test-target"
-FAKE_BIN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/onetcli-dmg-test.XXXXXX")"
+FAKE_BIN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/myterm-dmg-test.XXXXXX")"
 TEST_PROJECT_DIR="${FAKE_BIN_DIR}/project"
-APP_DIR="${TEST_PROJECT_DIR}/target/OnetCli.app"
-DMG_PATH="${TEST_PROJECT_DIR}/onetcli-${TARGET}.dmg"
+APP_DIR="${TEST_PROJECT_DIR}/target/MyTerm.app"
+DMG_PATH="${TEST_PROJECT_DIR}/myterm-${TARGET}.dmg"
 ATTEMPTS_FILE="${FAKE_BIN_DIR}/attempts"
 
 cleanup() {
@@ -20,7 +20,7 @@ cat > "${FAKE_BIN_DIR}/hdiutil" <<'HDIUTIL'
 #!/usr/bin/env bash
 set -euo pipefail
 
-attempts_file="${ONETCLI_TEST_HDIUTIL_ATTEMPTS_FILE:?}"
+attempts_file="${MYTERM_TEST_HDIUTIL_ATTEMPTS_FILE:?}"
 attempts=0
 if [ -f "$attempts_file" ]; then
     attempts="$(cat "$attempts_file")"
@@ -42,10 +42,10 @@ HDIUTIL
 chmod +x "${FAKE_BIN_DIR}/hdiutil"
 
 PATH="${FAKE_BIN_DIR}:$PATH" \
-ONETCLI_PROJECT_DIR="$TEST_PROJECT_DIR" \
-ONETCLI_TEST_HDIUTIL_ATTEMPTS_FILE="$ATTEMPTS_FILE" \
-ONETCLI_DMG_RETRIES=2 \
-ONETCLI_DMG_RETRY_DELAY=0 \
+MYTERM_PROJECT_DIR="$TEST_PROJECT_DIR" \
+MYTERM_TEST_HDIUTIL_ATTEMPTS_FILE="$ATTEMPTS_FILE" \
+MYTERM_DMG_RETRIES=2 \
+MYTERM_DMG_RETRY_DELAY=0 \
     "$PROJECT_DIR/script/bundle-macos-dmg.sh" "$TARGET"
 
 if [ "$(cat "$ATTEMPTS_FILE")" != "2" ]; then

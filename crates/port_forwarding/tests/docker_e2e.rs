@@ -13,7 +13,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
-const ENABLE_ENV: &str = "ONETCLI_DOCKER_E2E";
+const ENABLE_ENV: &str = "MYTERM_DOCKER_E2E";
 const SSH_CONNECTION_ID: i64 = 91001;
 const LOCAL_FORWARDING_ID: i64 = 91002;
 const DYNAMIC_FORWARDING_ID: i64 = 91003;
@@ -25,11 +25,11 @@ const SSH_CONNECT_TIMEOUT_SECS: u64 = 10;
 async fn docker_local_and_dynamic_forwarding_roundtrip() -> Result<()> {
     ensure_docker_e2e_enabled()?;
 
-    let ssh_port = env_u16("ONETCLI_DOCKER_SSH_PORT", 2222)?;
-    let ssh_user = env_string("ONETCLI_DOCKER_SSH_USER", "onetcli");
-    let ssh_password = env_string("ONETCLI_DOCKER_SSH_PASSWORD", "onetcli-pass");
-    let target_host = env_string("ONETCLI_DOCKER_TARGET_HOST", "onetcli-pf-target");
-    let target_port = env_u16("ONETCLI_DOCKER_TARGET_PORT", 80)?;
+    let ssh_port = env_u16("MYTERM_DOCKER_SSH_PORT", 2222)?;
+    let ssh_user = env_string("MYTERM_DOCKER_SSH_USER", "myterm");
+    let ssh_password = env_string("MYTERM_DOCKER_SSH_PASSWORD", "myterm-pass");
+    let target_host = env_string("MYTERM_DOCKER_TARGET_HOST", "myterm-pf-target");
+    let target_port = env_u16("MYTERM_DOCKER_TARGET_PORT", 80)?;
 
     let ssh_connection = ssh_connection(ssh_port, ssh_user, ssh_password);
     let mut runtime = PortForwardingRuntime::new();

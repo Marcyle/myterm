@@ -15,21 +15,21 @@ const config: UserConfig = {
     "design/**",
     "superpowers/**",
   ],
-  title: "OnetCli",
-  base: "/onetcli/",
+  title: "MyTerm",
+  base: "/myterm/",
   description:
-    "OnetCli 是一个统一管理数据库、SSH、终端与 AI 工作流的跨平台桌面客户端。",
+    "MyTerm 是一个统一管理数据库、SSH、终端与 AI 工作流的跨平台桌面客户端。",
   cleanUrls: true,
   head: [
     ["meta", { name: "theme-color", content: "#0B0D13" }],
     ["meta", { property: "og:type", content: "website" }],
-    ["meta", { property: "og:title", content: "OnetCli" }],
+    ["meta", { property: "og:title", content: "MyTerm" }],
     [
       "meta",
       {
         property: "og:description",
         content:
-          "OnetCli 是一个统一管理数据库、SSH、终端与 AI 工作流的跨平台桌面客户端。",
+          "MyTerm 是一个统一管理数据库、SSH、终端与 AI 工作流的跨平台桌面客户端。",
       },
     ],
     ["meta", { name: "twitter:card", content: "summary_large_image" }],
@@ -37,7 +37,7 @@ const config: UserConfig = {
       "link",
       {
         rel: "icon",
-        href: "/onetcli/logo.svg",
+        href: "/myterm/logo.svg",
         media: "(prefers-color-scheme: light)",
       },
     ],
@@ -45,7 +45,7 @@ const config: UserConfig = {
       "link",
       {
         rel: "icon",
-        href: "/onetcli/logo-dark.svg",
+        href: "/myterm/logo-dark.svg",
         media: "(prefers-color-scheme: dark)",
       },
     ],
@@ -59,15 +59,15 @@ const config: UserConfig = {
       dark: "/logo-dark.svg",
     },
     footer: {
-      message: `OnetCli 是一个面向数据库、服务器和 AI 工作流的一体化桌面客户端。`,
+      message: `MyTerm 是一个面向数据库、服务器和 AI 工作流的一体化桌面客户端。`,
       copyright: `
-        <a href="https://github.com/feigeCode/onetcli">GitHub</a>
+        <a href="https://github.com/feigeCode/myterm">GitHub</a>
         |
-        <a href="https://github.com/feigeCode/onetcli/releases">Releases</a>
+        <a href="https://github.com/feigeCode/myterm/releases">Releases</a>
         |
-        <a href="/onetcli/changelog">更新日志</a>
+        <a href="/myterm/changelog">更新日志</a>
         |
-        <a href="/onetcli/download">下载</a>
+        <a href="/myterm/download">下载</a>
         <br />
         界面图标资源来自 <a href="https://lucide.dev" target="_blank">Lucide</a>。
       `,
@@ -88,7 +88,7 @@ const config: UserConfig = {
 
     socialLinks: null,
     editLink: {
-      pattern: "https://github.com/feigeCode/onetcli/edit/dev/docs/:path",
+      pattern: "https://github.com/feigeCode/myterm/edit/dev/docs/:path",
     },
   },
   markdown: {

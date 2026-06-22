@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**onetcli** (One Net Client) is a cross-platform desktop application built on [GPUI](https://gpui.rs) that provides a unified interface for database management, SSH/SFTP, terminal, and AI tools.
+**myterm** (One Net Client) is a cross-platform desktop application built on [GPUI](https://gpui.rs) that provides a unified interface for database management, SSH/SFTP, terminal, and AI tools.
 
 Key capabilities:
 - Multi-protocol database management (PostgreSQL, MySQL, SQLite, SQL Server, Oracle, ClickHouse)
@@ -12,7 +12,7 @@ Key capabilities:
 - SSH terminal and SFTP file management
 - Local terminal with multi-tab workflows
 - Cloud sync and account system with encrypted key storage
-- Built-in AI chat (OnetCli Provider via `llm-connector`)
+- Built-in AI chat (MyTerm Provider via `llm-connector`)
 
 ## Common Commands
 
@@ -69,7 +69,7 @@ The workspace has four default members (`crates/ui`, `crates/story`, `crates/ass
 
 ### Application Layer
 
-- **`main/`** — Application entry point and main UI. Orchestrates all subsystems: auth, settings, licensing, updates, home page. Entry: `main/src/main.rs` → `OnetCliApp`.
+- **`main/`** — Application entry point and main UI. Orchestrates all subsystems: auth, settings, licensing, updates, home page. Entry: `main/src/main.rs` → `MyTermApp`.
 
 ### Core Infrastructure
 
@@ -99,12 +99,12 @@ The workspace has four default members (`crates/ui`, `crates/story`, `crates/ass
 
 ## Application Initialization Flow
 
-The startup sequence in `main/src/main.rs` and `main/src/onetcli_app.rs` is order-sensitive:
+The startup sequence in `main/src/main.rs` and `main/src/myterm_app.rs` is order-sensitive:
 
 1. `update::handle_update_command()` — handle self-update CLI commands
 2. `load_env_files()` — load `.env.local` / `.env` from CWD + exe directory + Resources
 3. `Application::new().with_assets(Assets)` — create app with bundled assets
-4. `onetcli_app::init(cx)` — tracing, HTTP client, then subsystem init:
+4. `myterm_app::init(cx)` — tracing, HTTP client, then subsystem init:
    - `gpui_component::init(cx)` — **must be called before any UI component usage**
    - `one_core::init(cx)`, `one_ui::init(cx)` — core and UI subsystem init
    - `db_view::chatdb::agents::init(cx)` — chat DB agents
@@ -117,7 +117,7 @@ The startup sequence in `main/src/main.rs` and `main/src/onetcli_app.rs` is orde
 6. `GlobalDbState::new()` + cleanup task → `cx.set_global()`
 7. `db_view::init_ask_ai_notifier(cx)` — Ask AI notifier
 8. `DatabaseViewPluginRegistry` → `cx.set_global()`
-9. Open window with `Root::new(OnetCliApp, window, cx)` — **Root must be the outermost view**
+9. Open window with `Root::new(MyTermApp, window, cx)` — **Root must be the outermost view**
 
 ## Architecture Patterns
 
@@ -163,7 +163,7 @@ Text input based on Rope (`ropey` crate) with:
 
 - **Environment files**: `.env.local` (priority) → `.env` (fallback), loaded from CWD + exe directory + macOS Resources directory
 - **Build-time config**: `SUPABASE_URL`, `SUPABASE_ANON_KEY` can be baked in at compile time, overridden at runtime
-- **Update URL**: `ONETCLI_UPDATE_URL` env var
+- **Update URL**: `MYTERM_UPDATE_URL` env var
 - **Log level**: `RUST_LOG` env var (default: `info`)
 
 ## Language Convention

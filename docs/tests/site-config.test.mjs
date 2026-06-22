@@ -8,11 +8,11 @@ async function readConfig() {
   return readFile(configPath, "utf8");
 }
 
-test("站点配置切换为 OnetCli 品牌和 GitHub Pages 路径", async () => {
+test("站点配置切换为 MyTerm 品牌和 GitHub Pages 路径", async () => {
   const config = await readConfig();
 
-  assert.match(config, /title:\s*"OnetCli"/);
-  assert.match(config, /base:\s*"\/onetcli\/"/);
+  assert.match(config, /title:\s*"MyTerm"/);
+  assert.match(config, /base:\s*"\/myterm\/"/);
   assert.match(config, /description:[\s\S]*数据库/);
 });
 
@@ -28,8 +28,8 @@ test("导航文档链接、仓库链接和搜索配置符合官网用途", async
   const config = await readConfig();
 
   assert.match(config, /link:\s*"\/guide"/);
-  assert.match(config, /feigeCode\/onetcli/);
+  assert.match(config, /feigeCode\/myterm/);
   assert.match(config, /edit\/dev\/docs\/:path/);
-  assert.doesNotMatch(config, /hufei\/onetcli/);
+  assert.doesNotMatch(config, /hufei\/myterm/);
   assert.doesNotMatch(config, /provider:\s*"local"/);
 });

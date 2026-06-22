@@ -135,10 +135,10 @@ fn uninstall_removes_directory_and_unregisters() {
 }
 
 #[test]
-#[ignore = "需要 ONETCLI_TEST_WASM_RUST 指向真实 wasm fixture"]
+#[ignore = "需要 MYTERM_TEST_WASM_RUST 指向真实 wasm fixture"]
 fn load_extensions_dir_loads_real_wasm_extension() {
-    let Ok(wasm_path) = std::env::var("ONETCLI_TEST_WASM_RUST") else {
-        eprintln!("ONETCLI_TEST_WASM_RUST not set; skipping");
+    let Ok(wasm_path) = std::env::var("MYTERM_TEST_WASM_RUST") else {
+        eprintln!("MYTERM_TEST_WASM_RUST not set; skipping");
         return;
     };
 

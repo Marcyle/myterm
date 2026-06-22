@@ -53,5 +53,5 @@ Thumbs.db
 commit-info.md
 
 # macOS 应用图标（二进制资源，单独提交）
-resources/macos/OnetCli.icns
+resources/macos/MyTerm.icns
 .superpowers/

@@ -195,7 +195,7 @@
 - 若无明确要求，则按当前任务所需执行最小准备，不做额外环境工程。
 - macOS 上 `reqwest` 默认系统代理探测可能在测试进程里触发
   `system-configuration` 的 NULL object panic；应用内需要“无应用代理”的
-  HTTP client 时，优先使用 `ReqwestClient::user_agent("onetcli")` 这类显式
+  HTTP client 时，优先使用 `ReqwestClient::user_agent("myterm")` 这类显式
   direct client 构造路径，并用相关 `setting_tab`/CLI 测试验证。
 
 ### Command Verification Rules

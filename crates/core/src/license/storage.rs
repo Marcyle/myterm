@@ -202,7 +202,7 @@ mod tests {
     impl TestLicenseStorage {
         fn new() -> Self {
             let path = env::temp_dir()
-                .join("onetcli-test")
+                .join("myterm-test")
                 .join(format!("license-{}.json", std::process::id()));
             Self { path }
         }

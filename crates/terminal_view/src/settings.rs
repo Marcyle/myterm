@@ -302,7 +302,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("系统时间应晚于 UNIX 纪元")
             .as_nanos();
-        std::env::temp_dir().join(format!("onetcli-{name}-{nanos}.json"))
+        std::env::temp_dir().join(format!("myterm-{name}-{nanos}.json"))
     }
 
     #[test]

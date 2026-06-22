@@ -4,12 +4,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SOURCE_SVG="${1:-${PROJECT_DIR}/logo.svg}"
-OUTPUT_ICNS="${2:-${PROJECT_DIR}/resources/macos/OnetCli.icns}"
-WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/onetcli-icon.XXXXXX")"
-ICONSET_DIR="${WORK_DIR}/OnetCli.iconset"
-MASTER_PNG="${WORK_DIR}/OnetCli-master.png"
+OUTPUT_ICNS="${2:-${PROJECT_DIR}/resources/macos/MyTerm.icns}"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/myterm-icon.XXXXXX")"
+ICONSET_DIR="${WORK_DIR}/MyTerm.iconset"
+MASTER_PNG="${WORK_DIR}/MyTerm-master.png"
 SOURCE_ICONSET_DIR="${WORK_DIR}/Source.iconset"
-FALLBACK_ICNS="${PROJECT_DIR}/resources/macos/OnetCli.icns"
+FALLBACK_ICNS="${PROJECT_DIR}/resources/macos/MyTerm.icns"
 SWIFT_SCRIPT="${WORK_DIR}/generate-iconset.swift"
 TARGET_MASTER_SIZE=1024
 TARGET_PADDING=16

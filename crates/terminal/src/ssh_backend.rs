@@ -82,7 +82,7 @@ fn build_shell_integration_setup_script(
     let script = normalized_shell_integration_script(script);
     let script = shell_single_quote(&script);
     let integration_source =
-        format!("$HOME/.config/onetcli/sessions/{session_key}/shell_integration.sh");
+        format!("$HOME/.config/myterm/sessions/{session_key}/shell_integration.sh");
     let session_key = shell_double_quote(session_key);
     let success_marker = shell_single_quote(success_marker);
     let home_marker = shell_single_quote(home_marker);
@@ -90,38 +90,38 @@ fn build_shell_integration_setup_script(
     let shell_marker = shell_single_quote(shell_marker);
 
     // zsh wrapper 设计:让 ZDOTDIR 始终保持 session_dir/zsh,在该目录下放完整的 4 个 wrapper
-    // 文件,每个 fan-out 到 $ONETCLI_ORIG_ZDOTDIR 下的同名文件,保留完整 login shell 行为;
+    // 文件,每个 fan-out 到 $MYTERM_ORIG_ZDOTDIR 下的同名文件,保留完整 login shell 行为;
     // 仅在 .zshrc 末尾追加 integration source,然后还原 ZDOTDIR 给后续 sub-shell。
     let zshenv = shell_single_quote(
-        "[[ -n \"${ONETCLI_ORIG_ZDOTDIR:-}\" ]] && [ -f \"$ONETCLI_ORIG_ZDOTDIR/.zshenv\" ] \
-         && . \"$ONETCLI_ORIG_ZDOTDIR/.zshenv\"\n",
+        "[[ -n \"${MYTERM_ORIG_ZDOTDIR:-}\" ]] && [ -f \"$MYTERM_ORIG_ZDOTDIR/.zshenv\" ] \
+         && . \"$MYTERM_ORIG_ZDOTDIR/.zshenv\"\n",
     );
     let zprofile = shell_single_quote(
-        "[[ -n \"${ONETCLI_ORIG_ZDOTDIR:-}\" ]] && [ -f \"$ONETCLI_ORIG_ZDOTDIR/.zprofile\" ] \
-         && . \"$ONETCLI_ORIG_ZDOTDIR/.zprofile\"\n",
+        "[[ -n \"${MYTERM_ORIG_ZDOTDIR:-}\" ]] && [ -f \"$MYTERM_ORIG_ZDOTDIR/.zprofile\" ] \
+         && . \"$MYTERM_ORIG_ZDOTDIR/.zprofile\"\n",
     );
     let zshrc = shell_single_quote(&format!(
-        "[[ -n \"${{ONETCLI_ORIG_ZDOTDIR:-}}\" ]] && [ -f \"$ONETCLI_ORIG_ZDOTDIR/.zshrc\" ] \
-         && . \"$ONETCLI_ORIG_ZDOTDIR/.zshrc\"\n\
+        "[[ -n \"${{MYTERM_ORIG_ZDOTDIR:-}}\" ]] && [ -f \"$MYTERM_ORIG_ZDOTDIR/.zshrc\" ] \
+         && . \"$MYTERM_ORIG_ZDOTDIR/.zshrc\"\n\
          . \"{integration_source}\"\n\
-         ZDOTDIR=\"${{ONETCLI_ORIG_ZDOTDIR:-$HOME}}\"\n"
+         ZDOTDIR=\"${{MYTERM_ORIG_ZDOTDIR:-$HOME}}\"\n"
     ));
     let zlogin = shell_single_quote(
-        "[[ -n \"${ONETCLI_ORIG_ZDOTDIR:-}\" ]] && [ -f \"$ONETCLI_ORIG_ZDOTDIR/.zlogin\" ] \
-         && . \"$ONETCLI_ORIG_ZDOTDIR/.zlogin\"\n",
+        "[[ -n \"${MYTERM_ORIG_ZDOTDIR:-}\" ]] && [ -f \"$MYTERM_ORIG_ZDOTDIR/.zlogin\" ] \
+         && . \"$MYTERM_ORIG_ZDOTDIR/.zlogin\"\n",
     );
     // bash wrapper:`exec bash --rcfile X -i` 是 interactive non-login,跳过 /etc/profile 与
     // ~/.bash_profile 等。这里手动模拟 login chain,然后再显式 source ~/.bashrc + integration。
-    // ONETCLI_LOGIN_SIMULATED guard 防止 .bash_profile 内 `exec bash -l` 等场景二次进入时重复
+    // MYTERM_LOGIN_SIMULATED guard 防止 .bash_profile 内 `exec bash -l` 等场景二次进入时重复
     // 加载 profile 链。
     let bashrc = shell_single_quote(&format!(
-        "if [ -z \"${{ONETCLI_LOGIN_SIMULATED:-}}\" ]; then\n\
-         \x20\x20\x20\x20export ONETCLI_LOGIN_SIMULATED=1\n\
+        "if [ -z \"${{MYTERM_LOGIN_SIMULATED:-}}\" ]; then\n\
+         \x20\x20\x20\x20export MYTERM_LOGIN_SIMULATED=1\n\
          \x20\x20\x20\x20[ -r /etc/profile ] && . /etc/profile\n\
-         \x20\x20\x20\x20for __onetcli_profile in \"$HOME/.bash_profile\" \"$HOME/.bash_login\" \"$HOME/.profile\"; do\n\
-         \x20\x20\x20\x20\x20\x20\x20\x20if [ -r \"$__onetcli_profile\" ]; then . \"$__onetcli_profile\"; break; fi\n\
+         \x20\x20\x20\x20for __myterm_profile in \"$HOME/.bash_profile\" \"$HOME/.bash_login\" \"$HOME/.profile\"; do\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20if [ -r \"$__myterm_profile\" ]; then . \"$__myterm_profile\"; break; fi\n\
          \x20\x20\x20\x20done\n\
-         \x20\x20\x20\x20unset __onetcli_profile\n\
+         \x20\x20\x20\x20unset __myterm_profile\n\
          fi\n\
          [ -r \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\n\
          . \"{integration_source}\"\n"
@@ -130,7 +130,7 @@ fn build_shell_integration_setup_script(
     format!(
         concat!(
             "set -e\n",
-            "session_dir=\"$HOME/.config/onetcli/sessions/{session_key}\"\n",
+            "session_dir=\"$HOME/.config/myterm/sessions/{session_key}\"\n",
             "integration_path=\"$session_dir/shell_integration.sh\"\n",
             "zsh_dir=\"$session_dir/zsh\"\n",
             "bash_dir=\"$session_dir/bash\"\n",
@@ -481,10 +481,10 @@ impl SshBackend {
         channel: &mut dyn SshChannel,
         connection_id: Option<i64>,
     ) -> anyhow::Result<ShellIntegrationSetup> {
-        const SUCCESS_MARKER: &str = "__ONETCLI_SETUP_OK__";
-        const HOME_MARKER: &str = "__ONETCLI_HOME__=";
-        const SESSION_MARKER: &str = "__ONETCLI_SESSION_DIR__=";
-        const SHELL_MARKER: &str = "__ONETCLI_LOGIN_SHELL__=";
+        const SUCCESS_MARKER: &str = "__MYTERM_SETUP_OK__";
+        const HOME_MARKER: &str = "__MYTERM_HOME__=";
+        const SESSION_MARKER: &str = "__MYTERM_SESSION_DIR__=";
+        const SHELL_MARKER: &str = "__MYTERM_LOGIN_SHELL__=";
         let script = embedded_shell_integration_script();
         let setup_script = build_shell_integration_setup_script(
             &script,
@@ -567,9 +567,9 @@ impl SshBackend {
             return Ok(());
         };
 
-        channel.set_env("ONETCLI_SHELL_INTEGRATION", "1").await?;
+        channel.set_env("MYTERM_SHELL_INTEGRATION", "1").await?;
         channel
-            .set_env("ONETCLI_ORIG_ZDOTDIR", &setup.home_dir)
+            .set_env("MYTERM_ORIG_ZDOTDIR", &setup.home_dir)
             .await?;
 
         match setup.login_shell.as_deref().map(shell_basename) {
@@ -790,7 +790,7 @@ mod tests {
         let (setup_channel, setup_state) = MockChannel::new(
             [
                 ChannelEvent::Data(
-                    b"__ONETCLI_HOME__=/tmp/home\n__ONETCLI_SESSION_DIR__=/tmp/home/.config/onetcli/sessions/42\n__ONETCLI_LOGIN_SHELL__=/bin/zsh\n__ONETCLI_SETUP_OK__\n"
+                    b"__MYTERM_HOME__=/tmp/home\n__MYTERM_SESSION_DIR__=/tmp/home/.config/myterm/sessions/42\n__MYTERM_LOGIN_SHELL__=/bin/zsh\n__MYTERM_SETUP_OK__\n"
                         .to_vec(),
                 ),
                 ChannelEvent::ExitStatus(0),
@@ -822,11 +822,11 @@ mod tests {
         assert_eq!(
             recorded_ops(&interactive_state),
             vec![
-                ChannelOp::SetEnv("ONETCLI_SHELL_INTEGRATION".into(), "1".into()),
-                ChannelOp::SetEnv("ONETCLI_ORIG_ZDOTDIR".into(), "/tmp/home".into()),
+                ChannelOp::SetEnv("MYTERM_SHELL_INTEGRATION".into(), "1".into()),
+                ChannelOp::SetEnv("MYTERM_ORIG_ZDOTDIR".into(), "/tmp/home".into()),
                 ChannelOp::SetEnv(
                     "ZDOTDIR".into(),
-                    "/tmp/home/.config/onetcli/sessions/42/zsh".into(),
+                    "/tmp/home/.config/myterm/sessions/42/zsh".into(),
                 ),
                 ChannelOp::RequestPty,
                 ChannelOp::RequestShell,
@@ -839,7 +839,7 @@ mod tests {
         let (setup_channel, setup_state) = MockChannel::new(
             [
                 ChannelEvent::Data(
-                    b"__ONETCLI_HOME__=/tmp/home\n__ONETCLI_SESSION_DIR__=/tmp/home/.config/onetcli/sessions/42\n__ONETCLI_LOGIN_SHELL__=/bin/bash\n__ONETCLI_SETUP_OK__\n"
+                    b"__MYTERM_HOME__=/tmp/home\n__MYTERM_SESSION_DIR__=/tmp/home/.config/myterm/sessions/42\n__MYTERM_LOGIN_SHELL__=/bin/bash\n__MYTERM_SETUP_OK__\n"
                         .to_vec(),
                 ),
                 ChannelEvent::ExitStatus(0),
@@ -868,8 +868,8 @@ mod tests {
         assert_eq!(
             interactive_ops[0..3],
             [
-                ChannelOp::SetEnv("ONETCLI_SHELL_INTEGRATION".into(), "1".into()),
-                ChannelOp::SetEnv("ONETCLI_ORIG_ZDOTDIR".into(), "/tmp/home".into()),
+                ChannelOp::SetEnv("MYTERM_SHELL_INTEGRATION".into(), "1".into()),
+                ChannelOp::SetEnv("MYTERM_ORIG_ZDOTDIR".into(), "/tmp/home".into()),
                 ChannelOp::RequestPty,
             ]
         );
@@ -896,7 +896,7 @@ mod tests {
         let (mut channel, _) = MockChannel::new(
             [
                 ChannelEvent::Data(
-                    b"__ONETCLI_HOME__=/tmp/home\n__ONETCLI_SESSION_DIR__=/tmp/home/.config/onetcli/sessions/42\n__ONETCLI_LOGIN_SHELL__=/bin/zsh\n__ONETCLI_SETUP_OK__\n"
+                    b"__MYTERM_HOME__=/tmp/home\n__MYTERM_SESSION_DIR__=/tmp/home/.config/myterm/sessions/42\n__MYTERM_LOGIN_SHELL__=/bin/zsh\n__MYTERM_SETUP_OK__\n"
                         .to_vec(),
                 ),
                 ChannelEvent::Close,
@@ -993,7 +993,7 @@ mod tests {
 
         let cached = ShellIntegrationSetup {
             home_dir: "/tmp/home".into(),
-            session_dir: "/tmp/home/.config/onetcli/sessions/42".into(),
+            session_dir: "/tmp/home/.config/myterm/sessions/42".into(),
             login_shell: Some("/bin/zsh".into()),
         };
 
@@ -1014,11 +1014,11 @@ mod tests {
         assert_eq!(
             recorded_ops(&interactive_state),
             vec![
-                ChannelOp::SetEnv("ONETCLI_SHELL_INTEGRATION".into(), "1".into()),
-                ChannelOp::SetEnv("ONETCLI_ORIG_ZDOTDIR".into(), "/tmp/home".into()),
+                ChannelOp::SetEnv("MYTERM_SHELL_INTEGRATION".into(), "1".into()),
+                ChannelOp::SetEnv("MYTERM_ORIG_ZDOTDIR".into(), "/tmp/home".into()),
                 ChannelOp::SetEnv(
                     "ZDOTDIR".into(),
-                    "/tmp/home/.config/onetcli/sessions/42/zsh".into(),
+                    "/tmp/home/.config/myterm/sessions/42/zsh".into(),
                 ),
                 ChannelOp::RequestPty,
                 ChannelOp::RequestShell,
@@ -1136,7 +1136,7 @@ mod tests {
             "shell setup 命令应成功执行: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let session_dir = home_dir.join(".config/onetcli/sessions/42");
+        let session_dir = home_dir.join(".config/myterm/sessions/42");
         let integration_path = session_dir.join("shell_integration.sh");
         assert_eq!(
             fs::read_to_string(&integration_path).expect("应写入 integration 文件"),
@@ -1170,15 +1170,15 @@ mod tests {
             ".zshrc wrapper 应在末尾 source integration: {zshrc_wrapper}"
         );
         assert!(
-            zshrc_wrapper.contains("ZDOTDIR=\"${ONETCLI_ORIG_ZDOTDIR:-$HOME}\""),
+            zshrc_wrapper.contains("ZDOTDIR=\"${MYTERM_ORIG_ZDOTDIR:-$HOME}\""),
             ".zshrc wrapper 应在末尾还原 ZDOTDIR: {zshrc_wrapper}"
         );
 
         let bashrc_wrapper =
             fs::read_to_string(session_dir.join("bash/.bashrc")).expect("应读取 bashrc wrapper");
         assert!(
-            bashrc_wrapper.contains("ONETCLI_LOGIN_SIMULATED"),
-            ".bashrc wrapper 应包含 ONETCLI_LOGIN_SIMULATED guard 模拟 login chain: {bashrc_wrapper}"
+            bashrc_wrapper.contains("MYTERM_LOGIN_SIMULATED"),
+            ".bashrc wrapper 应包含 MYTERM_LOGIN_SIMULATED guard 模拟 login chain: {bashrc_wrapper}"
         );
         assert!(
             bashrc_wrapper.contains("/etc/profile"),
@@ -1245,7 +1245,7 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
 
-        let integration_path = home_dir.join(".config/onetcli/sessions/42/shell_integration.sh");
+        let integration_path = home_dir.join(".config/myterm/sessions/42/shell_integration.sh");
         assert_eq!(
             fs::read_to_string(&integration_path).expect("应写入 integration 文件"),
             "echo one\necho two\n",
@@ -1276,16 +1276,16 @@ mod tests {
         fs::create_dir_all(&home_dir).expect("应创建 home 目录");
         fs::write(
             home_dir.join(".bash_profile"),
-            "export __ONETCLI_BASH_PROFILE_LOADED=1\n",
+            "export __MYTERM_BASH_PROFILE_LOADED=1\n",
         )
         .expect("应写入用户 .bash_profile");
         fs::write(
             home_dir.join(".bashrc"),
-            "[[ $- != *i* ]] && return\nexport __ONETCLI_USER_BASHRC=1\n",
+            "[[ $- != *i* ]] && return\nexport __MYTERM_USER_BASHRC=1\n",
         )
         .expect("应写入用户 .bashrc");
 
-        let script = "export __ONETCLI_INTEGRATION_LOADED=1\n";
+        let script = "export __MYTERM_INTEGRATION_LOADED=1\n";
         let command = build_shell_integration_setup_script(
             script,
             "42",
@@ -1306,17 +1306,17 @@ mod tests {
             String::from_utf8_lossy(&setup.stderr)
         );
 
-        let wrapper = home_dir.join(".config/onetcli/sessions/42/bash/.bashrc");
+        let wrapper = home_dir.join(".config/myterm/sessions/42/bash/.bashrc");
         let output = Command::new("bash")
             .arg("--rcfile")
             .arg(&wrapper)
             .arg("-i")
             .arg("-c")
             .arg(
-                "echo profile=$__ONETCLI_BASH_PROFILE_LOADED \
-                 rc=$__ONETCLI_USER_BASHRC \
-                 integration=$__ONETCLI_INTEGRATION_LOADED \
-                 login=$ONETCLI_LOGIN_SIMULATED",
+                "echo profile=$__MYTERM_BASH_PROFILE_LOADED \
+                 rc=$__MYTERM_USER_BASHRC \
+                 integration=$__MYTERM_INTEGRATION_LOADED \
+                 login=$MYTERM_LOGIN_SIMULATED",
             )
             .env("HOME", &home_dir)
             .env("PS1", "$ ")
@@ -1344,7 +1344,7 @@ mod tests {
         );
         assert!(
             stdout.contains("login=1"),
-            "bash wrapper 应设置 ONETCLI_LOGIN_SIMULATED guard，实际: {stdout}"
+            "bash wrapper 应设置 MYTERM_LOGIN_SIMULATED guard，实际: {stdout}"
         );
 
         let _ = fs::remove_dir_all(&temp_dir);
@@ -1369,12 +1369,12 @@ mod tests {
 
         let home_dir = temp_dir.join("home");
         fs::create_dir_all(&home_dir).expect("应创建 home 目录");
-        fs::write(home_dir.join(".zshenv"), "export __ONETCLI_USER_ZSHENV=1\n")
+        fs::write(home_dir.join(".zshenv"), "export __MYTERM_USER_ZSHENV=1\n")
             .expect("应写入用户 .zshenv");
-        fs::write(home_dir.join(".zshrc"), "export __ONETCLI_USER_ZSHRC=1\n")
+        fs::write(home_dir.join(".zshrc"), "export __MYTERM_USER_ZSHRC=1\n")
             .expect("应写入用户 .zshrc");
 
-        let script = "export __ONETCLI_INTEGRATION_LOADED=1\n";
+        let script = "export __MYTERM_INTEGRATION_LOADED=1\n";
         let command = build_shell_integration_setup_script(
             script,
             "42",
@@ -1395,19 +1395,19 @@ mod tests {
             String::from_utf8_lossy(&setup.stderr)
         );
 
-        let zsh_dir = home_dir.join(".config/onetcli/sessions/42/zsh");
+        let zsh_dir = home_dir.join(".config/myterm/sessions/42/zsh");
         let output = Command::new("zsh")
             .arg("-i")
             .arg("-c")
             .arg(
-                "echo zshenv=$__ONETCLI_USER_ZSHENV \
-                 zshrc=$__ONETCLI_USER_ZSHRC \
-                 integration=$__ONETCLI_INTEGRATION_LOADED \
+                "echo zshenv=$__MYTERM_USER_ZSHENV \
+                 zshrc=$__MYTERM_USER_ZSHRC \
+                 integration=$__MYTERM_INTEGRATION_LOADED \
                  zdotdir=$ZDOTDIR",
             )
             .env("HOME", &home_dir)
             .env("ZDOTDIR", &zsh_dir)
-            .env("ONETCLI_ORIG_ZDOTDIR", &home_dir)
+            .env("MYTERM_ORIG_ZDOTDIR", &home_dir)
             .output()
             .expect("应执行 zsh wrapper");
 

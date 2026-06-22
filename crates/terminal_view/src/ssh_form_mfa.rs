@@ -8,7 +8,7 @@ use ssh::{
     KeyboardInteractiveTarget,
 };
 
-const JUMP_MFA_REQUIRED_MARKER: &str = "__onetcli_jump_mfa_required__";
+const JUMP_MFA_REQUIRED_MARKER: &str = "__myterm_jump_mfa_required__";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FormMfaPrompt {

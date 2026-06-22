@@ -1,10 +1,10 @@
 <template>
     <a
-        href="https://github.com/feigeCode/onetcli"
+        href="https://github.com/feigeCode/myterm"
         target="_blank"
         rel="noopener noreferrer"
         class="github-star-button"
-        title="在 GitHub 上查看 OnetCli"
+        title="在 GitHub 上查看 MyTerm"
     >
         <svg viewBox="0 0 438.549 438.549">
             <path

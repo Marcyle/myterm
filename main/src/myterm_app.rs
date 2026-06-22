@@ -7,7 +7,7 @@ use gpui_component::WindowExt;
 use one_core::keybindings::{action_id, rebind_keybindings, shortcuts_for};
 
 actions!(
-    onetcli_app,
+    myterm_app,
     [
         ActivateTab1,
         ActivateTab2,
@@ -135,7 +135,7 @@ pub(crate) fn configured_log_file_path(value: &str) -> anyhow::Result<PathBuf> {
 }
 
 fn default_log_file_path() -> anyhow::Result<PathBuf> {
-    Ok(get_config_dir()?.join("logs").join("onetcli.log"))
+    Ok(get_config_dir()?.join("logs").join("myterm.log"))
 }
 
 pub(crate) fn log_file_appender(path: &Path) -> std::io::Result<std::fs::File> {
@@ -354,11 +354,11 @@ fn init_action_handlers(cx: &mut App) {
     });
 }
 
-pub struct OnetCliApp {
+pub struct MyApp {
     tab_container: Entity<TabContainer>,
 }
 
-impl OnetCliApp {
+impl MyApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let tab_container = cx.new(|cx| {
             let mut container = TabContainer::new(window, cx)
@@ -424,14 +424,14 @@ mod tests {
 
     #[test]
     fn configured_log_file_path_trims_value() {
-        let path = configured_log_file_path("  /tmp/onetcli.log  ").expect("应返回日志路径");
-        assert_eq!(path, std::path::PathBuf::from("/tmp/onetcli.log"));
+        let path = configured_log_file_path("  /tmp/myterm.log  ").expect("应返回日志路径");
+        assert_eq!(path, std::path::PathBuf::from("/tmp/myterm.log"));
     }
 
     #[test]
     fn log_file_appender_creates_parent_directories_and_appends() {
         let path = std::env::temp_dir()
-            .join(format!("onetcli-log-test-{}", std::process::id()))
+            .join(format!("myterm-log-test-{}", std::process::id()))
             .join("nested")
             .join("app.log");
 
@@ -457,7 +457,7 @@ mod tests {
 
         let path = std::env::temp_dir()
             .join(format!(
-                "onetcli-log-permission-test-{}",
+                "myterm-log-permission-test-{}",
                 std::process::id()
             ))
             .join("app.log");
@@ -474,7 +474,7 @@ mod tests {
     }
 }
 
-impl Render for OnetCliApp {
+impl Render for MyApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let sheet_layer = Root::render_sheet_layer(window, cx);
         let dialog_layer = Root::render_dialog_layer(window, cx);

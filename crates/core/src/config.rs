@@ -42,8 +42,8 @@ pub fn public_base_url_from_parts(
 }
 
 pub fn public_base_url() -> Option<String> {
-    let runtime = std::env::var("ONETCLI_PUBLIC_BASE_URL").ok();
-    public_base_url_from_parts(runtime.as_deref(), option_env!("ONETCLI_PUBLIC_BASE_URL"))
+    let runtime = std::env::var("MYTERM_PUBLIC_BASE_URL").ok();
+    public_base_url_from_parts(runtime.as_deref(), option_env!("MYTERM_PUBLIC_BASE_URL"))
 }
 
 pub fn update_url_from_public_base(base_url: &str) -> String {
@@ -66,11 +66,11 @@ impl UpdateConfig {
 
     /// 获取更新接口地址
     fn get_update_url() -> String {
-        if let Some(url) = runtime_env("ONETCLI_UPDATE_URL") {
+        if let Some(url) = runtime_env("MYTERM_UPDATE_URL") {
             return url;
         }
 
-        if let Some(url) = trimmed_value(option_env!("ONETCLI_UPDATE_URL")) {
+        if let Some(url) = trimmed_value(option_env!("MYTERM_UPDATE_URL")) {
             return url;
         }
 
@@ -81,11 +81,11 @@ impl UpdateConfig {
 
     /// 获取下载页地址
     fn get_download_url() -> Option<String> {
-        if let Some(url) = runtime_env("ONETCLI_UPDATE_DOWNLOAD_URL") {
+        if let Some(url) = runtime_env("MYTERM_UPDATE_DOWNLOAD_URL") {
             return Some(url);
         }
 
-        trimmed_value(option_env!("ONETCLI_UPDATE_DOWNLOAD_URL"))
+        trimmed_value(option_env!("MYTERM_UPDATE_DOWNLOAD_URL"))
     }
 
     /// 检查配置是否有效
@@ -182,16 +182,16 @@ mod tests {
     #[test]
     fn update_url_from_public_base_points_to_r2_manifest() {
         assert_eq!(
-            "https://onetcli.test.cn/updates/latest.json",
-            update_url_from_public_base("https://onetcli.test.cn")
+            "https://myterm.test.cn/updates/latest.json",
+            update_url_from_public_base("https://myterm.test.cn")
         );
     }
 
     #[test]
     fn update_url_from_public_base_trims_trailing_slash() {
         assert_eq!(
-            "https://onetcli.test.cn/updates/latest.json",
-            update_url_from_public_base("https://onetcli.test.cn/")
+            "https://myterm.test.cn/updates/latest.json",
+            update_url_from_public_base("https://myterm.test.cn/")
         );
     }
 
@@ -199,8 +199,8 @@ mod tests {
     fn public_base_url_from_parts_has_no_built_in_default() {
         assert_eq!(None, public_base_url_from_parts(None, None));
         assert_eq!(
-            Some("https://onetcli.test.cn".to_string()),
-            public_base_url_from_parts(None, Some("https://onetcli.test.cn"))
+            Some("https://myterm.test.cn".to_string()),
+            public_base_url_from_parts(None, Some("https://myterm.test.cn"))
         );
     }
 }

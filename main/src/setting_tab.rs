@@ -60,8 +60,8 @@ fn init_tracing(settings: &AppSettings) {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
 
-    match crate::onetcli_app::configured_log_file_path(&settings.log_file_path) {
-        Ok(log_file_path) => match crate::onetcli_app::log_file_appender(&log_file_path) {
+    match crate::myterm_app::configured_log_file_path(&settings.log_file_path) {
+        Ok(log_file_path) => match crate::myterm_app::log_file_appender(&log_file_path) {
             Ok(file_appender) => {
                 let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
                 Box::leak(Box::new(guard));
@@ -94,11 +94,11 @@ pub(crate) fn build_app_http_client(
 ) -> Result<Arc<ReqwestClient>, String> {
     if proxy.enabled {
         let proxy_url = proxy.to_proxy_url()?;
-        ReqwestClient::proxy_and_user_agent(proxy_url, "onetcli")
+        ReqwestClient::proxy_and_user_agent(proxy_url, "myterm")
             .map(Arc::new)
             .map_err(|err| format!("HTTP 客户端初始化失败: {}", err))
     } else {
-        ReqwestClient::user_agent("onetcli")
+        ReqwestClient::user_agent("myterm")
             .map(Arc::new)
             .map_err(|err| format!("HTTP 客户端初始化失败: {}", err))
     }
@@ -1006,7 +1006,7 @@ async fn test_proxy_connectivity(
     let request = Request::builder()
         .method(Method::HEAD)
         .uri("https://www.gstatic.com/generate_204")
-        .header("User-Agent", "onetcli-updater")
+        .header("User-Agent", "myterm-updater")
         .body(AsyncBody::empty())
         .map_err(|err| format!("构建代理测试请求失败: {}", err))?;
 
@@ -1480,14 +1480,14 @@ fn set_custom_keybinding(action_id: &str, spec: String, cx: &mut App) {
             .custom_keybindings
             .insert(action_id.to_string(), vec![spec]);
     });
-    crate::onetcli_app::refresh_keybindings(cx);
+    crate::myterm_app::refresh_keybindings(cx);
 }
 
 fn reset_custom_keybinding(action_id: &str, cx: &mut App) {
     AppSettings::update_and_save(cx, |settings| {
         settings.custom_keybindings.remove(action_id);
     });
-    crate::onetcli_app::refresh_keybindings(cx);
+    crate::myterm_app::refresh_keybindings(cx);
 }
 
 fn shortcut_spec_from_keystroke(keystroke: &Keystroke) -> Option<String> {
@@ -1833,7 +1833,7 @@ mod tests {
         assert_eq!(client.proxy(), None);
         assert_eq!(
             client.user_agent().and_then(|value| value.to_str().ok()),
-            Some("onetcli")
+            Some("myterm")
         );
     }
 
@@ -1874,7 +1874,7 @@ mod tests {
 }
 
 /// GitHub 开源地址
-const GITHUB_URL: &str = "https://github.com/feigeCode/onetcli";
+const GITHUB_URL: &str = "https://github.com/feigeCode/myterm";
 
 /// 渲染关于页面
 fn render_about_section(cx: &App) -> gpui::AnyElement {

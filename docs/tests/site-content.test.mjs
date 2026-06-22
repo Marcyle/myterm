@@ -9,11 +9,11 @@ async function readText(path) {
   return readFile(new URL(path, root), "utf8");
 }
 
-test("首页替换为 OnetCli 产品文案并指向 GitHub Releases", async () => {
+test("首页替换为 MyTerm 产品文案并指向 GitHub Releases", async () => {
   const home = await readText("index.vue");
   const homeEntry = await readText("index.md");
 
-  assert.match(home, /OnetCli/);
+  assert.match(home, /MyTerm/);
   assert.match(home, /数据库/);
   assert.match(home, /SSH/);
   assert.match(home, /GitHub Releases/);

@@ -1,11 +1,11 @@
 [Desktop Entry]
-Name=OnetCli
+Name=MyTerm
 Comment=One Net Client - Database, SSH, Terminal, AI Tools
-Exec=onetcli
-Icon=onetcli
+Exec=myterm
+Icon=myterm
 Type=Application
 Categories=Development;Utility;Database;
 Terminal=false
-StartupWMClass=onetcli
+StartupWMClass=myterm
 MimeType=
 Keywords=database;ssh;sftp;terminal;redis;mongodb;postgresql;mysql;

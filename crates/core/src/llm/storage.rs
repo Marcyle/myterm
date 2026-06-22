@@ -95,12 +95,12 @@ impl ProviderRepository {
         Self { conn }
     }
 
-    pub fn ensure_onetcli_provider(&self) -> Result<ProviderConfig> {
-        // 先查找已有的 OnetCli 类型 provider
+    pub fn ensure_myterm_provider(&self) -> Result<ProviderConfig> {
+        // 先查找已有的 MyTerm 类型 provider
         if let Ok(list) = self.list() {
             if let Some(mut existing) = list
                 .into_iter()
-                .find(|p| p.provider_type == ProviderType::OnetCli)
+                .find(|p| p.provider_type == ProviderType::MyTerm)
             {
                 if !existing.enabled {
                     existing.enabled = true;
@@ -119,8 +119,8 @@ impl ProviderRepository {
 
         let mut config = ProviderConfig {
             id: now,
-            name: "OnetCli AI".to_string(),
-            provider_type: ProviderType::OnetCli,
+            name: "MyTerm AI".to_string(),
+            provider_type: ProviderType::MyTerm,
             api_key: None,
             api_base: None,
             api_version: None,

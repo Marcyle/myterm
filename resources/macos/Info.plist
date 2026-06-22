@@ -3,19 +3,19 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>OnetCli</string>
+    <string>MyTerm</string>
     <key>CFBundleDisplayName</key>
-    <string>OnetCli</string>
+    <string>MyTerm</string>
     <key>CFBundleIdentifier</key>
-    <string>com.onetcli.app</string>
+    <string>com.myterm.app</string>
     <key>CFBundleVersion</key>
-    <string>${ONETCLI_VERSION}</string>
+    <string>${MYTERM_VERSION}</string>
     <key>CFBundleShortVersionString</key>
-    <string>${ONETCLI_VERSION}</string>
+    <string>${MYTERM_VERSION}</string>
     <key>CFBundleExecutable</key>
-    <string>onetcli</string>
+    <string>myterm</string>
     <key>CFBundleIconFile</key>
-    <string>OnetCli</string>
+    <string>MyTerm</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleSignature</key>

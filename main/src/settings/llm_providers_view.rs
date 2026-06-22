@@ -470,7 +470,7 @@ impl LlmProvidersView {
             })
     }
 
-    /// 内置 provider（OnetCli）支持设置/取消默认和编辑，不可删除和禁用
+    /// 内置 provider（MyTerm）支持设置/取消默认和编辑，不可删除和禁用
     fn render_builtin_actions(
         &self,
         provider: &ProviderConfig,

@@ -32,8 +32,8 @@ const REFRESH_INTERVAL_SECS: u64 = 3;
 const HISTORY_LIMIT: usize = 30;
 const MAX_HISTORY_X_AXIS_LABELS: usize = 6;
 const SERVER_MONITOR_PREFS_FILE: &str = "server-monitor.json";
-const REMOTE_HELPER_DIR: &str = "$HOME/.onetcli-monitor";
-const REMOTE_HELPER_SCRIPT: &str = "$HOME/.onetcli-monitor/collect.sh";
+const REMOTE_HELPER_DIR: &str = "$HOME/.myterm-monitor";
+const REMOTE_HELPER_SCRIPT: &str = "$HOME/.myterm-monitor/collect.sh";
 
 const REMOTE_MONITOR_SCRIPT: &str = r#"#!/usr/bin/env bash
 set -u
@@ -1797,7 +1797,7 @@ async fn exec_capture(session_manager: Arc<SshSessionManager>, command: &str) ->
 
 fn build_prepare_command() -> String {
     format!(
-        "mkdir -p {dir} && cat > {script} <<'__ONETCLI_MONITOR__'\n{body}\n__ONETCLI_MONITOR__\nchmod 700 {script}",
+        "mkdir -p {dir} && cat > {script} <<'__MYTERM_MONITOR__'\n{body}\n__MYTERM_MONITOR__\nchmod 700 {script}",
         dir = REMOTE_HELPER_DIR,
         script = REMOTE_HELPER_SCRIPT,
         body = REMOTE_MONITOR_SCRIPT

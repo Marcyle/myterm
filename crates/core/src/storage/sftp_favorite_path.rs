@@ -188,7 +188,7 @@ mod tests {
             .as_nanos();
         let counter = DB_COUNTER.fetch_add(1, Ordering::Relaxed);
         let db_path = std::env::temp_dir().join(format!(
-            "onetcli-sftp-favorite-paths-{}-{unique}-{counter}.db",
+            "myterm-sftp-favorite-paths-{}-{unique}-{counter}.db",
             std::process::id(),
         ));
         let _ = std::fs::remove_file(&db_path);

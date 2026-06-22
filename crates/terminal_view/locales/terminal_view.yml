@@ -811,9 +811,9 @@ ServerMonitor:
     zh-CN: 开始监控
     zh-HK: 開始監控
   start_hint:
-    en: Start monitoring for the current SSH connection. This will deploy a helper script under ~/.onetcli-monitor on the remote host after your confirmation.
-    zh-CN: 为当前 SSH 连接启动监控。确认后会在远端主目录下部署 ~/.onetcli-monitor 监控脚本，并开始定时采集。
-    zh-HK: 為目前 SSH 連線啟動監控。確認後會在遠端主目錄下部署 ~/.onetcli-monitor 監控腳本，並開始定時採集。
+    en: Start monitoring for the current SSH connection. This will deploy a helper script under ~/.myterm-monitor on the remote host after your confirmation.
+    zh-CN: 为当前 SSH 连接启动监控。确认后会在远端主目录下部署 ~/.myterm-monitor 监控脚本，并开始定时采集。
+    zh-HK: 為目前 SSH 連線啟動監控。確認後會在遠端主目錄下部署 ~/.myterm-monitor 監控腳本，並開始定時採集。
   preparing:
     en: Preparing remote monitor helper...
     zh-CN: 正在准备远端监控脚本...
