@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use crate::app_init::is_valid_system_hotkey;
-use crate::settings::llm_providers_view::LlmProvidersView;
 use gpui::http_client::{AsyncBody, Method, Request};
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -26,7 +25,6 @@ use gpui_component::{
 };
 use one_core::gpui_tokio::Tokio;
 use one_core::keybindings::action_id;
-use one_core::llm::manager::GlobalProviderState;
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 pub const DEFAULT_SYSTEM_HOTKEY_MACOS: &str = "cmd-alt-m";
 pub const DEFAULT_SYSTEM_HOTKEY_OTHER: &str = "ctrl-space";
@@ -106,24 +104,20 @@ pub(crate) fn build_app_http_client(
 
 pub struct SettingsPanel {
     focus_handle: FocusHandle,
-    llm_providers_view: Entity<LlmProvidersView>,
     size: Size,
     group_variant: GroupBoxVariant,
 }
 
 impl SettingsPanel {
     pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let llm_providers_view = cx.new(|cx| LlmProvidersView::new(cx));
         Self {
             focus_handle: cx.focus_handle(),
-            llm_providers_view,
             size: Size::default(),
             group_variant: GroupBoxVariant::Outline,
         }
     }
 
     fn setting_pages(&self, _window: &mut Window, _cx: &App) -> Vec<SettingPage> {
-        let llm_view = self.llm_providers_view.clone();
         let default_settings = AppSettings::default();
         let default_system_hotkey = AppSettings::default().current_system_hotkey().to_string();
 
@@ -467,11 +461,6 @@ impl SettingsPanel {
                     render_shortcuts_section(default_system_hotkey.clone(), window, cx)
                 })),
             ),
-            SettingPage::new(t!("LlmProviders.title")).group(SettingGroup::new().item(
-                SettingItem::render(move |_options, _window, _cx| {
-                    llm_view.clone().into_any_element()
-                }),
-            )),
             // 关于页面
             SettingPage::new(t!("Settings.About.title")).group(SettingGroup::new().item(
                 SettingItem::render(move |_options, _window, cx| render_about_section(cx)),
@@ -986,17 +975,10 @@ fn apply_global_proxy_settings(
 }
 
 fn apply_global_http_client(
-    proxy_settings: &GlobalProxySettings,
+    _proxy_settings: &GlobalProxySettings,
     http_client: Arc<ReqwestClient>,
     cx: &mut App,
 ) {
-    if let Some(provider_state) = cx.try_global::<GlobalProviderState>() {
-        if let Err(err) = provider_state.set_proxy_settings(proxy_settings) {
-            tracing::error!(error = %err, "LLM 代理设置同步失败");
-        }
-        provider_state.manager().clear_cache();
-    }
-
     cx.set_http_client(http_client);
 }
 

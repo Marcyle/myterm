@@ -4,9 +4,7 @@
 
 use crate::cloud_sync::models::*;
 use crate::license::SubscriptionInfo;
-use crate::llm::ChatStream;
 use async_trait::async_trait;
-use llm_connector::ChatRequest;
 use std::fmt;
 
 /// 云端 API 错误类型
@@ -184,16 +182,6 @@ pub trait CloudApiClient: Send + Sync {
 
     /// 移除团队成员
     async fn remove_team_member(&self, member_id: &str) -> Result<(), CloudApiError>;
-
-    // ========================================================================
-    // AI 聊天
-    // ========================================================================
-
-    /// 聊天
-    async fn chat(&self, request: &ChatRequest) -> Result<String, CloudApiError>;
-
-    /// 聊天流
-    async fn chat_stream(&self, request: &ChatRequest) -> Result<ChatStream, CloudApiError>;
 }
 
 /// 认证响应

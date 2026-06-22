@@ -6,14 +6,12 @@
 use crate::cloud_sync::client::*;
 use crate::cloud_sync::models::*;
 use crate::license::SubscriptionInfo;
-use crate::llm::ChatStream;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::AsyncReadExt;
 use futures_util::StreamExt;
 use futures_util::stream;
 use gpui::http_client::{AsyncBody, HttpClient, Method, Request, Response, StatusCode};
-use llm_connector::{ChatRequest, StreamingResponse};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
@@ -1899,148 +1897,6 @@ impl CloudApiClient for SupabaseClient {
         } else {
             Err(CloudApiError::ServerError("移除团队成员失败".to_string()))
         }
-    }
-
-    // ========================================================================
-    // AI 聊天
-    // ========================================================================
-
-    async fn chat(&self, request: &ChatRequest) -> Result<String, CloudApiError> {
-        let url = self.functions_url("ai-proxy");
-
-        // 使用 serde_json::Value 手动解析，兼容 content 为字符串或数组两种格式
-        let (status, response) = self
-            .post_json_with_retry::<serde_json::Value, ChatRequest>(&url, vec![], request)
-            .await?;
-
-        let json_val = response.map_err(|e| CloudApiError::ParseError(e))?;
-
-        if !status.is_success() {
-            return Err(CloudApiError::ServerError("接口请求失败".to_string()));
-        }
-
-        // 从顶层 content 字段取值（部分代理会填充此字段）
-        if let Some(content) = json_val.get("content").and_then(|v| v.as_str()) {
-            if !content.is_empty() {
-                return Ok(content.to_string());
-            }
-        }
-
-        // 从 choices[0].message 中提取
-        let choices = json_val.get("choices").and_then(|v| v.as_array());
-        let Some(choices) = choices else {
-            return Ok(String::new());
-        };
-        let Some(first_choice) = choices.first() else {
-            return Ok(String::new());
-        };
-        let Some(message) = first_choice.get("message") else {
-            return Ok(String::new());
-        };
-
-        // content 可能是字符串（OpenAI 标准格式）或数组（多模态格式）
-        if let Some(content) = message.get("content") {
-            if let Some(text) = content.as_str() {
-                return Ok(text.to_string());
-            }
-            if let Some(arr) = content.as_array() {
-                for block in arr {
-                    if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                        if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-                            return Ok(text.to_string());
-                        }
-                    }
-                }
-            }
-        }
-
-        // 按优先级尝试 reasoning 字段
-        for key in &["reasoning_content", "reasoning", "thought", "thinking"] {
-            if let Some(val) = message.get(*key).and_then(|v| v.as_str()) {
-                if !val.is_empty() {
-                    return Ok(val.to_string());
-                }
-            }
-        }
-
-        Ok(String::new())
-    }
-
-    async fn chat_stream(&self, request: &ChatRequest) -> Result<ChatStream, CloudApiError> {
-        // 设置 stream = true
-        let mut stream_request = request.clone();
-        stream_request.stream = Some(true);
-
-        let url = self.functions_url("ai-proxy");
-        let response = self.post_stream_with_retry(&url, &stream_request).await?;
-
-        let body = response.into_body();
-
-        // 创建 SSE 解析流
-        let stream = stream::unfold((body, String::new()), |(mut body, mut buffer)| async move {
-            let mut chunk = vec![0u8; 4096];
-            match body.read(&mut chunk).await {
-                Ok(0) => None, // EOF
-                Ok(n) => {
-                    buffer.push_str(&String::from_utf8_lossy(&chunk[..n]));
-
-                    // 解析 SSE 事件
-                    let mut results = Vec::new();
-                    while let Some(pos) = buffer.find("\n\n") {
-                        let event = buffer[..pos].to_string();
-                        buffer = buffer[pos + 2..].to_string();
-
-                        // 解析 data: 前缀
-                        for line in event.lines() {
-                            if let Some(data) = line.strip_prefix("data: ") {
-                                if data == "[DONE]" {
-                                    continue;
-                                }
-                                // 直接解析为 StreamingResponse
-                                if let Ok(mut response) =
-                                    serde_json::from_str::<StreamingResponse>(data)
-                                {
-                                    if response.choices.is_empty() {
-                                        continue;
-                                    }
-                                    // 按优先级获取内容：content > reasoning_content > reasoning > thought > thinking
-                                    if response.content.is_empty() {
-                                        if let Some(choice) = response.choices.first() {
-                                            let content = choice
-                                                .delta
-                                                .content
-                                                .as_ref()
-                                                .filter(|s| !s.is_empty())
-                                                .or(choice.delta.reasoning_content.as_ref())
-                                                .or(choice.delta.reasoning.as_ref())
-                                                .or(choice.delta.thought.as_ref())
-                                                .or(choice.delta.thinking.as_ref())
-                                                .cloned()
-                                                .unwrap_or_default();
-                                            response.content = content;
-                                        }
-                                    }
-                                    results.push(Ok(response));
-                                }
-                            }
-                        }
-                    }
-
-                    if results.is_empty() {
-                        Some((stream::iter(vec![]), (body, buffer)))
-                    } else {
-                        Some((stream::iter(results), (body, buffer)))
-                    }
-                }
-                Err(e) => Some((
-                    stream::iter(vec![Err(anyhow!("读取流失败: {}", e))]),
-                    (body, buffer),
-                )),
-            }
-        })
-        .flatten();
-
-        Ok(Box::pin(stream))
     }
 }
 

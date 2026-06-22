@@ -20,7 +20,6 @@ gpui-component.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 dashmap.workspace = true
-llm-connector.workspace = true
 futures-util = "0.3"
 aes-gcm.workspace = true
 rand.workspace = true

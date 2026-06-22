@@ -1208,14 +1208,6 @@ impl TerminalView {
                 // 仅粘贴命令，不自动回车执行，降低误操作风险
                 self.paste_text(command, window, cx);
             }
-            TerminalSidebarEvent::PasteCodeToTerminal(code) => {
-                // 粘贴代码块到终端（使用 bracketed paste 模式，不自动执行）
-                self.paste_code_block(&code, window, cx);
-            }
-            TerminalSidebarEvent::AskAi => {
-                // AI 请求已由 sidebar 内部处理，这里只需要通知刷新
-                cx.notify();
-            }
             TerminalSidebarEvent::CursorBlinkChanged(enabled) => {
                 let enabled = *enabled;
                 let _ = update_settings(cx, move |settings| {
@@ -3207,26 +3199,8 @@ impl TerminalView {
                     }),
             );
 
-        // 询问AI（仅在有选中文本时可用）
+        // 保存快捷命令（仅在有选中文本时可用）
         if let Some(text) = selection_text {
-            let message = format!(
-                "{}",
-                t!(
-                    "TerminalView.ask_ai_selection_template",
-                    content = text.trim()
-                )
-            );
-            let sidebar_clone = sidebar.clone();
-            menu = menu.separator().item(
-                PopupMenuItem::new(t!("ContextMenu.ask_ai"))
-                    .icon(IconName::AI.color())
-                    .on_click(move |_, _window, cx| {
-                        sidebar_clone.update(cx, |sidebar, cx| {
-                            sidebar.ask_ai(message.clone(), cx);
-                        });
-                    }),
-            );
-
             let save_text = text.trim().to_string();
             let sidebar_quick = sidebar.clone();
             if !save_text.is_empty() {
