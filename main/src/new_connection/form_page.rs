@@ -1,5 +1,4 @@
 use gpui::{AnyView, AnyWindowHandle, AppContext, Context, Entity, Window};
-use one_core::cloud_sync::get_cached_team_options;
 use one_core::storage::ConnectionType;
 use port_forwarding_view::{PortForwardingFormWindow, PortForwardingFormWindowConfig};
 use terminal_view::{SshFormWindow, SshFormWindowConfig};
@@ -48,7 +47,7 @@ fn build_port_forwarding_form(
     window: &mut Window,
     cx: &mut Context<NewConnectionWindow>,
 ) -> NewConnectionFormResult {
-    let Some(config) = parent.update(cx, |home, cx| {
+    let Some(config) = parent.update(cx, |home, _cx| {
         if !home.is_master_key_ready_for_new_connection() {
             return None;
         }
@@ -70,7 +69,7 @@ fn build_port_forwarding_form(
             editing_connection,
             ssh_connections,
             workspaces: home.workspaces.clone(),
-            teams: get_cached_team_options(cx),
+            teams: Vec::new(),
         })
     }) else {
         return NewConnectionFormResult::Blocked;
@@ -87,7 +86,7 @@ fn build_ssh_form(
     window: &mut Window,
     cx: &mut Context<NewConnectionWindow>,
 ) -> NewConnectionFormResult {
-    let Some(config) = parent.update(cx, |home, cx| {
+    let Some(config) = parent.update(cx, |home, _cx| {
         if !home.is_master_key_ready_for_new_connection() {
             return None;
         }
@@ -102,7 +101,7 @@ fn build_ssh_form(
         Some(SshFormWindowConfig {
             editing_connection,
             workspaces: home.workspaces.clone(),
-            teams: get_cached_team_options(cx),
+            teams: Vec::new(),
         })
     }) else {
         return NewConnectionFormResult::Blocked;

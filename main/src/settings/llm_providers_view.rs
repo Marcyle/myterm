@@ -14,14 +14,12 @@ use one_core::storage::{GlobalStorageState, StorageManager, traits::Repository};
 use rust_i18n::t;
 
 use super::provider_form_dialog::ProviderForm;
-use crate::setting_tab::GlobalCurrentUser;
 
 pub struct LlmProvidersView {
     focus_handle: FocusHandle,
     storage_manager: StorageManager,
     providers: Vec<ProviderConfig>,
     loading: bool,
-    is_logged_in: bool,
 }
 
 impl LlmProvidersView {
@@ -35,7 +33,6 @@ impl LlmProvidersView {
             storage_manager,
             providers: vec![],
             loading: false,
-            is_logged_in: GlobalCurrentUser::get_user(cx).is_some(),
         };
         cx.spawn(async move |entity: WeakEntity<Self>, cx: &mut AsyncApp| {
             let _ = entity.update(cx, |this, cx| {
@@ -49,25 +46,14 @@ impl LlmProvidersView {
 
     fn load_providers(&mut self, cx: &mut Context<Self>) {
         self.loading = true;
-        let is_logged_in = GlobalCurrentUser::get_user(cx).is_some();
-        self.is_logged_in = is_logged_in;
 
         let repo = self
             .storage_manager
             .get::<ProviderRepository>()
             .expect("ProviderRepository not found");
 
-        if is_logged_in {
-            if let Err(e) = repo.ensure_onetcli_provider() {
-                tracing::error!("Failed to ensure OnetCli provider: {}", e);
-            }
-        }
-
         match repo.list() {
-            Ok(mut providers) => {
-                if !is_logged_in {
-                    providers.retain(|p| !p.is_builtin());
-                }
+            Ok(providers) => {
                 self.providers = providers;
             }
             Err(e) => {

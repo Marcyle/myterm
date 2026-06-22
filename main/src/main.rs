@@ -10,7 +10,6 @@ pub mod new_connection;
 mod onetcli_app;
 mod setting_tab;
 mod settings;
-mod user_avatar;
 
 use crate::onetcli_app::OnetCliApp;
 use gpui::*;

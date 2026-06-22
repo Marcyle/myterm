@@ -1,16 +1,13 @@
 use std::sync::Arc;
 
 use crate::app_init::is_valid_system_hotkey;
-use crate::auth::get_auth_service;
-use crate::license::{get_license_service, offline_license_public_key};
 use crate::settings::llm_providers_view::LlmProvidersView;
-use crate::update;
 use gpui::http_client::{AsyncBody, Method, Request};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     App, AppContext, AsyncApp, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    FontWeight, InteractiveElement, IntoElement, KeyDownEvent, Keystroke, ParentElement,
-    PathPromptOptions, Render, SharedString, Styled, WeakEntity, Window, div,
+    FontWeight, InteractiveElement, IntoElement, KeyDownEvent, Keystroke, ParentElement, Render,
+    SharedString, Styled, WeakEntity, Window, div,
 };
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, IndexPath, Sizable, Size, Theme, ThemeMode, TitleBar,
@@ -35,7 +32,7 @@ pub const DEFAULT_SYSTEM_HOTKEY_MACOS: &str = "cmd-alt-m";
 pub const DEFAULT_SYSTEM_HOTKEY_OTHER: &str = "ctrl-space";
 
 pub use one_core::settings::{
-    AppSettings, DatabaseOpenMode, GlobalCurrentUser, GlobalProxySettings,
+    AppSettings, DatabaseOpenMode, GlobalProxySettings,
     LargeTextCellEditorOpenMode, ProxyType,
 };
 use one_core::tab_container::{TabContent, TabContentEvent};
@@ -475,10 +472,6 @@ impl SettingsPanel {
                     llm_view.clone().into_any_element()
                 }),
             )),
-            // 账户设置页
-            SettingPage::new(t!("Settings.Account.title")).group(SettingGroup::new().item(
-                SettingItem::render(move |_options, window, cx| render_account_section(window, cx)),
-            )),
             // 关于页面
             SettingPage::new(t!("Settings.About.title")).group(SettingGroup::new().item(
                 SettingItem::render(move |_options, _window, cx| render_about_section(cx)),
@@ -555,14 +548,6 @@ fn render_manual_update_check_item(cx: &mut App) -> gpui::AnyElement {
                         .text_color(cx.theme().muted_foreground)
                         .child(t!("Settings.General.Update.check_now_desc").to_string()),
                 ),
-        )
-        .child(
-            Button::new("settings-check-update")
-                .icon(IconName::Refresh)
-                .label(t!("Settings.General.Update.check_now"))
-                .on_click(|_, window, cx| {
-                    update::check_for_updates_manually(window, cx);
-                }),
         )
         .into_any_element()
 }
@@ -1005,12 +990,7 @@ fn apply_global_http_client(
     http_client: Arc<ReqwestClient>,
     cx: &mut App,
 ) {
-    let auth_service = get_auth_service(cx);
-    let http_for_auth: Arc<dyn gpui::http_client::HttpClient> = http_client.clone();
-    auth_service.replace_http_client(http_for_auth);
-
     if let Some(provider_state) = cx.try_global::<GlobalProviderState>() {
-        provider_state.set_cloud_client(auth_service.cloud_client());
         if let Err(err) = provider_state.set_proxy_settings(proxy_settings) {
             tracing::error!(error = %err, "LLM 代理设置同步失败");
         }
@@ -1040,155 +1020,6 @@ async fn test_proxy_connectivity(
     }
 
     Ok(())
-}
-
-/// 渲染账户设置区域
-fn render_account_section(_window: &mut Window, cx: &App) -> gpui::AnyElement {
-    let user = GlobalCurrentUser::get_user(cx);
-
-    if let Some(user) = user {
-        // 已登录状态：显示用户信息和登出按钮
-        let email: SharedString = user.email.clone().into();
-        let display_name: SharedString = user
-            .username
-            .clone()
-            .unwrap_or_else(|| {
-                user.email
-                    .split('@')
-                    .next()
-                    .unwrap_or(&user.email)
-                    .to_string()
-            })
-            .into();
-
-        v_flex()
-            .gap_4()
-            .p_4()
-            // 用户信息区域
-            .child(
-                v_flex()
-                    .gap_2()
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .items_center()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(t!("Settings.Account.username").to_string()),
-                            )
-                            .child(div().text_sm().child(display_name)),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .items_center()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(t!("Settings.Account.email").to_string()),
-                            )
-                            .child(div().text_sm().child(email)),
-                    ),
-            )
-            // 登出按钮
-            .child(
-                h_flex()
-                    .gap_2()
-                    .child(
-                        Button::new("import-license-button")
-                            .icon(IconName::File)
-                            .label(t!("License.import_offline").to_string())
-                            .on_click(move |_, window, cx| {
-                                let public_key = match offline_license_public_key() {
-                                    Ok(key) => key,
-                                    Err(msg) => {
-                                        window.push_notification(msg, cx);
-                                        return;
-                                    }
-                                };
-                                let license_service = get_license_service(cx);
-                                let future = cx.prompt_for_paths(PathPromptOptions {
-                                    files: true,
-                                    directories: false,
-                                    multiple: false,
-                                    prompt: Some(t!("License.select_file").to_string().into()),
-                                });
-
-                                window
-                                    .spawn(cx, async move |cx| {
-                                        if let Ok(Ok(Some(paths))) = future.await {
-                                            if let Some(path) = paths.into_iter().next() {
-                                                let result = license_service
-                                                    .import_offline_license_from_path(
-                                                        &path,
-                                                        &public_key,
-                                                        None,
-                                                    );
-                                                let message = match result {
-                                                    Ok(_) => {
-                                                        t!("License.import_success").to_string()
-                                                    }
-                                                    Err(err) => t!(
-                                                        "License.import_failed",
-                                                        error = err.to_string()
-                                                    )
-                                                    .to_string(),
-                                                };
-                                                let _ = cx.update(|_view, cx: &mut App| {
-                                                    if let Some(window_id) = cx.active_window() {
-                                                        let _ = cx.update_window(
-                                                            window_id,
-                                                            |_, window, cx| {
-                                                                window
-                                                                    .push_notification(message, cx);
-                                                            },
-                                                        );
-                                                    }
-                                                });
-                                            }
-                                        }
-                                    })
-                                    .detach();
-                            }),
-                    )
-                    .child(
-                        Button::new("logout-button")
-                            .icon(IconName::Close)
-                            .label(t!("Auth.logout"))
-                            .danger()
-                            .on_click(move |_, _window, cx| {
-                                // 清除 License
-                                get_license_service(cx).clear();
-
-                                // 执行登出
-                                let auth = get_auth_service(cx);
-                                cx.spawn(async move |cx: &mut AsyncApp| {
-                                    auth.sign_out().await;
-                                    cx.update(|cx| {
-                                        GlobalCurrentUser::set_user(None, cx);
-                                    });
-                                })
-                                .detach();
-                            }),
-                    ),
-            )
-            .into_any_element()
-    } else {
-        // 未登录状态：显示提示信息
-        v_flex()
-            .gap_2()
-            .p_4()
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(t!("Settings.Account.not_logged_in").to_string()),
-            )
-            .into_any_element()
-    }
 }
 
 // ============================================================================
