@@ -2,6 +2,7 @@ use gpui_component::{Icon, IconName, Size, Sizable};
 use one_core::storage::DbConnectionConfig;
 use std::path::Path;
 
+#[allow(dead_code)]
 pub(crate) fn external_driver_icon_for_config(
     _config: &DbConnectionConfig,
     size: impl Into<Size>,

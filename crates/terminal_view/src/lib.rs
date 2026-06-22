@@ -5,7 +5,6 @@ pub mod cd_completion;
 pub mod highlight_presets;
 pub mod history_prompt;
 pub mod keys;
-pub mod serial_form_window;
 pub mod settings;
 pub mod sidebar;
 mod ssh_form_mfa;
@@ -18,7 +17,6 @@ pub use addon::{AddonManager, HoveredLink, SearchAddon, TerminalAddon, WebLinksA
 pub use one_core::layout::{
     SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, TOOLBAR_WIDTH,
 };
-pub use serial_form_window::{SerialFormWindow, SerialFormWindowConfig};
 pub use settings::{
     TerminalHighlightRule, TerminalSettings, current_settings, init_settings, update_settings,
 };

@@ -15,19 +15,6 @@ pub(crate) fn build_connection_open_strategy(
             connection,
             workspace,
         }),
-        ConnectionType::Database => Box::new(DatabaseOpenStrategy {
-            connection,
-            workspace,
-        }),
-        ConnectionType::Redis => Box::new(RedisOpenStrategy {
-            connection,
-            workspace,
-        }),
-        ConnectionType::MongoDB => Box::new(MongoOpenStrategy {
-            connection,
-            workspace,
-        }),
-        ConnectionType::Serial => Box::new(SerialOpenStrategy { connection }),
         ConnectionType::PortForwarding => Box::new(PortForwardingOpenStrategy { connection }),
         _ => Box::new(NoopOpenStrategy),
     }
@@ -44,76 +31,7 @@ impl ConnectionOpenStrategy for SshOpenStrategy {
     }
 }
 
-struct DatabaseOpenStrategy {
-    connection: StoredConnection,
-    workspace: Option<Workspace>,
-}
-
-impl ConnectionOpenStrategy for DatabaseOpenStrategy {
-    fn open(self: Box<Self>, home: &mut HomePage, window: &mut Window, cx: &mut Context<HomePage>) {
-        let DatabaseOpenStrategy {
-            connection,
-            workspace,
-        } = *self;
-        extension_runtime::database_driver_install::open_database_connection_with_driver_guard(
-            home, connection, workspace, window, cx,
-        );
-    }
-}
-
-impl extension_runtime::database_driver_install::DatabaseDriverConnectionOpener for HomePage {
-    fn open_database_connection(
-        &mut self,
-        connection: &StoredConnection,
-        workspace: Option<Workspace>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.add_item_to_tab(connection, workspace, window, cx);
-    }
-}
-
-struct RedisOpenStrategy {
-    connection: StoredConnection,
-    workspace: Option<Workspace>,
-}
-
-impl ConnectionOpenStrategy for RedisOpenStrategy {
-    fn open(self: Box<Self>, home: &mut HomePage, window: &mut Window, cx: &mut Context<HomePage>) {
-        let RedisOpenStrategy {
-            connection,
-            workspace,
-        } = *self;
-        home.open_redis_tab(connection, workspace, window, cx);
-    }
-}
-
-struct MongoOpenStrategy {
-    connection: StoredConnection,
-    workspace: Option<Workspace>,
-}
-
-impl ConnectionOpenStrategy for MongoOpenStrategy {
-    fn open(self: Box<Self>, home: &mut HomePage, window: &mut Window, cx: &mut Context<HomePage>) {
-        let MongoOpenStrategy {
-            connection,
-            workspace,
-        } = *self;
-        home.open_mongodb_tab(connection, workspace, window, cx);
-    }
-}
-
 struct NoopOpenStrategy;
-
-struct SerialOpenStrategy {
-    connection: StoredConnection,
-}
-
-impl ConnectionOpenStrategy for SerialOpenStrategy {
-    fn open(self: Box<Self>, home: &mut HomePage, window: &mut Window, cx: &mut Context<HomePage>) {
-        home.open_serial_terminal(self.connection, window, cx);
-    }
-}
 
 struct PortForwardingOpenStrategy {
     connection: StoredConnection,

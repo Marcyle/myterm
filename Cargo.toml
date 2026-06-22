@@ -29,7 +29,7 @@ members = [
     "crates/port_forwarding",
     "crates/port_forwarding_view",
     "crates/process-util",
-    "main", "crates/ssh", "crates/sftp", "crates/sftp_view", "crates/one_ui", "crates/redis_view", "crates/license_tool", "crates/mongodb_view", "crates/remote_file_editor"]
+    "main", "crates/ssh", "crates/sftp", "crates/sftp_view", "crates/one_ui", "crates/license_tool", "crates/remote_file_editor"]
 resolver = "2"
 
 [workspace.package]
@@ -79,7 +79,6 @@ tracing = "0.1.41"
 
 
 reqwest_client = { path = "crates/reqwest_client" }
-redis_view = { path = "crates/redis_view" }
 one-ui = { path = "crates/one_ui" }
 ssh = { path = "crates/ssh" }
 sftp = { path = "crates/sftp" }
@@ -90,7 +89,6 @@ port_forwarding_view = { path = "crates/port_forwarding_view" }
 process-util = { path = "crates/process-util" }
 sftp_view = { path = "crates/sftp_view" }
 one-core = { path = "crates/core" }
-mongodb_view = {path = "crates/mongodb_view"}
 remote_file_editor = { path = "crates/remote_file_editor" }
 er_flow = { path = "crates/er_flow" }
 ipc = { path = "crates/ipc" }

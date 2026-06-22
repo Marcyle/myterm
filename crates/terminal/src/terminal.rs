@@ -20,7 +20,7 @@ use futures::StreamExt;
 use gpui::*;
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::models::{
-    ActiveConnections, ProxyType as StorageProxyType, SerialParams, SshAuthMethod, StoredConnection,
+    ActiveConnections, ProxyType as StorageProxyType, SshAuthMethod, StoredConnection,
 };
 use std::collections::VecDeque;
 use std::fs;
@@ -48,7 +48,7 @@ use crate::pty_backend::{GpuiEventProxy, LocalPtyBackend};
 #[cfg(not(target_os = "windows"))]
 use crate::shell_integration::embedded_shell_integration_script;
 
-use crate::{LocalConfig, SerialBackend, SshBackend, TerminalBackend, TerminalEvent, TerminalSize};
+use crate::{LocalConfig, SshBackend, TerminalBackend, TerminalEvent, TerminalSize};
 use ssh::{
     ChannelEvent, KeyboardInteractiveRequest, KeyboardInteractiveResponder,
     KeyboardInteractiveTarget, SshChannel, SshSessionManager,
@@ -95,7 +95,6 @@ pub enum ConnectionState {
 pub enum TerminalConnectionKind {
     Local,
     Ssh,
-    Serial,
 }
 
 const SSH_CLEAR_SCREEN_REDRAW_BYTES: &[u8] = b"\x0c";
@@ -103,7 +102,7 @@ const SSH_CLEAR_SCREEN_REDRAW_BYTES: &[u8] = b"\x0c";
 fn clear_screen_remote_redraw_bytes(kind: TerminalConnectionKind) -> Option<&'static [u8]> {
     match kind {
         TerminalConnectionKind::Ssh => Some(SSH_CLEAR_SCREEN_REDRAW_BYTES),
-        TerminalConnectionKind::Local | TerminalConnectionKind::Serial => None,
+        TerminalConnectionKind::Local => None,
     }
 }
 
@@ -674,8 +673,6 @@ pub struct Terminal {
     ssh_session_manager: Option<Arc<SshSessionManager>>,
     /// SSH keyboard-interactive/MFA 输入响应器
     ssh_mfa_responder: Option<TerminalMfaResponder>,
-    /// 串口参数（用于重连）
-    serial_params: Option<SerialParams>,
     /// 事件发送器（用于 SSH 重连）
     event_tx: Option<UnboundedSender<TerminalEvent>>,
     /// 事件代理（用于设置 PtyWrite 回写通道）
@@ -781,7 +778,6 @@ impl Terminal {
             ssh_config: None,
             ssh_session_manager: None,
             ssh_mfa_responder: None,
-            serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: None,
             connection_id: None,
@@ -857,7 +853,6 @@ impl Terminal {
             ssh_config: None,
             ssh_session_manager: None,
             ssh_mfa_responder: None,
-            serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: None, // 本地终端的 event_proxy 已在 LocalPtyBackend 中设置
             connection_id: None,
@@ -1021,7 +1016,6 @@ impl Terminal {
             ssh_config: Some(config),
             ssh_session_manager: Some(ssh_session_manager),
             ssh_mfa_responder: Some(ssh_mfa_responder),
-            serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
             connection_id: conn.id,
@@ -1031,56 +1025,6 @@ impl Terminal {
             persisted_history: Vec::new(),
             connection_generation,
             connection_kind: TerminalConnectionKind::Ssh,
-        }
-    }
-
-    /// 创建串口终端
-    pub fn new_serial(conn: StoredConnection, cx: &mut Context<Self>) -> Self {
-        let serial_params = conn
-            .to_serial_params()
-            .expect("StoredConnection 应包含有效的 SerialParams");
-
-        let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
-        let (term, event_proxy, _colors) =
-            Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
-        let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
-        let connection_generation = 1;
-
-        Self::spawn_disconnect_handler(disconnect_rx, connection_generation, cx);
-        Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
-        Self::spawn_serial_connect(
-            serial_params.clone(),
-            term.clone(),
-            event_tx.clone(),
-            Some(disconnect_tx),
-            connection_generation,
-            cx,
-        );
-
-        Self {
-            term,
-            backend: None,
-            title: String::new(),
-            current_working_dir: None,
-            child_exited: None,
-            connection_state: ConnectionState::Connecting,
-            cols: DEFAULT_COLS,
-            rows: DEFAULT_ROWS,
-            pixel_width: 0,
-            pixel_height: 0,
-            ssh_config: None,
-            ssh_session_manager: None,
-            ssh_mfa_responder: None,
-            serial_params: Some(serial_params),
-            event_tx: Some(event_tx),
-            event_proxy: None,
-            connection_id: conn.id,
-            connection_name: Some(conn.name),
-            init_commands: None,
-            session_history: VecDeque::new(),
-            persisted_history: Vec::new(),
-            connection_generation,
-            connection_kind: TerminalConnectionKind::Serial,
         }
     }
 
@@ -1345,65 +1289,6 @@ impl Terminal {
         cx.emit(TerminalModelEvent::Wakeup);
     }
 
-    fn spawn_serial_connect(
-        params: SerialParams,
-        term: Arc<FairMutex<Term<GpuiEventProxy>>>,
-        event_tx: UnboundedSender<TerminalEvent>,
-        on_disconnect: Option<tokio::sync::oneshot::Sender<()>>,
-        generation: u64,
-        cx: &mut Context<Self>,
-    ) {
-        let disconnect_tx = on_disconnect.map(|tx| {
-            let (sender, mut receiver) = unbounded_channel::<()>();
-            Tokio::spawn(cx, async move {
-                if receiver.recv().await.is_some() {
-                    let _ = tx.send(());
-                }
-            })
-            .detach();
-            sender
-        });
-
-        let result = SerialBackend::connect(params, term, event_tx, disconnect_tx);
-
-        cx.spawn(async move |this: WeakEntity<Self>, cx| {
-            let _ = this.update(cx, |this, cx| {
-                this.handle_serial_result(result, generation, cx);
-            });
-        })
-        .detach();
-    }
-
-    fn handle_serial_result(
-        &mut self,
-        result: anyhow::Result<SerialBackend>,
-        generation: u64,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.is_current_connection_generation(generation) {
-            if let Ok(backend) = result {
-                backend.shutdown();
-            }
-            return;
-        }
-
-        match result {
-            Ok(backend) => {
-                self.connection_state = ConnectionState::Connected;
-                self.set_connection_active(true, cx);
-                self.backend = Some(Box::new(backend));
-                tracing::info!("串口连接成功");
-            }
-            Err(e) => {
-                self.connection_state = ConnectionState::Disconnected {
-                    error: Some(e.to_string()),
-                };
-                self.set_connection_active(false, cx);
-            }
-        }
-        cx.emit(TerminalModelEvent::Wakeup);
-    }
-
     fn set_connection_active(&self, active: bool, cx: &mut Context<Self>) {
         let Some(connection_id) = self.connection_id else {
             return;
@@ -1581,7 +1466,7 @@ impl Terminal {
 
     /// 是否可以重连
     pub fn can_reconnect(&self) -> bool {
-        self.ssh_config.is_some() || self.serial_params.is_some()
+        self.ssh_config.is_some()
     }
 
     /// 写入数据到终端
@@ -1712,29 +1597,6 @@ impl Terminal {
                 });
             })
             .detach();
-        } else if let Some(params) = self.serial_params.clone() {
-            let Some(event_tx) = self.event_tx.clone() else {
-                return;
-            };
-
-            self.connection_state = ConnectionState::Connecting;
-            self.set_connection_active(false, cx);
-            if let Some(backend) = self.backend.take() {
-                backend.shutdown();
-            }
-            self.reset_terminal_surface();
-            let generation = self.next_connection_generation();
-
-            let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel::<()>();
-            Self::spawn_disconnect_handler(disconnect_rx, generation, cx);
-            Self::spawn_serial_connect(
-                params,
-                self.term.clone(),
-                event_tx,
-                Some(disconnect_tx),
-                generation,
-                cx,
-            );
         } else {
             return;
         }
@@ -1925,10 +1787,6 @@ mod tests {
         assert_eq!(
             None,
             clear_screen_remote_redraw_bytes(TerminalConnectionKind::Local)
-        );
-        assert_eq!(
-            None,
-            clear_screen_remote_redraw_bytes(TerminalConnectionKind::Serial)
         );
     }
 
@@ -2279,7 +2137,6 @@ mod tests {
             ssh_config: None,
             ssh_session_manager: None,
             ssh_mfa_responder: None,
-            serial_params: None,
             event_tx: Some(event_tx),
             event_proxy: Some(event_proxy),
             connection_id: Some(1),

@@ -32,8 +32,6 @@ terminal_view = { workspace = true }
 port_forwarding = { workspace = true }
 port_forwarding_view = { workspace = true }
 sftp_view = { workspace = true }
-redis_view = { workspace = true }
-mongodb_view = { workspace = true }
 remote_file_editor = { workspace = true, features = ["ui"] }
 one-core.workspace = true
 one-ui.workspace = true

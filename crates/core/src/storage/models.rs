@@ -44,12 +44,7 @@ impl ActiveConnections {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ConnectionType {
     All,
-    Database,
     SshSftp,
-    Redis,
-    MongoDB,
-    ChatDB,
-    Serial,
     PortForwarding,
 }
 
@@ -57,12 +52,7 @@ impl fmt::Display for ConnectionType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
             ConnectionType::All => "All",
-            ConnectionType::Database => "Database",
             ConnectionType::SshSftp => "SshSftp",
-            ConnectionType::Redis => "Redis",
-            ConnectionType::MongoDB => "MongoDB",
-            ConnectionType::ChatDB => "ChatDB",
-            ConnectionType::Serial => "Serial",
             ConnectionType::PortForwarding => "PortForwarding",
         };
         write!(f, "{}", s)
@@ -73,37 +63,22 @@ impl ConnectionType {
     pub fn all() -> Vec<ConnectionType> {
         vec![
             ConnectionType::All,
-            ConnectionType::Database,
             ConnectionType::SshSftp,
-            ConnectionType::Redis,
-            ConnectionType::MongoDB,
-            ConnectionType::ChatDB,
-            ConnectionType::Serial,
             ConnectionType::PortForwarding,
         ]
     }
     pub fn from_str(s: &str) -> Self {
         match s {
-            "Database" => ConnectionType::Database,
             "SshSftp" => ConnectionType::SshSftp,
-            "Redis" => ConnectionType::Redis,
-            "MongoDB" => ConnectionType::MongoDB,
-            "ChatDB" => ConnectionType::ChatDB,
-            "Serial" => ConnectionType::Serial,
             "PortForwarding" => ConnectionType::PortForwarding,
-            _ => ConnectionType::Database,
+            _ => ConnectionType::SshSftp,
         }
     }
 
     pub fn label(&self) -> &'static str {
         match self {
             ConnectionType::All => "All",
-            ConnectionType::Database => "Database",
             ConnectionType::SshSftp => "SSH/SFTP",
-            ConnectionType::Redis => "Redis",
-            ConnectionType::MongoDB => "MongoDB",
-            ConnectionType::ChatDB => "ChatDB",
-            ConnectionType::Serial => "Serial",
             ConnectionType::PortForwarding => "Port Forwarding",
         }
     }
@@ -111,12 +86,7 @@ impl ConnectionType {
     pub fn icon(&self) -> IconName {
         match self {
             ConnectionType::All => IconName::Server,
-            ConnectionType::Database => IconName::Database,
             ConnectionType::SshSftp => IconName::TerminalColor,
-            ConnectionType::Redis => IconName::Redis,
-            ConnectionType::MongoDB => IconName::MongoDB,
-            ConnectionType::ChatDB => IconName::AI,
-            ConnectionType::Serial => IconName::SerialPort,
             ConnectionType::PortForwarding => IconName::Network,
         }
     }
@@ -822,34 +792,6 @@ impl SyncableItem for StoredConnection {
 }
 
 impl StoredConnection {
-    pub fn new_database(
-        name: String,
-        params: DbConnectionConfig,
-        workspace_id: Option<i64>,
-    ) -> Self {
-        Self {
-            id: None,
-            name,
-            connection_type: ConnectionType::Database,
-            params: serde_json::to_string(&params).expect("DbConnectionConfig 序列化不应失败"),
-            workspace_id,
-            selected_databases: if let Some(database) = &params.database {
-                Some(format!("[\"{}\"]", database))
-            } else {
-                None
-            },
-            remark: None,
-            sync_enabled: true,
-            cloud_id: None,
-            last_synced_at: None,
-            last_used_at: None,
-            created_at: None,
-            updated_at: None,
-            team_id: None,
-            owner_id: None,
-        }
-    }
-
     pub fn new_ssh(name: String, params: SshParams, workspace_id: Option<i64>) -> Self {
         Self {
             id: None,
@@ -870,76 +812,8 @@ impl StoredConnection {
         }
     }
 
-    pub fn new_redis(name: String, params: RedisParams, workspace_id: Option<i64>) -> Self {
-        Self {
-            id: None,
-            name,
-            connection_type: ConnectionType::Redis,
-            params: serde_json::to_string(&params).expect("RedisParams 序列化不应失败"),
-            workspace_id,
-            selected_databases: None,
-            remark: None,
-            sync_enabled: true,
-            cloud_id: None,
-            last_synced_at: None,
-            last_used_at: None,
-            created_at: None,
-            updated_at: None,
-            team_id: None,
-            owner_id: None,
-        }
-    }
-
-    pub fn new_mongodb(name: String, params: MongoDBParams, workspace_id: Option<i64>) -> Self {
-        Self {
-            id: None,
-            name,
-            connection_type: ConnectionType::MongoDB,
-            params: serde_json::to_string(&params).expect("MongoDBParams 序列化不应失败"),
-            workspace_id,
-            selected_databases: None,
-            remark: None,
-            sync_enabled: true,
-            cloud_id: None,
-            last_synced_at: None,
-            last_used_at: None,
-            created_at: None,
-            updated_at: None,
-            team_id: None,
-            owner_id: None,
-        }
-    }
-
     pub fn to_ssh_params(&self) -> Result<SshParams, serde_json::Error> {
         serde_json::from_str(&self.params)
-    }
-
-    pub fn to_redis_params(&self) -> Result<RedisParams, serde_json::Error> {
-        serde_json::from_str(&self.params)
-    }
-
-    pub fn to_mongodb_params(&self) -> Result<MongoDBParams, serde_json::Error> {
-        serde_json::from_str(&self.params)
-    }
-
-    pub fn new_serial(name: String, params: SerialParams, workspace_id: Option<i64>) -> Self {
-        Self {
-            id: None,
-            name,
-            connection_type: ConnectionType::Serial,
-            params: serde_json::to_string(&params).expect("SerialParams 序列化不应失败"),
-            workspace_id,
-            selected_databases: None,
-            remark: None,
-            sync_enabled: true,
-            cloud_id: None,
-            last_synced_at: None,
-            last_used_at: None,
-            created_at: None,
-            updated_at: None,
-            team_id: None,
-            owner_id: None,
-        }
     }
 
     pub fn new_port_forwarding(
@@ -966,27 +840,10 @@ impl StoredConnection {
         }
     }
 
-    pub fn to_serial_params(&self) -> Result<SerialParams, serde_json::Error> {
-        serde_json::from_str(&self.params)
-    }
-
     pub fn to_port_forwarding_params(&self) -> Result<PortForwardingParams, serde_json::Error> {
         serde_json::from_str(&self.params)
     }
 
-    pub fn to_db_connection(&self) -> Result<DbConnectionConfig, serde_json::Error> {
-        let mut params: DbConnectionConfig = serde_json::from_str(&self.params)?;
-        params.name = self.name.clone();
-        params.workspace_id = self.workspace_id;
-        params.id = self.id.unwrap_or(0).to_string();
-        Ok(params)
-    }
-
-    pub fn from_db_connection(connection: DbConnectionConfig) -> Self {
-        let name = connection.name.clone();
-        let workspace_id = connection.workspace_id.clone();
-        Self::new_database(name, connection, workspace_id)
-    }
 
     /// 获取已选中的数据库列表，None表示全选
     pub fn get_selected_databases(&self) -> Option<Vec<String>> {
@@ -1377,14 +1234,6 @@ mod serial_tests {
         assert_eq!(rt.stop_bits, 2);
         assert_eq!(rt.parity, SerialParity::Even);
         assert_eq!(rt.flow_control, SerialFlowControl::Hardware);
-    }
-
-    #[test]
-    fn connection_type_serial_methods() {
-        assert_eq!(ConnectionType::Serial.label(), "Serial");
-        assert_eq!(ConnectionType::from_str("Serial"), ConnectionType::Serial);
-        assert_eq!(format!("{}", ConnectionType::Serial), "Serial");
-        assert!(ConnectionType::all().contains(&ConnectionType::Serial));
     }
 
     #[test]

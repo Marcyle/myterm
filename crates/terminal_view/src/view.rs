@@ -1003,31 +1003,6 @@ impl TerminalView {
         )
     }
 
-    pub fn new_serial(conn: StoredConnection, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::new_serial_with_index(conn, None, window, cx)
-    }
-
-    pub fn new_serial_with_index(
-        conn: StoredConnection,
-        tab_index: Option<usize>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        let connection_id = conn.id;
-        let terminal = cx.new(|cx| Terminal::new_serial(conn, cx));
-        // 串口不传 stored_connection，避免创建文件管理器面板
-        Self::new_with_terminal(
-            terminal,
-            connection_id,
-            None,
-            true,
-            None,
-            tab_index,
-            window,
-            cx,
-        )
-    }
-
     fn new_with_terminal(
         terminal: Entity<Terminal>,
         connection_id: Option<i64>,
@@ -3933,12 +3908,8 @@ impl TabContent for TerminalView {
         }
     }
 
-    fn icon(&self, cx: &App) -> Option<Icon> {
-        if self.connection_kind(cx) == TerminalConnectionKind::Serial {
-            Some(IconName::SerialPort.color())
-        } else {
-            Some(IconName::TerminalColor.color())
-        }
+    fn icon(&self, _cx: &App) -> Option<Icon> {
+        Some(IconName::TerminalColor.color())
     }
 
     fn closeable(&self, _cx: &App) -> bool {
@@ -4471,14 +4442,12 @@ mod tests {
 
     #[test]
     fn terminal_close_confirmation_is_only_for_local_terminals() {
-        for kind in [TerminalConnectionKind::Ssh, TerminalConnectionKind::Serial] {
-            assert!(!should_confirm_local_terminal_close(
-                kind,
-                true,
-                TermMode::ALT_SCREEN,
-                None,
-            ));
-        }
+        assert!(!should_confirm_local_terminal_close(
+            TerminalConnectionKind::Ssh,
+            true,
+            TermMode::ALT_SCREEN,
+            None,
+        ));
     }
 
     #[test]

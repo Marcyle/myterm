@@ -20,7 +20,6 @@ use gpui_component::{
     tooltip::Tooltip,
     v_flex,
 };
-use mongodb_view::{MongoFormWindow, MongoFormWindowConfig};
 use one_core::cloud_sync::{
     CloudApiClient, CloudSyncService, ConflictResolution, SyncConflict, SyncEngine, UserInfo,
     can_edit_connection, get_cached_team_options,
@@ -34,7 +33,7 @@ use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 use one_core::storage::traits::Repository;
 use one_core::storage::{
     ActiveConnections, ConnectionRepository, ConnectionType, GlobalStorageState,
-    PendingCloudDeletionRepository, RedisMode, StoredConnection, Workspace, WorkspaceRepository,
+    PendingCloudDeletionRepository, StoredConnection, Workspace, WorkspaceRepository,
 };
 use one_core::tab_container::{TabContainer, TabContent, TabContentEvent};
 use port_forwarding::{
@@ -42,13 +41,10 @@ use port_forwarding::{
     build_dynamic_forwarding_request, build_local_forwarding_request,
 };
 use port_forwarding_view::{PortForwardingFormWindow, PortForwardingFormWindowConfig};
-use redis_view::{RedisFormWindow, RedisFormWindowConfig};
 use rust_i18n::t;
-use terminal_view::{SerialFormWindow, SerialFormWindowConfig};
 use terminal_view::{SshFormWindow, SshFormWindowConfig};
 
 use crate::auth::{AuthService, show_auth_dialog};
-use crate::external_driver_display::external_driver_icon_for_config;
 use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_strategy::build_connection_open_strategy;
 use crate::home::home_workspace_filter::{WorkspaceFilterDelegate, show_workspace_dialog};
@@ -1391,102 +1387,6 @@ impl HomePage {
         );
     }
 
-    pub(crate) fn show_redis_form(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
-            return;
-        }
-
-        let editing_conn = self.editing_connection_id.and_then(|id| {
-            self.connections
-                .iter()
-                .find(|c| c.id == Some(id) && c.connection_type == ConnectionType::Redis)
-                .cloned()
-        });
-
-        let config = RedisFormWindowConfig {
-            editing_connection: editing_conn,
-            workspaces: self.workspaces.clone(),
-            teams: get_cached_team_options(cx),
-        };
-
-        self.editing_connection_id = None;
-
-        open_popup_window(
-            PopupWindowOptions::new(if config.editing_connection.is_some() {
-                t!("Connection.edit", db_type = "Redis").to_string()
-            } else {
-                t!("Connection.new", db_type = "Redis").to_string()
-            })
-            .size(700.0, 650.0),
-            move |window, cx| cx.new(|cx| RedisFormWindow::new(config, window, cx)),
-            cx,
-        );
-    }
-
-    pub(crate) fn show_mongodb_form(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
-            return;
-        }
-
-        let editing_conn = self.editing_connection_id.and_then(|id| {
-            self.connections
-                .iter()
-                .find(|c| c.id == Some(id) && c.connection_type == ConnectionType::MongoDB)
-                .cloned()
-        });
-
-        let config = MongoFormWindowConfig {
-            editing_connection: editing_conn,
-            workspaces: self.workspaces.clone(),
-            teams: get_cached_team_options(cx),
-        };
-
-        self.editing_connection_id = None;
-
-        open_popup_window(
-            PopupWindowOptions::new(if config.editing_connection.is_some() {
-                t!("Connection.edit", db_type = "MongoDB").to_string()
-            } else {
-                t!("Connection.new", db_type = "MongoDB").to_string()
-            })
-            .size(700.0, 520.0),
-            move |window, cx| cx.new(|cx| MongoFormWindow::new(config, window, cx)),
-            cx,
-        );
-    }
-
-    pub(crate) fn show_serial_form(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.editing_connection_id.is_none() && !self.is_master_key_ready_for_new_connection() {
-            return;
-        }
-
-        let editing_conn = self.editing_connection_id.and_then(|id| {
-            self.connections
-                .iter()
-                .find(|c| c.id == Some(id) && c.connection_type == ConnectionType::Serial)
-                .cloned()
-        });
-
-        let config = SerialFormWindowConfig {
-            editing_connection: editing_conn,
-            workspaces: self.workspaces.clone(),
-            teams: get_cached_team_options(cx),
-        };
-
-        self.editing_connection_id = None;
-
-        open_popup_window(
-            PopupWindowOptions::new(if config.editing_connection.is_some() {
-                t!("Serial.edit").to_string()
-            } else {
-                t!("Serial.new").to_string()
-            })
-            .size(700.0, 600.0),
-            move |window, cx| cx.new(|cx| SerialFormWindow::new(config, window, cx)),
-            cx,
-        );
-    }
-
     pub(crate) fn show_port_forwarding_form(
         &mut self,
         _window: &mut Window,
@@ -2216,11 +2116,7 @@ impl HomePage {
                                 this.bg(cx.theme().sidebar)
                                     .hover(|style| style.bg(cx.theme().sidebar_accent))
                             })
-                            .on_click(cx.listener(move |this: &mut HomePage, _, window, cx| {
-                                if filter_type_clone == ConnectionType::ChatDB {
-                                    this.add_ai_chat_tab(window, cx);
-                                    return;
-                                }
+                            .on_click(cx.listener(move |this: &mut HomePage, _, _window, cx| {
                                 this.selected_filter = filter_type_clone;
                                 cx.notify();
                             }))
@@ -2306,30 +2202,6 @@ impl HomePage {
 
         // 根据连接类型解析对应参数进行匹配
         match conn.connection_type {
-            ConnectionType::Database => {
-                if let Ok(params) = conn.to_db_connection() {
-                    if params.host.to_lowercase().contains(query) {
-                        return true;
-                    }
-                    if params.port.to_string().contains(query) {
-                        return true;
-                    }
-                    if params.username.to_lowercase().contains(query) {
-                        return true;
-                    }
-                    if params
-                        .database
-                        .as_ref()
-                        .map_or(false, |db| db.to_lowercase().contains(query))
-                    {
-                        return true;
-                    }
-                    let conn_str = format!("{}@{}:{}", params.username, params.host, params.port);
-                    if conn_str.to_lowercase().contains(query) {
-                        return true;
-                    }
-                }
-            }
             ConnectionType::SshSftp => {
                 if let Ok(params) = conn.to_ssh_params() {
                     if params.host.to_lowercase().contains(query) {
@@ -2343,50 +2215,6 @@ impl HomePage {
                     }
                     let conn_str = format!("{}@{}:{}", params.username, params.host, params.port);
                     if conn_str.to_lowercase().contains(query) {
-                        return true;
-                    }
-                }
-            }
-            ConnectionType::Redis => {
-                if let Ok(params) = conn.to_redis_params() {
-                    if params.host.to_lowercase().contains(query) {
-                        return true;
-                    }
-                    if params.port.to_string().contains(query) {
-                        return true;
-                    }
-                    if params
-                        .username
-                        .as_ref()
-                        .map_or(false, |u| u.to_lowercase().contains(query))
-                    {
-                        return true;
-                    }
-                }
-            }
-            ConnectionType::MongoDB => {
-                if let Ok(params) = conn.to_mongodb_params() {
-                    if params.host.to_lowercase().contains(query) {
-                        return true;
-                    }
-                    if params.port.map_or(false, |p| p.to_string().contains(query)) {
-                        return true;
-                    }
-                    if params
-                        .username
-                        .as_ref()
-                        .map_or(false, |u| u.to_lowercase().contains(query))
-                    {
-                        return true;
-                    }
-                    if params
-                        .database
-                        .as_ref()
-                        .map_or(false, |db| db.to_lowercase().contains(query))
-                    {
-                        return true;
-                    }
-                    if params.connection_string.to_lowercase().contains(query) {
                         return true;
                     }
                 }
@@ -2761,21 +2589,6 @@ impl HomePage {
                                                 this.editing_connection_id = Some(conn_id);
                                                 this.show_ssh_form(window, cx);
                                             }
-                                            ConnectionType::Database => {
-                                                // Database support removed
-                                            }
-                                            ConnectionType::Redis => {
-                                                this.editing_connection_id = Some(conn_id);
-                                                this.show_redis_form(window, cx);
-                                            }
-                                            ConnectionType::MongoDB => {
-                                                this.editing_connection_id = Some(conn_id);
-                                                this.show_mongodb_form(window, cx);
-                                            }
-                                            ConnectionType::Serial => {
-                                                this.editing_connection_id = Some(conn_id);
-                                                this.show_serial_form(window, cx);
-                                            }
                                             ConnectionType::PortForwarding => {
                                                 this.editing_connection_id = Some(conn_id);
                                                 this.show_port_forwarding_form(window, cx);
@@ -2822,32 +2635,10 @@ impl HomePage {
                             .items_center()
                             .justify_center()
                             .child(match conn.connection_type {
-                                ConnectionType::Database => {
-                                    let icon = conn
-                                        .to_db_connection()
-                                        .map(|c| {
-                                            external_driver_icon_for_config(&c, px(40.0))
-                                                .unwrap_or_else(|| c.database_type.as_icon())
-                                        })
-                                        .unwrap_or_else(|_| IconName::Database.color());
-                                    icon.with_size(px(40.0))
-                                }
                                 ConnectionType::SshSftp => IconName::TerminalColor
                                     .color()
                                     .with_size(px(40.0))
                                     .text_color(gpui::rgb(0x8b5cf6)),
-                                ConnectionType::Redis => IconName::Redis
-                                    .color()
-                                    .with_size(px(40.0))
-                                    .text_color(gpui::white()),
-                                ConnectionType::MongoDB => IconName::MongoDB
-                                    .color()
-                                    .with_size(px(40.0))
-                                    .text_color(gpui::white()),
-                                ConnectionType::Serial => IconName::SerialPort
-                                    .color()
-                                    .with_size(px(40.0))
-                                    .text_color(gpui::white()),
                                 ConnectionType::PortForwarding => IconName::Network
                                     .color()
                                     .with_size(px(40.0))
@@ -2906,132 +2697,6 @@ impl HomePage {
                                     let conn_info = format!(
                                         "{}@{}:{}",
                                         params.username, params.host, params.port
-                                    );
-                                    let tooltip_text: SharedString = conn_info.clone().into();
-                                    this.child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "conn-info-{}",
-                                                conn.id.unwrap_or(0)
-                                            )))
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .max_w_full()
-                                            .tooltip(move |window, cx| {
-                                                Tooltip::new(tooltip_text.clone()).build(window, cx)
-                                            })
-                                            .child(conn_info),
-                                    )
-                                } else {
-                                    this
-                                }
-                            })
-                            .when(conn.connection_type == ConnectionType::Redis, |this| {
-                                if let Ok(params) = conn.to_redis_params() {
-                                    let conn_info = match params.mode {
-                                        RedisMode::Standalone => {
-                                            format!(
-                                                "{}:{}/{}",
-                                                params.host, params.port, params.db_index
-                                            )
-                                        }
-                                        RedisMode::Sentinel => {
-                                            let (master_name, sentinel_count) = params
-                                                .sentinel
-                                                .as_ref()
-                                                .map(|sentinel| {
-                                                    (
-                                                        sentinel.master_name.as_str(),
-                                                        sentinel.sentinels.len(),
-                                                    )
-                                                })
-                                                .unwrap_or(("sentinel", 0));
-                                            format!("{} (sentinel:{})", master_name, sentinel_count)
-                                        }
-                                        RedisMode::Cluster => {
-                                            let node_count = params
-                                                .cluster
-                                                .as_ref()
-                                                .map(|cluster| cluster.nodes.len())
-                                                .unwrap_or(0);
-                                            format!("cluster ({} nodes)", node_count)
-                                        }
-                                    };
-                                    let tooltip_text: SharedString = conn_info.clone().into();
-                                    this.child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "conn-info-{}",
-                                                conn.id.unwrap_or(0)
-                                            )))
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .max_w_full()
-                                            .tooltip(move |window, cx| {
-                                                Tooltip::new(tooltip_text.clone()).build(window, cx)
-                                            })
-                                            .child(conn_info),
-                                    )
-                                } else {
-                                    this
-                                }
-                            })
-                            .when(conn.connection_type == ConnectionType::MongoDB, |this| {
-                                if let Ok(params) = conn.to_mongodb_params() {
-                                    let conn_info = if !params.host.is_empty() {
-                                        if let Some(port) = params.port {
-                                            format!("{}:{}", params.host, port)
-                                        } else {
-                                            params.host
-                                        }
-                                    } else if !params.connection_string.is_empty() {
-                                        params.connection_string
-                                    } else {
-                                        "MongoDB".to_string()
-                                    };
-                                    let tooltip_text: SharedString = conn_info.clone().into();
-                                    this.child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "conn-info-{}",
-                                                conn.id.unwrap_or(0)
-                                            )))
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .max_w_full()
-                                            .tooltip(move |window, cx| {
-                                                Tooltip::new(tooltip_text.clone()).build(window, cx)
-                                            })
-                                            .child(conn_info),
-                                    )
-                                } else {
-                                    this
-                                }
-                            })
-                            .when(conn.connection_type == ConnectionType::Serial, |this| {
-                                if let Ok(params) = conn.to_serial_params() {
-                                    // 格式：/dev/ttyUSB0 (115200, 8N1)
-                                    let parity_char = match params.parity {
-                                        one_core::storage::models::SerialParity::None => 'N',
-                                        one_core::storage::models::SerialParity::Odd => 'O',
-                                        one_core::storage::models::SerialParity::Even => 'E',
-                                    };
-                                    let conn_info = format!(
-                                        "{} ({}, {}{}{})",
-                                        params.port_name,
-                                        params.baud_rate,
-                                        params.data_bits,
-                                        parity_char,
-                                        params.stop_bits,
                                     );
                                     let tooltip_text: SharedString = conn_info.clone().into();
                                     this.child(

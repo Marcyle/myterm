@@ -1,117 +1,14 @@
 use crate::home_tab::HomePage;
-use crate::setting_tab::{AppSettings, DatabaseOpenMode, SettingsPanel};
+use crate::setting_tab::SettingsPanel;
 use gpui::AppContext;
 use gpui::{App, Context, Window};
-use gpui_component::WindowExt;
-use mongodb_view::MongoTabView;
-use one_core::storage::{ConnectionType, StoredConnection, Workspace};
+use one_core::storage::{StoredConnection, Workspace};
 use one_core::tab_container::TabItem;
-use redis_view::RedisTabView;
 use sftp_view::{SftpView, SftpViewEvent};
 use terminal::LocalConfig;
 use terminal_view::{
     TerminalConnectionKind, TerminalView, current_settings as current_terminal_settings,
 };
-
-fn redis_tab_open_context(
-    open_mode: DatabaseOpenMode,
-    conn: &StoredConnection,
-    workspace: Option<Workspace>,
-    all_connections: &[StoredConnection],
-) -> (String, Vec<StoredConnection>, Option<Workspace>) {
-    let workspace_id = workspace.as_ref().and_then(|ws| ws.id);
-
-    match (open_mode, workspace_id) {
-        (DatabaseOpenMode::Workspace, Some(id)) => {
-            let mut connections: Vec<StoredConnection> = all_connections
-                .iter()
-                .filter(|connection| connection.connection_type == ConnectionType::Redis)
-                .filter(|connection| connection.workspace_id == Some(id))
-                .cloned()
-                .collect();
-            if connections.is_empty() {
-                connections.push(conn.clone());
-            }
-            (format!("workspace-redis-tab-{id}"), connections, workspace)
-        }
-        _ => {
-            let conn_id = conn.id.unwrap_or(0);
-            (format!("redis-{conn_id}"), vec![conn.clone()], None)
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use one_core::storage::{RedisMode, RedisParams};
-
-    fn redis_connection(id: i64, name: &str, workspace_id: Option<i64>) -> StoredConnection {
-        let params = RedisParams {
-            host: "localhost".to_string(),
-            port: 6379,
-            password: None,
-            username: None,
-            db_index: 0,
-            mode: RedisMode::Standalone,
-            use_tls: false,
-            connect_timeout: None,
-            sentinel: None,
-            cluster: None,
-        };
-        let mut connection = StoredConnection::new_redis(name.to_string(), params, workspace_id);
-        connection.id = Some(id);
-        connection
-    }
-
-    fn workspace(id: i64, name: &str) -> Workspace {
-        let mut workspace = Workspace::new(name.to_string());
-        workspace.id = Some(id);
-        workspace
-    }
-
-    #[test]
-    fn redis_single_mode_opens_connection_tab_without_workspace() {
-        let connection = redis_connection(42, "redis-prod", Some(7));
-        let all_connections = vec![connection.clone()];
-
-        let (tab_id, connections, workspace_for_tab) = redis_tab_open_context(
-            DatabaseOpenMode::Single,
-            &connection,
-            Some(workspace(7, "backend")),
-            &all_connections,
-        );
-
-        assert_eq!("redis-42", tab_id);
-        assert_eq!(
-            vec![Some(42)],
-            connections.iter().map(|c| c.id).collect::<Vec<_>>()
-        );
-        assert!(workspace_for_tab.is_none());
-    }
-
-    #[test]
-    fn redis_workspace_mode_groups_workspace_connections() {
-        let active = redis_connection(1, "redis-a", Some(7));
-        let peer = redis_connection(2, "redis-b", Some(7));
-        let other = redis_connection(3, "redis-c", Some(8));
-        let all_connections = vec![active.clone(), peer, other];
-
-        let (tab_id, connections, workspace_for_tab) = redis_tab_open_context(
-            DatabaseOpenMode::Workspace,
-            &active,
-            Some(workspace(7, "backend")),
-            &all_connections,
-        );
-
-        assert_eq!("workspace-redis-tab-7", tab_id);
-        assert_eq!(
-            vec![Some(1), Some(2)],
-            connections.iter().map(|c| c.id).collect::<Vec<_>>()
-        );
-        assert_eq!("backend", workspace_for_tab.unwrap().name);
-    }
-}
 
 impl HomePage {
     fn terminal_sync_path_enabled(cx: &App) -> bool {
@@ -154,41 +51,6 @@ impl HomePage {
         });
         self.tab_container.update(cx, |tc, cx| {
             let tab = TabItem::new(tab_id, "ssh", terminal_view);
-            tc.add_and_activate_tab_with_focus(tab, window, cx);
-        });
-    }
-
-    pub(crate) fn open_serial_terminal(
-        &mut self,
-        conn: StoredConnection,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let conn_id = conn.id.unwrap_or(0);
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        let tab_id = format!("serial-terminal-{}-{}", conn_id, timestamp);
-
-        let prefix = format!("serial-terminal-{}-", conn_id);
-        let existing_count = self
-            .tab_container
-            .read(cx)
-            .tabs()
-            .iter()
-            .filter(|t| t.id().starts_with(&prefix))
-            .count();
-        let tab_index = if existing_count > 0 {
-            Some(existing_count + 1)
-        } else {
-            None
-        };
-
-        let terminal_view =
-            cx.new(|cx| TerminalView::new_serial_with_index(conn, tab_index, window, cx));
-        self.tab_container.update(cx, |tc, cx| {
-            let tab = TabItem::new(tab_id, "serial", terminal_view);
             tc.add_and_activate_tab_with_focus(tab, window, cx);
         });
     }
@@ -317,108 +179,6 @@ impl HomePage {
         });
     }
 
-    pub(crate) fn open_redis_tab(
-        &mut self,
-        conn: StoredConnection,
-        workspace: Option<Workspace>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let open_mode = if cx.has_global::<AppSettings>() {
-            AppSettings::global(cx).database_open_mode
-        } else {
-            DatabaseOpenMode::default()
-        };
-        let active_conn_id = conn.id;
-
-        let (tab_id, connections, workspace_for_tab) =
-            redis_tab_open_context(open_mode, &conn, workspace, &self.connections);
-
-        let tab_container = self.tab_container.clone();
-        window.defer(cx, move |window, cx| {
-            let tab_id_for_tab = tab_id.clone();
-            tab_container.update(cx, |tc, cx| {
-                tc.activate_or_add_tab_lazy(
-                    tab_id,
-                    move |window, cx| {
-                        let redis_view = cx.new(|cx| {
-                            RedisTabView::new_with_active_conn(
-                                workspace_for_tab,
-                                connections,
-                                active_conn_id,
-                                window,
-                                cx,
-                            )
-                        });
-                        TabItem::new(tab_id_for_tab, "redis", redis_view)
-                    },
-                    window,
-                    cx,
-                );
-            });
-        });
-    }
-
-    pub(crate) fn open_mongodb_tab(
-        &mut self,
-        conn: StoredConnection,
-        workspace: Option<Workspace>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let open_mode = if cx.has_global::<AppSettings>() {
-            AppSettings::global(cx).database_open_mode
-        } else {
-            DatabaseOpenMode::default()
-        };
-
-        let workspace_id = workspace.as_ref().and_then(|ws| ws.id);
-        let active_conn_id = conn.id;
-
-        let (tab_id, connections, workspace_for_tab) = match open_mode {
-            DatabaseOpenMode::Workspace if workspace_id.is_some() => {
-                let connections = self
-                    .connections
-                    .iter()
-                    .filter(|connection| connection.workspace_id == workspace_id)
-                    .filter(|connection| connection.connection_type == ConnectionType::MongoDB)
-                    .cloned()
-                    .collect();
-                let tab_id = format!("workspace-mongodb-tab-{}", workspace_id.unwrap_or(0));
-                (tab_id, connections, workspace)
-            }
-            _ => {
-                let conn_id = conn.id.unwrap_or(0);
-                let tab_id = format!("mongodb-{}", conn_id);
-                (tab_id, vec![conn.clone()], None)
-            }
-        };
-
-        let tab_container = self.tab_container.clone();
-        window.defer(cx, move |window, cx| {
-            let tab_id_for_tab = tab_id.clone();
-            tab_container.update(cx, |tc, cx| {
-                tc.activate_or_add_tab_lazy(
-                    tab_id,
-                    move |window, cx| {
-                        let mongo_view = cx.new(|cx| {
-                            MongoTabView::new_with_active_conn(
-                                workspace_for_tab,
-                                connections,
-                                active_conn_id,
-                                window,
-                                cx,
-                            )
-                        });
-                        TabItem::new(tab_id_for_tab, "mongodb", mongo_view)
-                    },
-                    window,
-                    cx,
-                );
-            });
-        });
-    }
-
     pub(crate) fn add_settings_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let tab_container = self.tab_container.clone();
         window.defer(cx, move |window, cx| {
@@ -492,24 +252,6 @@ impl HomePage {
         });
     }
 
-    pub(crate) fn add_ai_chat_tab(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        // AI chat support removed
-    }
-
-    pub(crate) fn add_item_to_tab(
-        &mut self,
-        _conn: &StoredConnection,
-        _workspace: Option<Workspace>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        // Database support removed - show notification
-        window.push_notification(
-            gpui_component::notification::Notification::error("数据库连接已禁用".to_string()),
-            cx,
-        );
-    }
-
     /// 复制当前活动标签并打开
     pub(crate) fn duplicate_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let tc = self.tab_container.read(cx);
@@ -546,19 +288,6 @@ impl HomePage {
                                 .cloned()
                             {
                                 self.open_ssh_terminal(conn, None, window, cx);
-                            }
-                        }
-                    }
-                    TerminalConnectionKind::Serial => {
-                        let conn_id = terminal_view.read(cx).connection_id(cx);
-                        if let Some(conn_id) = conn_id {
-                            if let Some(conn) = self
-                                .connections
-                                .iter()
-                                .find(|c| c.id == Some(conn_id))
-                                .cloned()
-                            {
-                                self.open_serial_terminal(conn, window, cx);
                             }
                         }
                     }
