@@ -7,12 +7,10 @@
 
 pub mod file_manager_panel;
 mod quick_command_panel;
-mod server_monitor_panel;
 mod settings_panel;
 
 pub use file_manager_panel::{FileManagerPanel, FileManagerPanelEvent};
 pub use quick_command_panel::QuickCommandPanel;
-pub use server_monitor_panel::{ServerMonitorPanel, ServerMonitorPanelEvent};
 pub use settings_panel::SettingsPanel;
 
 use crate::{
@@ -41,8 +39,6 @@ pub enum SidebarPanel {
     QuickCommand,
     /// 文件管理器面板（仅 SSH 终端）
     FileManager,
-    /// 服务器监控面板（仅 SSH 终端）
-    ServerMonitor,
 }
 
 impl SidebarPanel {
@@ -52,7 +48,6 @@ impl SidebarPanel {
             SidebarPanel::Settings => IconName::Settings.mono(),
             SidebarPanel::QuickCommand => IconName::SquareTerminal.mono(),
             SidebarPanel::FileManager => IconName::FolderOpen.mono(),
-            SidebarPanel::ServerMonitor => IconName::Monitor.color(),
         }
     }
 
@@ -62,7 +57,6 @@ impl SidebarPanel {
             SidebarPanel::Settings => "Settings",
             SidebarPanel::QuickCommand => "Quick Commands",
             SidebarPanel::FileManager => "File Manager",
-            SidebarPanel::ServerMonitor => "Server Monitor",
         }
     }
 }
@@ -114,14 +108,14 @@ pub enum TerminalSidebarEvent {
 pub struct TerminalSidebar {
     /// 当前激活的面板
     active_panel: Option<SidebarPanel>,
+    /// 是否折叠（完全隐藏侧边栏）
+    collapsed: bool,
     /// 设置面板
     settings_panel: Entity<SettingsPanel>,
     /// 快捷命令面板
     quick_command_panel: Entity<QuickCommandPanel>,
     /// 文件管理器面板（仅 SSH 终端时创建）
     file_manager_panel: Option<Entity<FileManagerPanel>>,
-    /// 服务器监控面板（仅 SSH 终端时创建）
-    server_monitor_panel: Option<Entity<ServerMonitorPanel>>,
     /// 路径与终端同步开关（默认开启）
     sync_path_enabled: bool,
     /// 焦点句柄
@@ -136,7 +130,7 @@ impl TerminalSidebar {
     pub fn new(
         connection_id: Option<i64>,
         stored_connection: Option<StoredConnection>,
-        ssh_config: Option<SshTerminalConfig>,
+        _ssh_config: Option<SshTerminalConfig>,
         ssh_session_manager: Option<Arc<SshSessionManager>>,
         initial_theme: &TerminalTheme,
         initial_font_size: Pixels,
@@ -147,7 +141,6 @@ impl TerminalSidebar {
     ) -> Self {
         let colors = initial_theme.colors();
         let has_file_manager = stored_connection.is_some();
-        let auto_show_server_monitor = ServerMonitorPanel::load_monitor_enabled(connection_id);
         let settings_panel = cx.new(|cx| {
             SettingsPanel::new(
                 initial_theme,
@@ -169,13 +162,6 @@ impl TerminalSidebar {
         let file_manager_panel = stored_connection
             .zip(ssh_session_manager.clone())
             .map(|(conn, manager)| cx.new(|cx| FileManagerPanel::new(conn, manager, window, cx)));
-        let server_monitor_panel = ssh_config
-            .zip(ssh_session_manager)
-            .map(|(_config, manager)| {
-                cx.new(|cx| {
-                    ServerMonitorPanel::new(connection_id, manager, auto_show_server_monitor, cx)
-                })
-            });
 
         // 订阅设置面板事件
         let set_sub = cx.subscribe(
@@ -271,24 +257,12 @@ impl TerminalSidebar {
             subs.push(fm_sub);
         }
 
-        if let Some(ref monitor_panel) = server_monitor_panel {
-            let monitor_sub = cx.subscribe(
-                monitor_panel,
-                |this, _, event: &ServerMonitorPanelEvent, cx| match event {
-                    ServerMonitorPanelEvent::Close => {
-                        this.set_active_panel(None, cx);
-                    }
-                },
-            );
-            subs.push(monitor_sub);
-        }
-
         Self {
             active_panel: None,
+            collapsed: true,
             settings_panel,
             quick_command_panel,
             file_manager_panel,
-            server_monitor_panel,
             sync_path_enabled,
             focus_handle: cx.focus_handle(),
             colors,
@@ -324,20 +298,30 @@ impl TerminalSidebar {
                     });
                 }
             }
-            if panel == SidebarPanel::ServerMonitor {
-                if let Some(ref monitor_panel) = self.server_monitor_panel {
-                    monitor_panel.update(cx, |panel, cx| {
-                        panel.restore_monitoring(cx);
-                    });
-                }
-            }
             self.set_active_panel(Some(panel), cx);
         }
     }
 
     /// 是否显示侧边栏
     pub fn is_visible(&self) -> bool {
-        self.active_panel.is_some()
+        !self.collapsed && self.active_panel.is_some()
+    }
+
+    /// 是否折叠
+    pub fn is_collapsed(&self) -> bool {
+        self.collapsed
+    }
+
+    /// 切换折叠状态
+    pub fn toggle_collapsed(&mut self, cx: &mut Context<Self>) {
+        self.collapsed = !self.collapsed;
+        cx.notify();
+    }
+
+    /// 展开侧边栏
+    pub fn expand(&mut self, cx: &mut Context<Self>) {
+        self.collapsed = false;
+        cx.notify();
     }
 
     /// 更新设置面板的当前主题
@@ -475,14 +459,6 @@ impl TerminalSidebar {
         }
     }
 
-    pub fn reconnect_server_monitor(&mut self, cx: &mut Context<Self>) {
-        if let Some(ref monitor_panel) = self.server_monitor_panel {
-            monitor_panel.update(cx, |panel, cx| {
-                panel.reconnect(cx);
-            });
-        }
-    }
-
     /// 渲染工具栏按钮
     fn render_toolbar_button(
         &self,
@@ -522,7 +498,6 @@ impl TerminalSidebar {
         let border_color = self.colors.border;
         let muted_bg = self.colors.background;
         let has_file_manager = self.file_manager_panel.is_some();
-        let has_server_monitor = self.server_monitor_panel.is_some();
 
         v_flex()
             .flex_shrink_0()
@@ -534,13 +509,31 @@ impl TerminalSidebar {
             .items_center()
             .py_2()
             .gap_1()
+            // 折叠按钮放在最上面
+            .child(
+                div()
+                    .id("sidebar-collapse-btn")
+                    .w(px(36.0))
+                    .h(px(36.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .hover(|s| s.bg(self.colors.muted))
+                    .on_click(cx.listener(|this, _event, _window, cx| {
+                        this.toggle_collapsed(cx);
+                    }))
+                    .child(
+                        Icon::new(IconName::PanelLeftClose)
+                            .with_size(Size::Medium)
+                            .text_color(gpui::white()),
+                    ),
+            )
             .child(self.render_toolbar_button(SidebarPanel::Settings, window, cx))
             .child(self.render_toolbar_button(SidebarPanel::QuickCommand, window, cx))
             .when(has_file_manager, |this| {
                 this.child(self.render_toolbar_button(SidebarPanel::FileManager, window, cx))
-            })
-            .when(has_server_monitor, |this| {
-                this.child(self.render_toolbar_button(SidebarPanel::ServerMonitor, window, cx))
             })
             .into_any_element()
     }
@@ -562,13 +555,6 @@ impl TerminalSidebar {
                     div().into_any_element()
                 }
             }
-            SidebarPanel::ServerMonitor => {
-                if let Some(ref monitor_panel) = self.server_monitor_panel {
-                    monitor_panel.clone().into_any_element()
-                } else {
-                    div().into_any_element()
-                }
-            }
         }
     }
 }
@@ -586,11 +572,15 @@ impl Render for TerminalSidebar {
         let border_color = cx.theme().border;
         let bg_color = cx.theme().background;
 
-        div()
-            .h_full()
-            .flex_shrink_0()
-            .when_some(self.active_panel, |this, panel| {
-                this.w_full().child(
+        if self.collapsed {
+            // 折叠状态下不渲染任何内容（完全隐藏）
+            div().into_any_element()
+        } else if let Some(panel) = self.active_panel {
+            div()
+                .h_full()
+                .flex_shrink_0()
+                .w_full()
+                .child(
                     v_flex()
                         .size_full()
                         .border_l_1()
@@ -598,9 +588,13 @@ impl Render for TerminalSidebar {
                         .bg(bg_color)
                         .child(self.render_panel_content(panel, window, cx)),
                 )
-            })
-            .when(!self.is_visible(), |this| {
-                this.child(self.render_toolbar(window, cx))
-            })
+                .into_any_element()
+        } else {
+            div()
+                .h_full()
+                .flex_shrink_0()
+                .child(self.render_toolbar(window, cx))
+                .into_any_element()
+        }
     }
 }

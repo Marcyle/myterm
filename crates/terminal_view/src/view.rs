@@ -10,7 +10,7 @@ use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
-use gpui_component::{BlinkCursor, Icon, IconName, Sizable, WindowExt, h_flex, kbd::Kbd, v_flex};
+use gpui_component::{BlinkCursor, Icon, IconName, Sizable, Size, WindowExt, h_flex, kbd::Kbd, v_flex};
 use one_core::gpui_tokio::Tokio;
 use one_core::keybindings::{
     action_id, keystroke_matches_shortcuts, rebind_keybindings, shortcuts_for,
@@ -2327,7 +2327,6 @@ impl TerminalView {
                         let _ = this.update(cx, |this, cx| {
                             this.sidebar.update(cx, |sidebar, cx| {
                                 sidebar.reconnect_file_manager(working_dir.clone(), cx);
-                                sidebar.reconnect_server_monitor(cx);
                             });
                         });
                         break;
@@ -3969,6 +3968,7 @@ impl Render for TerminalView {
         let has_selection = self.terminal.read(cx).term().lock().selection.is_some();
         let selection_text = self.terminal.read(cx).selection_text();
         let sidebar_visible = self.sidebar.read(cx).is_visible();
+        let sidebar_collapsed = self.sidebar.read(cx).is_collapsed();
         let sidebar_panel_size = self.sidebar_panel_size;
         let view = cx.entity().clone();
         let terminal_mode = self.terminal.read(cx).mode();
@@ -4179,7 +4179,49 @@ impl Render for TerminalView {
                         .child(self.sidebar.clone()),
                 )
             })
-            .when(!sidebar_visible, |this| this.child(self.sidebar.clone()))
+            .when(!sidebar_visible && !sidebar_collapsed, |this| {
+                this.child(self.sidebar.clone())
+            })
+            // 折叠时显示一个半透明的展开按钮
+            .when(sidebar_collapsed, |this| {
+                let sidebar = self.sidebar.clone();
+                this.child(
+                    div()
+                        .id("sidebar-expand-overlay")
+                        .absolute()
+                        .right(px(8.0))
+                        .top(px(8.0))
+                        .w(px(36.0))
+                        .h(px(36.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_md()
+                        .bg(Hsla {
+                            h: 0.,
+                            s: 0.,
+                            l: 0.2,
+                            a: 0.6,
+                        })
+                        .cursor_pointer()
+                        .hover(|s| s.bg(Hsla {
+                            h: 0.,
+                            s: 0.,
+                            l: 0.3,
+                            a: 0.7,
+                        }))
+                        .on_click(move |_, _window, cx| {
+                            sidebar.update(cx, |sidebar, cx| {
+                                sidebar.expand(cx);
+                            });
+                        })
+                        .child(
+                            Icon::new(IconName::PanelLeftOpen)
+                                .with_size(Size::Medium)
+                                .text_color(gpui::white()),
+                        ),
+                )
+            })
             .child(ResizeEventHandler { view })
     }
 }
