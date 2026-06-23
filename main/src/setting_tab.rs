@@ -30,7 +30,7 @@ pub const DEFAULT_SYSTEM_HOTKEY_MACOS: &str = "cmd-alt-m";
 pub const DEFAULT_SYSTEM_HOTKEY_OTHER: &str = "ctrl-space";
 
 pub use one_core::settings::{
-    AppSettings, DatabaseOpenMode, GlobalProxySettings,
+    AppSettings, GlobalProxySettings,
     LargeTextCellEditorOpenMode, ProxyType,
 };
 use one_core::tab_container::{TabContent, TabContentEvent};
@@ -256,156 +256,6 @@ impl SettingsPanel {
                             .description(t!("Settings.General.Font.font_size_desc").to_string()),
                         ),
                     SettingGroup::new()
-                        .title(t!("Settings.General.Database.group_title"))
-                        .items(vec![
-                            SettingItem::new(
-                                t!("Settings.General.Database.open_mode"),
-                                SettingField::dropdown(
-                                    vec![
-                                        (
-                                            "single".into(),
-                                            t!("Settings.General.Database.open_mode_single").into(),
-                                        ),
-                                        (
-                                            "workspace".into(),
-                                            t!("Settings.General.Database.open_mode_workspace")
-                                                .into(),
-                                        ),
-                                    ],
-                                    |cx: &App| {
-                                        SharedString::from(
-                                            AppSettings::global(cx).database_open_mode.as_str(),
-                                        )
-                                    },
-                                    |val: SharedString, cx: &mut App| {
-                                        AppSettings::update_and_save(cx, |settings| {
-                                            settings.database_open_mode =
-                                                DatabaseOpenMode::from_str(&val);
-                                        });
-                                    },
-                                )
-                                .default_value(SharedString::from(
-                                    default_settings.database_open_mode.as_str(),
-                                )),
-                            )
-                            .description(
-                                t!("Settings.General.Database.open_mode_desc").to_string(),
-                            ),
-                            SettingItem::new(
-                                t!("Settings.General.Database.large_text_editor_open_mode"),
-                                SettingField::dropdown(
-                                    vec![
-                                        (
-                                            "sidebar_preview".into(),
-                                            t!(
-                                                "Settings.General.Database.large_text_editor_open_mode_sidebar"
-                                            )
-                                            .into(),
-                                        ),
-                                        (
-                                            "dialog".into(),
-                                            t!(
-                                                "Settings.General.Database.large_text_editor_open_mode_dialog"
-                                            )
-                                            .into(),
-                                        ),
-                                    ],
-                                    |cx: &App| {
-                                        SharedString::from(
-                                            AppSettings::global(cx)
-                                                .large_text_cell_editor_open_mode
-                                                .as_str(),
-                                        )
-                                    },
-                                    |val: SharedString, cx: &mut App| {
-                                        let mode =
-                                            LargeTextCellEditorOpenMode::from_str(val.as_ref());
-                                        AppSettings::update_and_save(cx, |settings| {
-                                            settings.large_text_cell_editor_open_mode = mode;
-                                        });
-                                    },
-                                )
-                                .default_value(SharedString::from(
-                                    default_settings
-                                        .large_text_cell_editor_open_mode
-                                        .as_str(),
-                                )),
-                            )
-                            .description(
-                                t!("Settings.General.Database.large_text_editor_open_mode_desc")
-                                    .to_string(),
-                            ),
-                            SettingItem::new(
-                                t!("Settings.General.Database.auto_save"),
-                                SettingField::switch(
-                                    |cx: &App| AppSettings::global(cx).enable_sql_auto_save,
-                                    |val: bool, cx: &mut App| {
-                                        let interval =
-                                            AppSettings::global(cx).sql_auto_save_interval;
-                                        AppSettings::update_and_save(cx, |settings| {
-                                            settings.enable_sql_auto_save = val;
-                                        });
-                                        AppSettings::update_auto_save_config(
-                                            val,
-                                            interval,
-                                            cx,
-                                        );
-                                    },
-                                )
-                                .default_value(default_settings.enable_sql_auto_save),
-                            )
-                            .description(
-                                t!("Settings.General.Database.auto_save_desc").to_string(),
-                            ),
-                            SettingItem::new(
-                                t!("Settings.General.Database.auto_save_interval"),
-                                SettingField::number_input(
-                                    NumberFieldOptions {
-                                        min: 1.0,
-                                        max: 60.0,
-                                        step: 1.0,
-                                    },
-                                    |cx: &App| AppSettings::global(cx).sql_auto_save_interval,
-                                    |val: f64, cx: &mut App| {
-                                        let enabled = AppSettings::global(cx).enable_sql_auto_save;
-                                        AppSettings::update_and_save(cx, |settings| {
-                                            settings.sql_auto_save_interval = val;
-                                        });
-                                        AppSettings::update_auto_save_config(
-                                            enabled,
-                                            val,
-                                            cx,
-                                        );
-                                    },
-                                )
-                                .default_value(default_settings.sql_auto_save_interval),
-                            )
-                            .description(
-                                t!("Settings.General.Database.auto_save_interval_desc").to_string(),
-                            ),
-                            SettingItem::new(
-                                t!("Settings.General.Database.table_row_height"),
-                                SettingField::number_input(
-                                    NumberFieldOptions {
-                                        min: 24.0,
-                                        max: 100.0,
-                                        step: 2.0,
-                                    },
-                                    |cx: &App| AppSettings::global(cx).table_row_height as f64,
-                                    |val: f64, cx: &mut App| {
-                                        let height = val as u32;
-                                        AppSettings::update_and_save(cx, |settings| {
-                                            settings.table_row_height = height;
-                                        });
-                                    },
-                                )
-                                .default_value(default_settings.table_row_height as f64),
-                            )
-                            .description(
-                                t!("Settings.General.Database.table_row_height_desc").to_string(),
-                            ),
-                        ]),
-                    SettingGroup::new()
                         .title(t!("Settings.General.Log.group_title"))
                         .item(
                             SettingItem::new(
@@ -428,26 +278,150 @@ impl SettingsPanel {
                             .description(t!("Settings.General.Log.file_path_desc").to_string()),
                         ),
                     SettingGroup::new()
-                        .title(t!("Settings.General.Update.group_title"))
+                        .title(t!("Settings.General.Terminal.group_title"))
                         .items(vec![
                             SettingItem::new(
-                                t!("Settings.General.Update.auto_update"),
-                                SettingField::switch(
-                                    |cx: &App| AppSettings::global(cx).auto_update,
-                                    |val: bool, cx: &mut App| {
+                                t!("Settings.General.Terminal.font_size"),
+                                SettingField::number_input(
+                                    NumberFieldOptions {
+                                        min: 10.0,
+                                        max: 72.0,
+                                        step: 1.0,
+                                    },
+                                    |cx: &App| AppSettings::global(cx).terminal_font_size,
+                                    |val: f64, cx: &mut App| {
                                         AppSettings::update_and_save(cx, |settings| {
-                                            settings.auto_update = val;
+                                            settings.terminal_font_size = val;
                                         });
                                     },
                                 )
-                                .default_value(default_settings.auto_update),
+                                .default_value(default_settings.terminal_font_size),
                             )
                             .description(
-                                t!("Settings.General.Update.auto_update_desc").to_string(),
+                                t!("Settings.General.Terminal.font_size_desc").to_string(),
                             ),
-                            SettingItem::render(move |_options, _window, cx| {
-                                render_manual_update_check_item(cx)
-                            }),
+                            SettingItem::new(
+                                t!("Settings.General.Terminal.cursor_blink"),
+                                SettingField::switch(
+                                    |cx: &App| AppSettings::global(cx).terminal_cursor_blink,
+                                    |val: bool, cx: &mut App| {
+                                        AppSettings::update_and_save(cx, |settings| {
+                                            settings.terminal_cursor_blink = val;
+                                        });
+                                    },
+                                )
+                                .default_value(default_settings.terminal_cursor_blink),
+                            )
+                            .description(
+                                t!("Settings.General.Terminal.cursor_blink_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Terminal.auto_copy"),
+                                SettingField::switch(
+                                    |cx: &App| AppSettings::global(cx).terminal_auto_copy,
+                                    |val: bool, cx: &mut App| {
+                                        AppSettings::update_and_save(cx, |settings| {
+                                            settings.terminal_auto_copy = val;
+                                        });
+                                    },
+                                )
+                                .default_value(default_settings.terminal_auto_copy),
+                            )
+                            .description(
+                                t!("Settings.General.Terminal.auto_copy_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Terminal.autocomplete"),
+                                SettingField::switch(
+                                    |cx: &App| {
+                                        AppSettings::global(cx).terminal_enable_autocomplete
+                                    },
+                                    |val: bool, cx: &mut App| {
+                                        AppSettings::update_and_save(cx, |settings| {
+                                            settings.terminal_enable_autocomplete = val;
+                                        });
+                                    },
+                                )
+                                .default_value(default_settings.terminal_enable_autocomplete),
+                            )
+                            .description(
+                                t!("Settings.General.Terminal.autocomplete_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Terminal.middle_click_paste"),
+                                SettingField::switch(
+                                    |cx: &App| {
+                                        AppSettings::global(cx).terminal_middle_click_paste
+                                    },
+                                    |val: bool, cx: &mut App| {
+                                        AppSettings::update_and_save(cx, |settings| {
+                                            settings.terminal_middle_click_paste = val;
+                                        });
+                                    },
+                                )
+                                .default_value(default_settings.terminal_middle_click_paste),
+                            )
+                            .description(
+                                t!("Settings.General.Terminal.middle_click_paste_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Terminal.confirm_multiline_paste"),
+                                SettingField::switch(
+                                    |cx: &App| {
+                                        AppSettings::global(cx)
+                                            .terminal_confirm_multiline_paste
+                                    },
+                                    |val: bool, cx: &mut App| {
+                                        AppSettings::update_and_save(cx, |settings| {
+                                            settings.terminal_confirm_multiline_paste = val;
+                                        });
+                                    },
+                                )
+                                .default_value(
+                                    default_settings.terminal_confirm_multiline_paste,
+                                ),
+                            )
+                            .description(
+                                t!("Settings.General.Terminal.confirm_multiline_paste_desc")
+                                    .to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Terminal.confirm_high_risk"),
+                                SettingField::switch(
+                                    |cx: &App| {
+                                        AppSettings::global(cx)
+                                            .terminal_confirm_high_risk_command
+                                    },
+                                    |val: bool, cx: &mut App| {
+                                        AppSettings::update_and_save(cx, |settings| {
+                                            settings.terminal_confirm_high_risk_command = val;
+                                        });
+                                    },
+                                )
+                                .default_value(
+                                    default_settings.terminal_confirm_high_risk_command,
+                                ),
+                            )
+                            .description(
+                                t!("Settings.General.Terminal.confirm_high_risk_desc").to_string(),
+                            ),
+                            SettingItem::new(
+                                t!("Settings.General.Terminal.sync_path"),
+                                SettingField::switch(
+                                    |cx: &App| {
+                                        AppSettings::global(cx).terminal_sync_path_with_terminal
+                                    },
+                                    |val: bool, cx: &mut App| {
+                                        AppSettings::update_and_save(cx, |settings| {
+                                            settings.terminal_sync_path_with_terminal = val;
+                                        });
+                                    },
+                                )
+                                .default_value(default_settings.terminal_sync_path_with_terminal),
+                            )
+                            .description(
+                                t!("Settings.General.Terminal.sync_path_desc").to_string(),
+                            ),
                         ]),
                     SettingGroup::new()
                         .title(t!("Settings.General.Proxy.group_title"))
@@ -514,31 +488,6 @@ impl Render for SettingsPanel {
                 .pages(self.setting_pages(window, cx)),
         )
     }
-}
-
-fn render_manual_update_check_item(cx: &mut App) -> gpui::AnyElement {
-    h_flex()
-        .w_full()
-        .justify_between()
-        .items_center()
-        .gap_3()
-        .child(
-            v_flex()
-                .gap_1()
-                .flex_1()
-                .child(
-                    div()
-                        .text_sm()
-                        .child(t!("Settings.General.Update.check_now").to_string()),
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(t!("Settings.General.Update.check_now_desc").to_string()),
-                ),
-        )
-        .into_any_element()
 }
 
 fn render_global_proxy_settings_item(cx: &mut App) -> gpui::AnyElement {
@@ -1223,80 +1172,8 @@ const DATABASE_SHORTCUTS: &[ShortcutEntry] = &[
         action_id: Some(action_id::DB_FOCUS_SEARCH),
         system_hotkey: false,
     },
-    ShortcutEntry {
-        keys_macos: &["cmd-shift-enter"],
-        keys_other: &["ctrl-shift-enter"],
-        label_key: "Settings.Shortcuts.database_open_table_query",
-        action_id: Some(action_id::DB_OPEN_TABLE_QUERY),
-        system_hotkey: false,
-    },
-    ShortcutEntry {
-        keys_macos: &["cmd-enter", "ctrl-enter"],
-        keys_other: &["cmd-enter", "ctrl-enter"],
-        label_key: "Settings.Shortcuts.sql_run_query",
-        action_id: Some(action_id::SQL_RUN_QUERY),
-        system_hotkey: false,
-    },
 ];
 
-const TABLE_SHORTCUTS: &[ShortcutEntry] = &[
-    ShortcutEntry {
-        keys_macos: &["up", "down", "left", "right"],
-        keys_other: &["up", "down", "left", "right"],
-        label_key: "Settings.Shortcuts.table_move_selection",
-        action_id: None,
-        system_hotkey: false,
-    },
-    ShortcutEntry {
-        keys_macos: &["home", "end"],
-        keys_other: &["home", "end"],
-        label_key: "Settings.Shortcuts.table_first_last",
-        action_id: None,
-        system_hotkey: false,
-    },
-    ShortcutEntry {
-        keys_macos: &["pageup", "pagedown"],
-        keys_other: &["pageup", "pagedown"],
-        label_key: "Settings.Shortcuts.table_page",
-        action_id: None,
-        system_hotkey: false,
-    },
-    ShortcutEntry {
-        keys_macos: &["tab", "shift-tab"],
-        keys_other: &["tab", "shift-tab"],
-        label_key: "Settings.Shortcuts.table_next_previous_cell",
-        action_id: None,
-        system_hotkey: false,
-    },
-    ShortcutEntry {
-        keys_macos: &["cmd-c"],
-        keys_other: &["ctrl-c"],
-        label_key: "Settings.Shortcuts.table_copy",
-        action_id: Some(action_id::TABLE_COPY),
-        system_hotkey: false,
-    },
-    ShortcutEntry {
-        keys_macos: &["cmd-v"],
-        keys_other: &["ctrl-v"],
-        label_key: "Settings.Shortcuts.table_paste",
-        action_id: Some(action_id::TABLE_PASTE),
-        system_hotkey: false,
-    },
-    ShortcutEntry {
-        keys_macos: &["cmd-a"],
-        keys_other: &["ctrl-a"],
-        label_key: "Settings.Shortcuts.table_select_all",
-        action_id: Some(action_id::TABLE_SELECT_ALL),
-        system_hotkey: false,
-    },
-    ShortcutEntry {
-        keys_macos: &["escape"],
-        keys_other: &["escape"],
-        label_key: "Settings.Shortcuts.table_cancel",
-        action_id: Some(action_id::TABLE_CANCEL),
-        system_hotkey: false,
-    },
-];
 
 const REMOTE_EDITOR_SHORTCUTS: &[ShortcutEntry] = &[
     ShortcutEntry {
@@ -1315,50 +1192,6 @@ const REMOTE_EDITOR_SHORTCUTS: &[ShortcutEntry] = &[
     },
 ];
 
-const REDIS_CLI_SHORTCUTS: &[ShortcutEntry] = &[
-    ShortcutEntry {
-        keys_macos: &["ctrl-l"],
-        keys_other: &["ctrl-l"],
-        label_key: "Settings.Shortcuts.redis_clear_output",
-        action_id: Some(action_id::REDIS_CLEAR_OUTPUT),
-        system_hotkey: false,
-    },
-    ShortcutEntry {
-        keys_macos: &["cmd-c"],
-        keys_other: &["ctrl-c"],
-        label_key: "Settings.Shortcuts.redis_copy",
-        action_id: Some(action_id::REDIS_COPY),
-        system_hotkey: false,
-    },
-    ShortcutEntry {
-        keys_macos: &["cmd-v"],
-        keys_other: &["ctrl-v"],
-        label_key: "Settings.Shortcuts.redis_paste",
-        action_id: Some(action_id::REDIS_PASTE),
-        system_hotkey: false,
-    },
-    ShortcutEntry {
-        keys_macos: &["cmd-a"],
-        keys_other: &["ctrl-a"],
-        label_key: "Settings.Shortcuts.redis_select_all",
-        action_id: Some(action_id::REDIS_SELECT_ALL),
-        system_hotkey: false,
-    },
-    ShortcutEntry {
-        keys_macos: &["escape"],
-        keys_other: &["escape"],
-        label_key: "Settings.Shortcuts.redis_clear_selection",
-        action_id: Some(action_id::REDIS_CLEAR_SELECTION),
-        system_hotkey: false,
-    },
-    ShortcutEntry {
-        keys_macos: &["tab"],
-        keys_other: &["tab"],
-        label_key: "Settings.Shortcuts.redis_complete_command",
-        action_id: Some(action_id::REDIS_COMPLETE_COMMAND),
-        system_hotkey: false,
-    },
-];
 
 const SHORTCUT_GROUPS: &[ShortcutGroup] = &[
     ShortcutGroup {
@@ -1382,16 +1215,8 @@ const SHORTCUT_GROUPS: &[ShortcutGroup] = &[
         entries: DATABASE_SHORTCUTS,
     },
     ShortcutGroup {
-        title_key: "Settings.Shortcuts.table",
-        entries: TABLE_SHORTCUTS,
-    },
-    ShortcutGroup {
         title_key: "Settings.Shortcuts.remote_editor",
         entries: REMOTE_EDITOR_SHORTCUTS,
-    },
-    ShortcutGroup {
-        title_key: "Settings.Shortcuts.redis_cli",
-        entries: REDIS_CLI_SHORTCUTS,
     },
 ];
 

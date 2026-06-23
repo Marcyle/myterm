@@ -806,69 +806,6 @@ Settings:
         zh-CN: 使用鼠标中键粘贴剪贴板内容
         zh-HK: 使用滑鼠中鍵貼上剪貼簿內容
 
-    # 数据库设置
-    Database:
-      group_title:
-        en: Database
-        zh-CN: 数据库
-        zh-HK: 資料庫
-      open_mode:
-        en: Database Open Mode
-        zh-CN: 数据库打开方式
-        zh-HK: 資料庫打開方式
-      open_mode_desc:
-        en: Choose how to open database connections
-        zh-CN: 选择数据库连接的打开方式
-        zh-HK: 選擇資料庫連線的打開方式
-      open_mode_single:
-        en: Single Database Mode
-        zh-CN: 单库模式
-        zh-HK: 單庫模式
-      open_mode_workspace:
-        en: Workspace Mode
-        zh-CN: 工作区模式
-        zh-HK: 工作區模式
-      large_text_editor_open_mode:
-        en: Large Text Cell Editor Open Mode
-        zh-CN: 大文本单元格编辑器打开方式
-        zh-HK: 大文本單元格編輯器打開方式
-      large_text_editor_open_mode_desc:
-        en: Choose whether large text cells open in the sidebar preview or a dialog
-        zh-CN: 选择大文本单元格是通过侧边栏预览打开还是弹窗打开
-        zh-HK: 選擇大文本單元格是通過側邊欄預覽打開還是彈窗打開
-      large_text_editor_open_mode_sidebar:
-        en: Sidebar Preview
-        zh-CN: 侧边栏预览
-        zh-HK: 側邊欄預覽
-      large_text_editor_open_mode_dialog:
-        en: Dialog
-        zh-CN: 弹窗
-        zh-HK: 彈窗
-      auto_save:
-        en: SQL Auto Save
-        zh-CN: SQL自动保存
-        zh-HK: SQL自動保存
-      auto_save_desc:
-        en: Automatically save SQL query content at regular intervals
-        zh-CN: 定时自动保存SQL查询内容
-        zh-HK: 定時自動保存SQL查詢內容
-      auto_save_interval:
-        en: Auto Save Interval (seconds)
-        zh-CN: 自动保存间隔（秒）
-        zh-HK: 自動保存間隔（秒）
-      auto_save_interval_desc:
-        en: Set the interval for automatic saving (1-60 seconds)
-        zh-CN: 设置自动保存的时间间隔（1-60秒）
-        zh-HK: 設置自動保存的時間間隔（1-60秒）
-      table_row_height:
-        en: Table Row Height (px)
-        zh-CN: 表格行高（像素）
-        zh-HK: 表格行高（像素）
-      table_row_height_desc:
-        en: Set the height of database table and editable grid rows (24-100 pixels)
-        zh-CN: 设置数据库表和可编辑表格的行高（24-100像素）
-        zh-HK: 設置資料庫表和可編輯表格的行高（24-100像素）
-
     Log:
       group_title:
         en: Log
@@ -882,28 +819,6 @@ Settings:
         en: Leave empty to write logs to the default config directory logs folder. Restart the app after changing this path.
         zh-CN: 留空时写入默认配置目录下的 logs 文件夹，修改后重启应用生效。
         zh-HK: 留空時寫入默認配置目錄下的 logs 文件夾，修改後重啟應用生效。
-
-    Update:
-      group_title:
-        en: Update
-        zh-CN: 更新
-        zh-HK: 更新
-      auto_update:
-        en: Auto Update Check
-        zh-CN: 自动检查更新
-        zh-HK: 自動檢查更新
-      auto_update_desc:
-        en: Automatically check for updates when the application starts
-        zh-CN: 应用启动时自动检查新版本
-        zh-HK: 應用啟動時自動檢查新版本
-      check_now:
-        en: Check for Updates
-        zh-CN: 检查更新
-        zh-HK: 檢查更新
-      check_now_desc:
-        en: Manually check
-        zh-CN: 立即手动检查
-        zh-HK: 立即手動檢查
 
     Proxy:
       group_title:
@@ -1026,21 +941,13 @@ Settings:
       zh-CN: 终端
       zh-HK: 終端
     database:
-      en: SQL Editor
-      zh-CN: SQL 编辑器
-      zh-HK: SQL 編輯器
-    table:
-      en: Data Table
-      zh-CN: 数据表格
-      zh-HK: 數據表格
+      en: Database
+      zh-CN: 数据库
+      zh-HK: 資料庫
     remote_editor:
       en: Remote File Editor
       zh-CN: 远程文件编辑器
       zh-HK: 遠端檔案編輯器
-    redis_cli:
-      en: Redis CLI
-      zh-CN: Redis CLI
-      zh-HK: Redis CLI
     minimize_window:
       en: Minimize / Activate Window
       zh-CN: 最小化 / 激活窗口
@@ -1141,46 +1048,6 @@ Settings:
       en: Focus Search
       zh-CN: 聚焦搜索
       zh-HK: 聚焦搜尋
-    database_open_table_query:
-      en: Query Selected Table
-      zh-CN: 查询选中表
-      zh-HK: 查詢選中表
-    sql_run_query:
-      en: Run Query
-      zh-CN: 执行查询
-      zh-HK: 執行查詢
-    table_move_selection:
-      en: Move Selection
-      zh-CN: 移动选区
-      zh-HK: 移動選區
-    table_first_last:
-      en: First / Last Row
-      zh-CN: 首行 / 末行
-      zh-HK: 首行 / 末行
-    table_page:
-      en: Page Up / Down
-      zh-CN: 上下翻页
-      zh-HK: 上下翻頁
-    table_next_previous_cell:
-      en: Next / Previous Cell
-      zh-CN: 下一个 / 上一个单元格
-      zh-HK: 下一個 / 上一個儲存格
-    table_copy:
-      en: Copy
-      zh-CN: 复制
-      zh-HK: 複製
-    table_paste:
-      en: Paste
-      zh-CN: 粘贴
-      zh-HK: 貼上
-    table_select_all:
-      en: Select All
-      zh-CN: 全选
-      zh-HK: 全選
-    table_cancel:
-      en: Cancel Selection
-      zh-CN: 取消选择
-      zh-HK: 取消選擇
     remote_editor_search:
       en: Search
       zh-CN: 搜索
@@ -1189,30 +1056,6 @@ Settings:
       en: Replace
       zh-CN: 替换
       zh-HK: 取代
-    redis_clear_output:
-      en: Clear Output
-      zh-CN: 清空输出
-      zh-HK: 清空輸出
-    redis_copy:
-      en: Copy
-      zh-CN: 复制
-      zh-HK: 複製
-    redis_paste:
-      en: Paste
-      zh-CN: 粘贴
-      zh-HK: 貼上
-    redis_select_all:
-      en: Select All
-      zh-CN: 全选
-      zh-HK: 全選
-    redis_clear_selection:
-      en: Clear Selection
-      zh-CN: 清除选区
-      zh-HK: 清除選區
-    redis_complete_command:
-      en: Complete Command
-      zh-CN: 补全命令
-      zh-HK: 補全命令
 
   # 关于页面
   About:
@@ -1445,6 +1288,85 @@ Update:
     en: Open release page to download manually
     zh-CN: 打开发布页面手动下载
     zh-HK: 打開發布頁面手動下載
+
+# 终端设置
+Settings.General.Terminal:
+  group_title:
+    en: Terminal
+    zh-CN: 终端
+    zh-HK: 終端
+  font_size:
+    en: Terminal Font Size
+    zh-CN: 终端字体大小
+    zh-HK: 終端字型大小
+  font_size_desc:
+    en: Font size for the terminal emulator
+    zh-CN: 终端模拟器的字体大小
+    zh-HK: 終端模擬器的字型大小
+  font_family:
+    en: Terminal Font Family
+    zh-CN: 终端字体
+    zh-HK: 終端字型
+  font_family_desc:
+    en: Monospace font for the terminal
+    zh-CN: 终端使用的等宽字体
+    zh-HK: 終端使用的等寬字型
+  cursor_blink:
+    en: Cursor Blink
+    zh-CN: 光标闪烁
+    zh-HK: 游標閃爍
+  cursor_blink_desc:
+    en: Blinking cursor in terminal
+    zh-CN: 终端光标闪烁效果
+    zh-HK: 終端游標閃爍效果
+  auto_copy:
+    en: Auto Copy on Select
+    zh-CN: 选中自动复制
+    zh-HK: 選中自動複製
+  auto_copy_desc:
+    en: Automatically copy selected text to clipboard
+    zh-CN: 选中文本自动复制到剪贴板
+    zh-HK: 選中文本自動複製到剪貼板
+  autocomplete:
+    en: Autocomplete
+    zh-CN: 自动补全
+    zh-HK: 自動補全
+  autocomplete_desc:
+    en: Enable terminal command autocompletion
+    zh-CN: 启用终端命令自动补全
+    zh-HK: 啟用終端命令自動補全
+  middle_click_paste:
+    en: Middle Click Paste
+    zh-CN: 中键粘贴
+    zh-HK: 中鍵貼上
+  middle_click_paste_desc:
+    en: Paste on middle mouse click
+    zh-CN: 鼠标中键点击粘贴
+    zh-HK: 滑鼠中鍵點擊貼上
+  confirm_multiline_paste:
+    en: Confirm Multiline Paste
+    zh-CN: 多行粘贴确认
+    zh-HK: 多行貼上確認
+  confirm_multiline_paste_desc:
+    en: Require confirmation for multi-line paste
+    zh-CN: 多行粘贴时需要确认
+    zh-HK: 多行貼上時需要確認
+  confirm_high_risk:
+    en: Confirm High-Risk Command
+    zh-CN: 高危命令确认
+    zh-HK: 高危命令確認
+  confirm_high_risk_desc:
+    en: Require confirmation for high-risk commands
+    zh-CN: 高危命令执行前需要确认
+    zh-HK: 高危命令執行前需要確認
+  sync_path:
+    en: Sync Path with File Manager
+    zh-CN: 与文件管理器同步路径
+    zh-HK: 與檔案管理器同步路徑
+  sync_path_desc:
+    en: Sync terminal working directory to file manager
+    zh-CN: 将终端工作目录同步到文件管理器
+    zh-HK: 將終端工作目錄同步到檔案管理器
 
 
 Serial:
