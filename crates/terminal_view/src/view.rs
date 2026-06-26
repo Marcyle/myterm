@@ -960,6 +960,7 @@ impl TerminalView {
             true,
             local_working_dir,
             tab_index,
+            None,
             window,
             cx,
         );
@@ -985,6 +986,17 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        Self::new_jms_koko_with_context(params, None, tab_index, window, cx)
+    }
+
+    /// 创建 JumpServer Koko WebSocket 终端,并可携带资产树侧栏上下文
+    pub fn new_jms_koko_with_context(
+        params: jms::KokoConnectParams,
+        jms_context: Option<crate::sidebar::JmsSidebarContext>,
+        tab_index: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let terminal = cx.new(|cx| Terminal::new_jms_koko(params, cx));
         Self::new_with_terminal(
             terminal,
@@ -993,6 +1005,7 @@ impl TerminalView {
             false,
             None,
             tab_index,
+            jms_context,
             window,
             cx,
         )
@@ -1018,6 +1031,7 @@ impl TerminalView {
             sync_path_with_terminal,
             None,
             tab_index,
+            None,
             window,
             cx,
         )
@@ -1030,6 +1044,7 @@ impl TerminalView {
         sync_path_enabled: bool,
         local_working_dir: Option<PathBuf>,
         tab_index: Option<usize>,
+        jms_context: Option<crate::sidebar::JmsSidebarContext>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -1056,6 +1071,7 @@ impl TerminalView {
                 stored_connection,
                 ssh_config,
                 ssh_session_manager,
+                jms_context,
                 &default_theme,
                 default_font_size,
                 default_font_family.clone(),
@@ -1286,6 +1302,10 @@ impl TerminalView {
                         sidebar.sync_file_manager_path(path, cx);
                     });
                 }
+            }
+            TerminalSidebarEvent::OpenJmsTerminal(params) => {
+                // 冒泡到 HomePage,由其新建一个 JMS 终端 tab
+                cx.emit(TerminalViewEvent::OpenJmsTerminal(params.clone()));
             }
         }
     }
@@ -3877,6 +3897,15 @@ impl Focusable for TerminalView {
 }
 
 impl EventEmitter<TabContentEvent> for TerminalView {}
+
+/// TerminalView 对外事件(供 HomePage 订阅)
+#[derive(Clone, Debug)]
+pub enum TerminalViewEvent {
+    /// 请求打开新的 JMS 终端(资产树侧栏点击资产→选账号后冒泡)
+    OpenJmsTerminal(jms::KokoConnectParams),
+}
+
+impl EventEmitter<TerminalViewEvent> for TerminalView {}
 
 impl TabContent for TerminalView {
     fn content_key(&self) -> &'static str {

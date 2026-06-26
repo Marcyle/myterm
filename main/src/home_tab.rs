@@ -129,7 +129,8 @@ pub struct HomePage {
     master_key_dialog_open: bool,
     master_key_unlock_prompt_pending: bool,
     pub(crate) pending_jms_connections: Vec<StoredConnection>,
-    pub(crate) pending_jms_koko: Vec<jms::KokoConnectParams>,
+    pub(crate) pending_jms_koko:
+        Vec<(jms::KokoConnectParams, Option<terminal_view::JmsSidebarContext>)>,
 }
 
 
@@ -2217,11 +2218,11 @@ impl Render for HomePage {
         }
 
         // 处理 JMS Koko WebSocket 待连接队列
-        while let Some(params) = self.pending_jms_koko.pop() {
+        while let Some((params, jms_context)) = self.pending_jms_koko.pop() {
             let view = cx.entity();
             window.defer(cx, move |window, cx| {
                 view.update(cx, |this, cx| {
-                    this.open_jms_koko_terminal(params, window, cx);
+                    this.open_jms_koko_terminal(params, jms_context, window, cx);
                 });
             });
         }

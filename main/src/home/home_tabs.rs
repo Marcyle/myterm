@@ -7,7 +7,8 @@ use one_core::tab_container::TabItem;
 use sftp_view::{SftpView, SftpViewEvent};
 use terminal::LocalConfig;
 use terminal_view::{
-    TerminalConnectionKind, TerminalView, current_settings as current_terminal_settings,
+    TerminalConnectionKind, TerminalView, TerminalViewEvent,
+    current_settings as current_terminal_settings,
 };
 
 impl HomePage {
@@ -59,6 +60,7 @@ impl HomePage {
     pub(crate) fn open_jms_koko_terminal(
         &mut self,
         params: jms::KokoConnectParams,
+        jms_context: Option<terminal_view::JmsSidebarContext>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -82,8 +84,22 @@ impl HomePage {
             None
         };
 
-        let terminal_view =
-            cx.new(|cx| TerminalView::new_jms_koko(params, tab_index, window, cx));
+        let terminal_view = cx.new(|cx| {
+            TerminalView::new_jms_koko_with_context(params, jms_context, tab_index, window, cx)
+        });
+
+        // 订阅资产树侧栏冒泡的"打开新 JMS 终端"事件,递归开新 tab
+        let sub = cx.subscribe_in(
+            &terminal_view,
+            window,
+            move |this, _view, event: &TerminalViewEvent, window, cx| match event {
+                TerminalViewEvent::OpenJmsTerminal(params) => {
+                    this.open_jms_koko_terminal(params.clone(), None, window, cx);
+                }
+            },
+        );
+        self._subscriptions.push(sub);
+
         self.tab_container.update(cx, |tc, cx| {
             let tab = TabItem::new(tab_id, "ssh", terminal_view);
             tc.add_and_activate_tab_with_focus(tab, window, cx);

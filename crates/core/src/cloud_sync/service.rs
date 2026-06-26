@@ -583,7 +583,7 @@ mod tests {
         let conn = StoredConnection {
             id: Some(1),
             name: "db".to_string(),
-            connection_type: ConnectionType::Database,
+            connection_type: ConnectionType::SshSftp,
             params: r#"{"host":"localhost","port":5432}"#.to_string(),
             workspace_id: Some(7),
             selected_databases: None,

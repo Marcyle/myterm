@@ -6,10 +6,12 @@
 //! - 文件管理器面板（仅 SSH 终端）
 
 pub mod file_manager_panel;
+pub mod jms_asset_tree_panel;
 mod quick_command_panel;
 mod settings_panel;
 
 pub use file_manager_panel::{FileManagerPanel, FileManagerPanelEvent};
+pub use jms_asset_tree_panel::{JmsAssetTreePanel, JmsAssetTreePanelEvent};
 pub use quick_command_panel::QuickCommandPanel;
 pub use settings_panel::SettingsPanel;
 
@@ -30,6 +32,20 @@ use ssh::SshSessionManager;
 use std::sync::Arc;
 use terminal::terminal::SshTerminalConfig;
 
+/// JMS 资产树侧栏所需的上下文
+///
+/// 由 JMS 登录窗口在登录成功后构造,携带已认证的 [`jms::JmsClient`] 克隆、
+/// 已加载的资产树根节点,以及预先算好的代理配置,传递给终端侧栏的资产树面板。
+#[derive(Clone)]
+pub struct JmsSidebarContext {
+    /// 已认证的 JMS 客户端(克隆持有)
+    pub client: jms::JmsClient,
+    /// 已加载的资产树根节点
+    pub tree_roots: Vec<jms::JmsAssetTreeNode>,
+    /// 预先从全局设置算好的代理配置
+    pub proxy: Option<jms::KokoProxy>,
+}
+
 /// 侧边栏面板类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarPanel {
@@ -39,6 +55,8 @@ pub enum SidebarPanel {
     QuickCommand,
     /// 文件管理器面板（仅 SSH 终端）
     FileManager,
+    /// JMS 资产树面板（仅 JMS 终端）
+    JmsAssetTree,
 }
 
 impl SidebarPanel {
@@ -48,6 +66,7 @@ impl SidebarPanel {
             SidebarPanel::Settings => IconName::Settings.mono(),
             SidebarPanel::QuickCommand => IconName::SquareTerminal.mono(),
             SidebarPanel::FileManager => IconName::FolderOpen.mono(),
+            SidebarPanel::JmsAssetTree => IconName::Server.mono(),
         }
     }
 
@@ -57,6 +76,7 @@ impl SidebarPanel {
             SidebarPanel::Settings => "Settings",
             SidebarPanel::QuickCommand => "Quick Commands",
             SidebarPanel::FileManager => "File Manager",
+            SidebarPanel::JmsAssetTree => "JMS Assets",
         }
     }
 }
@@ -102,6 +122,8 @@ pub enum TerminalSidebarEvent {
     CdToTerminal(String),
     /// 请求将终端当前工作目录同步到文件管理器
     SyncWorkingDir,
+    /// 请求打开新的 JMS 终端(从资产树面板冒泡)
+    OpenJmsTerminal(jms::KokoConnectParams),
 }
 
 /// 终端侧边栏组件
@@ -116,6 +138,8 @@ pub struct TerminalSidebar {
     quick_command_panel: Entity<QuickCommandPanel>,
     /// 文件管理器面板（仅 SSH 终端时创建）
     file_manager_panel: Option<Entity<FileManagerPanel>>,
+    /// JMS 资产树面板（仅 JMS 终端时创建）
+    jms_asset_tree_panel: Option<Entity<JmsAssetTreePanel>>,
     /// 路径与终端同步开关（默认开启）
     sync_path_enabled: bool,
     /// 焦点句柄
@@ -132,6 +156,7 @@ impl TerminalSidebar {
         stored_connection: Option<StoredConnection>,
         _ssh_config: Option<SshTerminalConfig>,
         ssh_session_manager: Option<Arc<SshSessionManager>>,
+        jms_context: Option<JmsSidebarContext>,
         initial_theme: &TerminalTheme,
         initial_font_size: Pixels,
         initial_font_family: SharedString,
@@ -257,12 +282,34 @@ impl TerminalSidebar {
             subs.push(fm_sub);
         }
 
+        // 仅 JMS 终端时创建资产树面板
+        let jms_asset_tree_panel = jms_context.map(|ctx| {
+            cx.new(|cx| JmsAssetTreePanel::new(ctx.client, ctx.tree_roots, ctx.proxy, window, cx))
+        });
+
+        // 订阅资产树面板事件
+        if let Some(ref jms_panel) = jms_asset_tree_panel {
+            let jms_sub = cx.subscribe(
+                jms_panel,
+                |this, _, event: &JmsAssetTreePanelEvent, cx| match event {
+                    JmsAssetTreePanelEvent::Close => {
+                        this.set_active_panel(None, cx);
+                    }
+                    JmsAssetTreePanelEvent::OpenNewTerminal(params) => {
+                        cx.emit(TerminalSidebarEvent::OpenJmsTerminal(params.clone()));
+                    }
+                },
+            );
+            subs.push(jms_sub);
+        }
+
         Self {
             active_panel: None,
             collapsed: true,
             settings_panel,
             quick_command_panel,
             file_manager_panel,
+            jms_asset_tree_panel,
             sync_path_enabled,
             focus_handle: cx.focus_handle(),
             colors,
@@ -498,6 +545,7 @@ impl TerminalSidebar {
         let border_color = self.colors.border;
         let muted_bg = self.colors.background;
         let has_file_manager = self.file_manager_panel.is_some();
+        let has_jms_asset_tree = self.jms_asset_tree_panel.is_some();
 
         v_flex()
             .flex_shrink_0()
@@ -535,6 +583,9 @@ impl TerminalSidebar {
             .when(has_file_manager, |this| {
                 this.child(self.render_toolbar_button(SidebarPanel::FileManager, window, cx))
             })
+            .when(has_jms_asset_tree, |this| {
+                this.child(self.render_toolbar_button(SidebarPanel::JmsAssetTree, window, cx))
+            })
             .into_any_element()
     }
 
@@ -551,6 +602,13 @@ impl TerminalSidebar {
             SidebarPanel::FileManager => {
                 if let Some(ref fm_panel) = self.file_manager_panel {
                     fm_panel.clone().into_any_element()
+                } else {
+                    div().into_any_element()
+                }
+            }
+            SidebarPanel::JmsAssetTree => {
+                if let Some(ref jms_panel) = self.jms_asset_tree_panel {
+                    jms_panel.clone().into_any_element()
                 } else {
                     div().into_any_element()
                 }

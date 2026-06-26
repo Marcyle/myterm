@@ -326,7 +326,7 @@ mod tests {
         let conn = StoredConnection {
             id: Some(1),
             name: "Test Connection".to_string(),
-            connection_type: crate::storage::ConnectionType::Database,
+            connection_type: crate::storage::ConnectionType::SshSftp,
             workspace_id: None,
             params: "{}".to_string(),
             selected_databases: None,

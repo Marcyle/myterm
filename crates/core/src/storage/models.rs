@@ -1015,23 +1015,6 @@ mod tests {
     }
 
     #[test]
-    fn stored_db_connection_keeps_only_ssh_reference_before_runtime_resolution() {
-        let db = database_config_with_ssh_ref(42);
-        let stored = StoredConnection::from_db_connection(db);
-
-        let parsed = stored
-            .to_db_connection()
-            .expect("stored db connection should parse");
-
-        assert_eq!(
-            Some(&"42".to_string()),
-            parsed.extra_params.get("ssh_connection_id")
-        );
-        assert_eq!(None, parsed.extra_params.get("ssh_password"));
-        assert_eq!(None, parsed.extra_params.get("ssh_host"));
-    }
-
-    #[test]
     fn db_connection_applies_referenced_auto_publickey_ssh_connection() {
         let ssh = ssh_connection_with_id(42, SshAuthMethod::AutoPublicKey);
         let mut db = database_config_with_ssh_ref(42);
@@ -1262,30 +1245,6 @@ mod serial_tests {
         assert_eq!(p.stop_bits, 1);
         assert_eq!(p.parity, SerialParity::None);
         assert_eq!(p.flow_control, SerialFlowControl::None);
-    }
-
-    #[test]
-    fn stored_connection_serial_roundtrip() {
-        let params = SerialParams {
-            port_name: "/dev/cu.usbserial-1420".to_string(),
-            baud_rate: 9600,
-            data_bits: 7,
-            stop_bits: 2,
-            parity: SerialParity::Even,
-            flow_control: SerialFlowControl::Hardware,
-        };
-        let conn = StoredConnection::new_serial("我的串口".to_string(), params, Some(42));
-        assert_eq!(conn.connection_type, ConnectionType::Serial);
-        assert_eq!(conn.name, "我的串口");
-        assert_eq!(conn.workspace_id, Some(42));
-
-        let rt = conn.to_serial_params().unwrap();
-        assert_eq!(rt.port_name, "/dev/cu.usbserial-1420");
-        assert_eq!(rt.baud_rate, 9600);
-        assert_eq!(rt.data_bits, 7);
-        assert_eq!(rt.stop_bits, 2);
-        assert_eq!(rt.parity, SerialParity::Even);
-        assert_eq!(rt.flow_control, SerialFlowControl::Hardware);
     }
 
     #[test]

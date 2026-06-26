@@ -1052,7 +1052,7 @@ mod tests {
         StoredConnection {
             id: Some(1),
             name: "local".to_string(),
-            connection_type: ConnectionType::Database,
+            connection_type: ConnectionType::SshSftp,
             params: "{}".to_string(),
             workspace_id: None,
             selected_databases: None,

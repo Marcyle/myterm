@@ -11,6 +11,9 @@ use crate::models::*;
 /// 采用纯 Web Session 认证:通过 `/core/auth/login/` 表单登录获取**已认证**的
 /// `jms_sessionid`,后续资产树、账号列表、connect-token、Koko 全部复用同一 session
 /// + `X-CSRFToken`。不再使用 API Bearer token(其返回的是匿名 session,Koko 不认)。
+///
+/// 字段全部 cheaply-cloneable,可 Clone 后交给终端侧栏长期持有(只读资产树/账号)。
+#[derive(Clone)]
 pub struct JmsClient {
     client: Arc<dyn HttpClient>,
     base_url: String,
@@ -230,6 +233,43 @@ impl JmsClient {
             Ok(nodes)
         } else {
             Err(JmsError::ApiError(format!("获取子节点失败: {}", text)))
+        }
+    }
+
+    /// 按关键字搜索资产(服务端搜索,返回扁平的资产节点列表)
+    ///
+    /// 资产树是懒加载的,客户端只持有已展开的部分,因此搜索走服务端
+    /// `/api/v1/perms/users/self/assets/tree/?search=<keyword>` 端点,
+    /// 直接返回匹配的资产叶子节点(与 nodes 树端点不同,后者忽略 search 参数)。
+    pub async fn search_assets(&mut self, keyword: &str) -> Result<Vec<JmsAssetNode>, JmsError> {
+        let encoded = urlencoding::encode(keyword);
+        let url = format!(
+            "{}/api/v1/perms/users/self/assets/tree/?search={}",
+            self.base_url, encoded
+        );
+
+        tracing::info!("搜索资产: keyword={}, url={}", keyword, url);
+        let (status, text) = self.get_json(&url).await?;
+        tracing::info!("搜索响应: status={}, body={}", status, &text[..text.len().min(300)]);
+
+        if status >= 200 && status < 300 {
+            let nodes: Vec<JmsAssetNode> = serde_json::from_str(&text).map_err(|e| {
+                tracing::error!("搜索结果 JSON 解析失败: {}", e);
+                JmsError::ParseError(e.to_string())
+            })?;
+            // 仅保留资产叶子节点(过滤目录节点)
+            let assets = nodes
+                .into_iter()
+                .filter(|n| {
+                    n.meta
+                        .as_ref()
+                        .map(|m| m.node_type == "asset")
+                        .unwrap_or(false)
+                })
+                .collect();
+            Ok(assets)
+        } else {
+            Err(JmsError::ApiError(format!("搜索资产失败: {}", text)))
         }
     }
 

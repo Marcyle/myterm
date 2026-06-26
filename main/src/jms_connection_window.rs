@@ -549,6 +549,11 @@ impl JmsConnectionWindow {
         self.error_message = None;
         cx.notify();
 
+        // 克隆已认证 client + 资产树,供新终端的资产树侧栏常驻使用
+        let sidebar_client = client.clone();
+        let sidebar_tree_roots = self.tree_roots.clone();
+        let sidebar_proxy = koko_proxy.clone();
+
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             // 登录已在进入资产树前完成,session 已认证,直接创建连接 token
             let connect_result = client.create_connect_token(&asset_id, &account_name).await;
@@ -570,8 +575,16 @@ impl JmsConnectionWindow {
                         params.base_url
                     );
 
+                    let sidebar_ctx = terminal_view::JmsSidebarContext {
+                        client: sidebar_client,
+                        tree_roots: sidebar_tree_roots,
+                        proxy: sidebar_proxy,
+                    };
+
                     let _ = parent.update(cx, |home_page, _app| {
-                        home_page.pending_jms_koko.push(params);
+                        home_page
+                            .pending_jms_koko
+                            .push((params, Some(sidebar_ctx)));
                     });
 
                     // 关闭连接窗口
