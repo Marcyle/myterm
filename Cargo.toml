@@ -96,6 +96,8 @@ tracing-subscriber = "0.3"
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 tokio-util = "0.7.17"
+http = "0.2"
+futures-util = "0.3"
 dirs = "6.0"
 chrono = {version = "0.4.23", features = ["serde"]}
 rust_decimal = { version = "1.19.0" }
@@ -126,6 +128,9 @@ russh = "0.60.3"
 russh-sftp = "2.1.2"
 tokio-socks = "0.5"
 
+# WebSocket (JumpServer Koko 终端隧道)
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+
 # Encryption
 aes-gcm = "0.10"
 rand = "0.8"
@@ -143,7 +148,6 @@ serialport = "4"
 parking_lot = "0.12"
 bytes = "1.5"
 mongodb = "3.5.1"
-futures-util="0.3.31"
 interprocess = { version = "2.4.0", features = ["tokio"] }
 url = "2.5.4"
 percent-encoding = "2.3.1"

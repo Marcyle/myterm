@@ -46,6 +46,7 @@ pub enum ConnectionType {
     All,
     SshSftp,
     PortForwarding,
+    Jms,
 }
 
 impl fmt::Display for ConnectionType {
@@ -54,6 +55,7 @@ impl fmt::Display for ConnectionType {
             ConnectionType::All => "All",
             ConnectionType::SshSftp => "SshSftp",
             ConnectionType::PortForwarding => "PortForwarding",
+            ConnectionType::Jms => "Jms",
         };
         write!(f, "{}", s)
     }
@@ -65,12 +67,14 @@ impl ConnectionType {
             ConnectionType::All,
             ConnectionType::SshSftp,
             ConnectionType::PortForwarding,
+            ConnectionType::Jms,
         ]
     }
     pub fn from_str(s: &str) -> Self {
         match s {
             "SshSftp" => ConnectionType::SshSftp,
             "PortForwarding" => ConnectionType::PortForwarding,
+            "Jms" => ConnectionType::Jms,
             _ => ConnectionType::SshSftp,
         }
     }
@@ -80,6 +84,7 @@ impl ConnectionType {
             ConnectionType::All => "All",
             ConnectionType::SshSftp => "SSH/SFTP",
             ConnectionType::PortForwarding => "Port Forwarding",
+            ConnectionType::Jms => "JMS",
         }
     }
 
@@ -88,6 +93,7 @@ impl ConnectionType {
             ConnectionType::All => IconName::Server,
             ConnectionType::SshSftp => IconName::TerminalColor,
             ConnectionType::PortForwarding => IconName::Network,
+            ConnectionType::Jms => IconName::Key,
         }
     }
 }
@@ -504,6 +510,29 @@ fn default_forward_bind_host() -> String {
     "127.0.0.1".to_string()
 }
 
+/// JMS(JumpServer)连接参数
+///
+/// JMS 因强制验证码+MFA 无法自动连接,此参数仅用于保存 URL/用户名/密码,
+/// 下次打开 JMS 连接窗口时自动填充。password 字段在持久化时由
+/// [`StoredConnection::encrypt_params`] 自动加密。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JmsParams {
+    /// JMS 服务器地址(如 https://jumpserver.example.com)
+    pub url: String,
+    /// 用户名
+    pub username: String,
+    /// 密码(持久化时自动加密)
+    #[serde(default)]
+    pub password: String,
+    /// 是否使用本地代理
+    #[serde(default = "default_true")]
+    pub use_local_proxy: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
 /// Connection configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbConnectionConfig {
@@ -844,6 +873,29 @@ impl StoredConnection {
         serde_json::from_str(&self.params)
     }
 
+    pub fn new_jms(name: String, params: JmsParams, workspace_id: Option<i64>) -> Self {
+        Self {
+            id: None,
+            name,
+            connection_type: ConnectionType::Jms,
+            params: serde_json::to_string(&params).expect("JmsParams 序列化不应失败"),
+            workspace_id,
+            selected_databases: None,
+            remark: None,
+            sync_enabled: true,
+            cloud_id: None,
+            last_synced_at: None,
+            last_used_at: None,
+            created_at: None,
+            updated_at: None,
+            team_id: None,
+            owner_id: None,
+        }
+    }
+
+    pub fn to_jms_params(&self) -> Result<JmsParams, serde_json::Error> {
+        serde_json::from_str(&self.params)
+    }
 
     /// 获取已选中的数据库列表，None表示全选
     pub fn get_selected_databases(&self) -> Option<Vec<String>> {

@@ -978,6 +978,26 @@ impl TerminalView {
         Self::new_ssh_with_index(conn, None, window, cx, None, true)
     }
 
+    /// 创建 JumpServer Koko WebSocket 终端
+    pub fn new_jms_koko(
+        params: jms::KokoConnectParams,
+        tab_index: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let terminal = cx.new(|cx| Terminal::new_jms_koko(params, cx));
+        Self::new_with_terminal(
+            terminal,
+            None,
+            None,
+            false,
+            None,
+            tab_index,
+            window,
+            cx,
+        )
+    }
+
     pub fn new_ssh_with_index(
         conn: StoredConnection,
         tab_index: Option<usize>,

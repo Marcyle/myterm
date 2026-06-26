@@ -1,0 +1,33 @@
+[package]
+name = "jms"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gpui = { workspace = true }
+futures = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+smol = { workspace = true }
+reqwest_client = { path = "../reqwest_client" }
+url = "2"
+regex = { workspace = true }
+urlencoding = "2"
+rsa = { version = "0.9", features = ["pem"] }
+sha2 = { workspace = true }
+rand = { workspace = true }
+aes = "0.8"
+block-padding = "0.3"
+
+# Koko WebSocket 终端隧道
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tokio-socks = { workspace = true }
+rustls = { workspace = true }
+rustls-native-certs = { workspace = true }
+base64 = { workspace = true }
+uuid = { workspace = true }

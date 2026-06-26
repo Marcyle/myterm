@@ -1,0 +1,587 @@
+- generic [ref=e1]:
+  - generic:
+    - generic: 
+  - generic [ref=e3]:
+    - generic [ref=e5]:
+      - list [ref=e6]:
+        - listitem [ref=e7]
+        - listitem [ref=e9]:
+          - generic [ref=e10]: File Manager
+        - listitem [ref=e11]:
+          - generic [ref=e12]: View
+        - listitem [ref=e13]:
+          - generic [ref=e14]: Language
+        - listitem [ref=e15]:
+          - generic [ref=e16]: Setting
+        - listitem [ref=e17]:
+          - generic [ref=e18]: Tabs
+        - listitem [ref=e19]:
+          - generic [ref=e20]: Theme
+        - listitem [ref=e21]:
+          - generic [ref=e22]: Help
+      - generic [ref=e27]:
+        - generic [ref=e28]: 
+        - generic [ref=e29]: 徐明远 高级运维工程师
+        - generic [ref=e30]: 
+    - generic [ref=e31]:
+      - generic [ref=e33]:
+        - text:   
+        - generic [ref=e35]:
+          - generic [ref=e39]:
+            - generic [ref=e40]:
+              - generic [ref=e41]:
+                - generic:
+                  - generic [ref=e43] [cursor=pointer]: 
+                  - generic: My assets
+                - generic [ref=e45]:
+                  - generic [ref=e46]:
+                    - generic [ref=e47] [cursor=pointer]: 
+                    - textbox [ref=e48]: 10.60.23.100
+                  - generic [ref=e49] [cursor=pointer]: 
+                  - generic [ref=e50] [cursor=pointer]: 
+              - list [ref=e56]:
+                - listitem [ref=e94]:
+                  - generic [ref=e95] [cursor=pointer]: 
+                  - generic "收藏夹 (0)" [ref=e96] [cursor=pointer]:
+                    - generic [ref=e97]: 
+                    - text: 收藏夹 (0)
+                - listitem [ref=e98]:
+                  - generic [ref=e99] [cursor=pointer]: 
+                  - generic "DEFAULT (326)" [ref=e100] [cursor=pointer]:
+                    - generic [ref=e101]: 
+                    - text: DEFAULT (326)
+                  - list [ref=e102]:
+                    - listitem [ref=e103]:
+                      - generic [ref=e104] [cursor=pointer]: 
+                      - generic "安全 (1)" [ref=e105] [cursor=pointer]:
+                        - generic [ref=e106]: 
+                        - text: 安全 (1)
+                    - listitem [ref=e107]:
+                      - generic [ref=e108] [cursor=pointer]: 
+                      - generic "运维 (325)" [ref=e109] [cursor=pointer]:
+                        - generic [ref=e110]: 
+                        - text: 运维 (325)
+                      - list [ref=e111]:
+                        - listitem [ref=e112]:
+                          - generic [ref=e113] [cursor=pointer]: 
+                          - generic "中转机 (2)" [ref=e114] [cursor=pointer]:
+                            - generic [ref=e115]: 
+                            - text: 中转机 (2)
+                        - listitem [ref=e116]:
+                          - generic [ref=e117] [cursor=pointer]: 
+                          - generic "天下信用 (67)" [ref=e118] [cursor=pointer]:
+                            - generic [ref=e119]: 
+                            - text: 天下信用 (67)
+                        - listitem [ref=e120]:
+                          - generic [ref=e121] [cursor=pointer]: 
+                          - generic "开发测试 (9)" [ref=e122] [cursor=pointer]:
+                            - generic [ref=e123]: 
+                            - text: 开发测试 (9)
+                        - listitem [ref=e124]:
+                          - generic [ref=e125] [cursor=pointer]: 
+                          - generic "海南凤凰木 (94)" [ref=e126] [cursor=pointer]:
+                            - generic [ref=e127]: 
+                            - text: 海南凤凰木 (94)
+                          - list [ref=e204]:
+                            - listitem [ref=e205]:
+                              - generic [ref=e206] [cursor=pointer]: 
+                              - generic "云上 (27)" [ref=e207] [cursor=pointer]:
+                                - generic [ref=e208]: 
+                                - text: 云上 (27)
+                              - list [ref=e482]:
+                                - listitem [active] [ref=e483]:
+                                  - generic [ref=e484] [cursor=pointer]: 
+                                  - generic "default resource group (1)" [ref=e485] [cursor=pointer]:
+                                    - generic [ref=e486]: 
+                                    - text: default resource group (1)
+                                  - list [ref=e596]:
+                                    - listitem [ref=e597]:
+                                      - generic "192.168.201.252 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9b3sog8afl68spsg1d" [ref=e599] [cursor=pointer]:
+                                        - generic [ref=e600]: 
+                                        - text: worker-k8s-for-cs-ceea9fff2424348eea1ddec561b482264
+                                - listitem [ref=e487]:
+                                  - generic [ref=e488] [cursor=pointer]: 
+                                  - generic "公开报告 (1)" [ref=e489] [cursor=pointer]:
+                                    - generic [ref=e490]: 
+                                    - text: 公开报告 (1)
+                                - listitem [ref=e491]:
+                                  - generic [ref=e492] [cursor=pointer]: 
+                                  - generic "未分组 (25)" [ref=e493] [cursor=pointer]:
+                                    - generic [ref=e494]: 
+                                    - text: 未分组 (25)
+                                  - list [ref=e495]:
+                                    - listitem [ref=e496]:
+                                      - generic "192.168.189.135 阿里云 jiangyh@hnprod 华南1(深圳) i-wz92puqsr0y0cheou2w3" [ref=e498] [cursor=pointer]:
+                                        - generic [ref=e499]: 
+                                        - text: dba主机--Kettle
+                                    - listitem [ref=e500]:
+                                      - generic "192.168.203.169 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9if96moi4ceagqlgpe" [ref=e502] [cursor=pointer]:
+                                        - generic [ref=e503]: 
+                                        - text: DBA管理机
+                                    - listitem [ref=e504]:
+                                      - generic "192.168.200.2 阿里云 jiangyh@hnprod 华南1(深圳) i-wz92dmqg9w4x73gypfmj" [ref=e506] [cursor=pointer]:
+                                        - generic [ref=e507]: 
+                                        - text: hnsearchk8s_n4_link_ob_redis
+                                    - listitem [ref=e508]:
+                                      - generic "192.168.183.113" [ref=e510] [cursor=pointer]:
+                                        - generic [ref=e511]: 
+                                        - text: hnyun-corpsearch-n10
+                                    - listitem [ref=e512]:
+                                      - generic "192.168.201.92 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9c437dx8xtptcs4f9p" [ref=e514] [cursor=pointer]:
+                                        - generic [ref=e515]: 
+                                        - text: hnyun_corpsearch_n9
+                                    - listitem [ref=e516]:
+                                      - generic "192.168.189.139 阿里云 jiangyh@hnprod 华南1(深圳) i-wz99qqr9drbfm5m8jyh7" [ref=e518] [cursor=pointer]:
+                                        - generic [ref=e519]: 
+                                        - text: openReport_GPU_min伸缩版
+                                    - listitem [ref=e520]:
+                                      - generic "192.168.189.137 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9idz9decz7aupcg2tw" [ref=e522] [cursor=pointer]:
+                                        - generic [ref=e523]: 
+                                        - text: openReport_milvus
+                                    - listitem [ref=e524]:
+                                      - generic "192.168.202.124 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9a34rw0j6wbb32chvn" [ref=e526] [cursor=pointer]:
+                                        - generic [ref=e527]: 
+                                        - text: openvpn
+                                    - listitem [ref=e528]:
+                                      - generic "192.168.200.37 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9eauym9eiq35chlnab" [ref=e530] [cursor=pointer]:
+                                        - generic [ref=e531]: 
+                                        - text: prod-hnfhm-abtest-pycorp-zk1
+                                    - listitem [ref=e532]:
+                                      - generic "192.168.201.37 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9d74mj3se0294dg8ov" [ref=e534] [cursor=pointer]:
+                                        - generic [ref=e535]: 
+                                        - text: prod-hnfhm-abtest-pycorp-zk2
+                                    - listitem [ref=e536]:
+                                      - generic "192.168.201.38 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9d74mj3se0294dg8p4" [ref=e538] [cursor=pointer]:
+                                        - generic [ref=e539]: 
+                                        - text: prod-hnfhm-abtest-pycorp-zk3
+                                    - listitem [ref=e540]:
+                                      - generic "192.168.201.50 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9d74mj3se0294dg8p9" [ref=e542] [cursor=pointer]:
+                                        - generic [ref=e543]: 
+                                        - text: prod-hnfhm-bus-nginx
+                                    - listitem [ref=e544]:
+                                      - generic "192.168.200.50 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9d74mj3se0294dg8p9" [ref=e546] [cursor=pointer]:
+                                        - generic [ref=e547]: 
+                                        - text: prod-hnfhm-bus-nginx_192.168.200.50
+                                    - listitem [ref=e548]:
+                                      - generic "192.168.200.8 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9eauym9eiq35chlnah" [ref=e550] [cursor=pointer]:
+                                        - generic [ref=e551]: 
+                                        - text: prod-hnfhm-DNS
+                                    - listitem [ref=e552]:
+                                      - generic "192.168.201.8 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9d74mj3se0294dg8pb" [ref=e554] [cursor=pointer]:
+                                        - generic [ref=e555]: 
+                                        - text: prod-hnfhm-DNS_webNginx
+                                    - listitem [ref=e556]:
+                                      - generic "192.168.200.9 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9d74mj3se0294dg8p6" [ref=e558] [cursor=pointer]:
+                                        - generic [ref=e559]: 
+                                        - text: prod-hnfhm-proxytogl-nginx_192.168.200.9
+                                    - listitem [ref=e560]:
+                                      - generic "192.168.201.9 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9d74mj3se0294dg8p6" [ref=e562] [cursor=pointer]:
+                                        - generic [ref=e563]: 
+                                        - text: prod-hnfhm-proxytogl-nginx_192.168.201.9
+                                    - listitem [ref=e564]:
+                                      - generic "192.168.202.125 阿里云 jiangyh@hnprod 华南1(深圳) i-wz911tpv86rh3hen1z7w" [ref=e566] [cursor=pointer]:
+                                        - generic [ref=e567]: 
+                                        - text: prod-hnfhm-splunk-转发器
+                                    - listitem [ref=e568]:
+                                      - generic "192.168.200.3 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9729740fwf5gzsi4uw" [ref=e570] [cursor=pointer]:
+                                        - generic [ref=e571]: 
+                                        - text: prod-hnfhm-zabbix
+                                    - listitem [ref=e572]:
+                                      - generic "192.168.201.24 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9d74mj3se0294dg8p0" [ref=e574] [cursor=pointer]:
+                                        - generic [ref=e575]: 
+                                        - text: prod-hnhfm-pycorp-ws-nginx
+                                    - listitem [ref=e576]:
+                                      - generic "192.168.202.251 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9eauym9eipm5owo8dg" [ref=e578] [cursor=pointer]:
+                                        - generic [ref=e579]: 
+                                        - text: vfw-A-网络组使用
+                                    - listitem [ref=e580]:
+                                      - generic "192.168.202.252 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9abtr8fgz6rxn7ybtu" [ref=e582] [cursor=pointer]:
+                                        - generic [ref=e583]: 
+                                        - text: vfw-B-网络组使用
+                                    - listitem [ref=e584]:
+                                      - generic "192.168.201.1 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9e4bnchgsc6fmzg4tf" [ref=e586] [cursor=pointer]:
+                                        - generic [ref=e587]: 
+                                        - text: 一级域名跳转到oss上
+                                    - listitem [ref=e588]:
+                                      - generic "192.168.200.10 阿里云 jiangyh@hnprod 华南1(深圳) i-wz9a72ewxnbqjfzminla" [ref=e590] [cursor=pointer]:
+                                        - generic [ref=e591]: 
+                                        - text: 蜜罐
+                                    - listitem [ref=e592]:
+                                      - generic "192.168.201.2 阿里云 jiangyh@hnprod 华南1(深圳) i-wz932s5d4ktrk84njo97" [ref=e594] [cursor=pointer]:
+                                        - generic [ref=e595]: 
+                                        - text: 蜜罐2
+                            - listitem [ref=e209]:
+                              - generic [ref=e210] [cursor=pointer]: 
+                              - generic "观澜 (67)" [ref=e211] [cursor=pointer]:
+                                - generic [ref=e212]: 
+                                - text: 观澜 (67)
+                              - list [ref=e213]:
+                                - listitem [ref=e214]:
+                                  - generic "10.60.23.51 IDC海南总线-NG" [ref=e216] [cursor=pointer]:
+                                    - generic [ref=e217]: 
+                                    - text: hngl_bus_ng_10.60.23.51
+                                - listitem [ref=e218]:
+                                  - generic "10.60.23.52 IDC海南总线-NG" [ref=e220] [cursor=pointer]:
+                                    - generic [ref=e221]: 
+                                    - text: hngl_bus_ng_10.60.23.52
+                                - listitem [ref=e222]:
+                                  - generic "10.60.23.57 IDC海南总线-redis" [ref=e224] [cursor=pointer]:
+                                    - generic [ref=e225]: 
+                                    - text: hngl_bus_redis_10.60.23.57
+                                - listitem [ref=e226]:
+                                  - generic "10.60.23.58 IDC海南总线-redis" [ref=e228] [cursor=pointer]:
+                                    - generic [ref=e229]: 
+                                    - text: hngl_bus_redis_10.60.23.58
+                                - listitem [ref=e230]:
+                                  - generic "10.60.15.102 IDC海南公开报告-公开报告" [ref=e232] [cursor=pointer]:
+                                    - generic [ref=e233]: 
+                                    - text: hngl_commonreport_apm_10.60.15.102
+                                - listitem [ref=e234]:
+                                  - generic "10.60.15.60 IDC海南企业搜索-企业搜索" [ref=e236] [cursor=pointer]:
+                                    - generic [ref=e237]: 
+                                    - text: hngl_corpsearch_m_10.60.15.60
+                                - listitem [ref=e238]:
+                                  - generic "10.60.15.61 IDC海南企业搜索-企业搜索" [ref=e240] [cursor=pointer]:
+                                    - generic [ref=e241]: 
+                                    - text: hngl_corpsearch_n1_10.60.15.61
+                                - listitem [ref=e242]:
+                                  - generic "10.60.15.76 IDC海南企业搜索-企业搜索" [ref=e244] [cursor=pointer]:
+                                    - generic [ref=e245]: 
+                                    - text: hngl_corpsearch_n11_10.60.15.76
+                                - listitem [ref=e246]:
+                                  - generic "10.60.15.62 IDC海南企业搜索-企业搜索" [ref=e248] [cursor=pointer]:
+                                    - generic [ref=e249]: 
+                                    - text: hngl_corpsearch_n2_10.60.15.62
+                                - listitem [ref=e250]:
+                                  - generic "10.60.15.63 IDC海南企业搜索-企业搜索" [ref=e252] [cursor=pointer]:
+                                    - generic [ref=e253]: 
+                                    - text: hngl_corpsearch_n3_10.60.15.63
+                                - listitem [ref=e254]:
+                                  - generic "10.60.15.69 IDC海南企业搜索-es" [ref=e256] [cursor=pointer]:
+                                    - generic [ref=e257]: 
+                                    - text: hngl_corpsearch_n5_10.60.15.69
+                                - listitem [ref=e258]:
+                                  - generic "10.60.15.64 IDC海南企业搜索-企业搜索" [ref=e260] [cursor=pointer]:
+                                    - generic [ref=e261]: 
+                                    - text: hngl_corpsearch_n6_10.60.15.64
+                                - listitem [ref=e262]:
+                                  - generic "10.60.15.70 IDC海南企业搜索-企业搜索" [ref=e264] [cursor=pointer]:
+                                    - generic [ref=e265]: 
+                                    - text: hngl_corpsearch_n7_10.60.15.70
+                                - listitem [ref=e266]:
+                                  - generic "10.60.15.71 IDC海南企业搜索-企业搜索" [ref=e268] [cursor=pointer]:
+                                    - generic [ref=e269]: 
+                                    - text: hngl_corpsearch_n8_10.60.15.71
+                                - listitem [ref=e270]:
+                                  - generic "10.60.15.51" [ref=e272] [cursor=pointer]:
+                                    - generic [ref=e273]: 
+                                    - text: hngl_corpsearch_nacos-10.60.15.51
+                                - listitem [ref=e274]:
+                                  - generic "10.60.15.52" [ref=e276] [cursor=pointer]:
+                                    - generic [ref=e277]: 
+                                    - text: hngl_corpsearch_nacos-10.60.15.52
+                                - listitem [ref=e278]:
+                                  - generic "10.60.15.53" [ref=e280] [cursor=pointer]:
+                                    - generic [ref=e281]: 
+                                    - text: hngl_corpsearch_nacos-10.60.15.53
+                                - listitem [ref=e282]:
+                                  - generic "10.60.15.110" [ref=e284] [cursor=pointer]:
+                                    - generic [ref=e285]: 
+                                    - text: hngl_es_auxenter-10.60.15.110
+                                - listitem [ref=e286]:
+                                  - generic "10.60.15.111" [ref=e288] [cursor=pointer]:
+                                    - generic [ref=e289]: 
+                                    - text: hngl_es_auxenter-10.60.15.111
+                                - listitem [ref=e290]:
+                                  - generic "10.60.15.112" [ref=e292] [cursor=pointer]:
+                                    - generic [ref=e293]: 
+                                    - text: hngl_es_auxenter-10.60.15.112
+                                - listitem [ref=e294]:
+                                  - generic "10.60.15.113" [ref=e296] [cursor=pointer]:
+                                    - generic [ref=e297]: 
+                                    - text: hngl_es_auxenter-10.60.15.113
+                                - listitem [ref=e298]:
+                                  - generic "10.60.15.65 IDC海南企业搜索-es" [ref=e300] [cursor=pointer]:
+                                    - generic [ref=e301]: 
+                                    - text: hngl_es_corpsearch_10.60.15.65
+                                - listitem [ref=e302]:
+                                  - generic "10.60.15.66 IDC海南企业搜索-es" [ref=e304] [cursor=pointer]:
+                                    - generic [ref=e305]: 
+                                    - text: hngl_es_corpsearch_10.60.15.66
+                                - listitem [ref=e306]:
+                                  - generic "10.60.15.67 IDC海南企业搜索-es" [ref=e308] [cursor=pointer]:
+                                    - generic [ref=e309]: 
+                                    - text: hngl_es_corpsearch_10.60.15.67
+                                - listitem [ref=e310]:
+                                  - generic "10.60.15.68 IDC海南企业搜索-es" [ref=e312] [cursor=pointer]:
+                                    - generic [ref=e313]: 
+                                    - text: hngl_es_corpsearch_10.60.15.68
+                                - listitem [ref=e314]:
+                                  - generic "10.60.15.73 IDC海南企业搜索-es" [ref=e316] [cursor=pointer]:
+                                    - generic [ref=e317]: 
+                                    - text: hngl_es_corpsearch2_10.60.15.73
+                                - listitem [ref=e318]:
+                                  - generic "10.60.15.74 IDC海南企业搜索-es" [ref=e320] [cursor=pointer]:
+                                    - generic [ref=e321]: 
+                                    - text: hngl_es_corpsearch2_10.60.15.74
+                                - listitem [ref=e322]:
+                                  - generic "10.60.15.75 IDC海南企业搜索-es" [ref=e324] [cursor=pointer]:
+                                    - generic [ref=e325]: 
+                                    - text: hngl_es_corpsearch2_10.60.15.75
+                                - listitem [ref=e326]:
+                                  - generic "10.60.23.142 IDC海南IMS-IMS" [ref=e328] [cursor=pointer]:
+                                    - generic [ref=e329]: 
+                                    - text: hngl_ims_mq_zk_10.60.23.142
+                                - listitem [ref=e330]:
+                                  - generic "10.60.23.143 IDC海南IMS-IMS" [ref=e332] [cursor=pointer]:
+                                    - generic [ref=e333]: 
+                                    - text: hngl_ims_mq_zk_10.60.23.143
+                                - listitem [ref=e334]:
+                                  - generic "10.60.23.150 IDC海南IMS-IMS" [ref=e336] [cursor=pointer]:
+                                    - generic [ref=e337]: 
+                                    - text: hngl_ims_redis_10.60.23.150
+                                - listitem [ref=e338]:
+                                  - generic "10.60.23.136 IDC海南IMS-IMS" [ref=e340] [cursor=pointer]:
+                                    - generic [ref=e341]: 
+                                    - text: hngl_ims_web_10.60.23.136
+                                - listitem [ref=e342]:
+                                  - generic "10.60.23.137 IDC海南IMS-IMS" [ref=e344] [cursor=pointer]:
+                                    - generic [ref=e345]: 
+                                    - text: hngl_ims_web_10.60.23.137
+                                - listitem [ref=e346]:
+                                  - generic "10.60.23.89 IDC海南IMS-IMS" [ref=e348] [cursor=pointer]:
+                                    - generic [ref=e349]: 
+                                    - text: hngl_ims_zk_ftp_10.60.23.89
+                                - listitem [ref=e350]:
+                                  - generic "10.60.23.43 IDC海南MQ-MQ" [ref=e352] [cursor=pointer]:
+                                    - generic [ref=e353]: 
+                                    - text: hngl_mq_master_10.60.23.43
+                                - listitem [ref=e354]:
+                                  - generic "10.60.23.44 IDC海南MQ-MQ" [ref=e356] [cursor=pointer]:
+                                    - generic [ref=e357]: 
+                                    - text: hngl_mq_master_10.60.23.44
+                                - listitem [ref=e358]:
+                                  - generic "10.60.23.45 IDC海南MQ-MQ" [ref=e360] [cursor=pointer]:
+                                    - generic [ref=e361]: 
+                                    - text: hngl_mq_master_10.60.23.45
+                                - listitem [ref=e362]:
+                                  - generic "10.60.23.40 IDC海南MQ-MQ" [ref=e364] [cursor=pointer]:
+                                    - generic [ref=e365]: 
+                                    - text: hngl_mq_namesrv_slave_10.60.23.40
+                                - listitem [ref=e366]:
+                                  - generic "10.60.23.41 IDC海南MQ-MQ" [ref=e368] [cursor=pointer]:
+                                    - generic [ref=e369]: 
+                                    - text: hngl_mq_namesrv_slave_10.60.23.41
+                                - listitem [ref=e370]:
+                                  - generic "10.60.23.42 IDC海南MQ-MQ" [ref=e372] [cursor=pointer]:
+                                    - generic [ref=e373]: 
+                                    - text: hngl_mq_namesrv_slave_10.60.23.42
+                                - listitem [ref=e374]:
+                                  - generic "10.60.15.81 IDC海南公开报告-公开报告" [ref=e376] [cursor=pointer]:
+                                    - generic [ref=e377]: 
+                                    - text: hngl_openreport_nameclean_10.60.15.81
+                                - listitem [ref=e378]:
+                                  - generic "10.60.23.102 IDC海南备份机-备份机" [ref=e380] [cursor=pointer]:
+                                    - generic [ref=e381]: 
+                                    - text: hngl_ops_backup_10.60.23.102
+                                - listitem [ref=e382]:
+                                  - generic "10.60.23.11 IDC海南NG-NG" [ref=e384] [cursor=pointer]:
+                                    - generic [ref=e385]: 
+                                    - text: hngl_proxyforyun_nginx_10.60.23.11
+                                - listitem [ref=e386]:
+                                  - generic "10.60.23.12 IDC海南NG-NG" [ref=e388] [cursor=pointer]:
+                                    - generic [ref=e389]: 
+                                    - text: hngl_proxyforyun_nginx_10.60.23.12
+                                - listitem [ref=e390]:
+                                  - generic "10.60.23.5 IDC海南NG-NG" [ref=e392] [cursor=pointer]:
+                                    - generic [ref=e393]: 
+                                    - text: hngl_proxytoyun_nginx_10.60.23.5
+                                - listitem [ref=e394]:
+                                  - generic "10.60.23.6 IDC海南NG-NG" [ref=e396] [cursor=pointer]:
+                                    - generic [ref=e397]: 
+                                    - text: hngl_proxytoyun_nginx_10.60.23.6
+                                - listitem [ref=e398]:
+                                  - generic "10.60.23.135 IDC海南运维平台-运维平台" [ref=e400] [cursor=pointer]:
+                                    - generic [ref=e401]: 
+                                    - text: hngl_pycorp_jenkins_10.60.23.135
+                                - listitem [ref=e402]:
+                                  - generic "10.60.23.130 IDC海南K8S节点-K8S节点" [ref=e404] [cursor=pointer]:
+                                    - generic [ref=e405]: 
+                                    - text: hngl_pycorp_master_10.60.23.130
+                                - listitem [ref=e406]:
+                                  - generic "10.60.23.131 IDC海南K8S节点-K8S节点" [ref=e408] [cursor=pointer]:
+                                    - generic [ref=e409]: 
+                                    - text: hngl_pycorp_node1_10.60.23.131
+                                - listitem [ref=e410]:
+                                  - generic "10.60.23.132 IDC海南K8S节点-K8S节点" [ref=e412] [cursor=pointer]:
+                                    - generic [ref=e413]: 
+                                    - text: hngl_pycorp_node2_10.60.23.132
+                                - listitem [ref=e414]:
+                                  - generic "10.60.23.133 IDC海南K8S节点-K8S节点" [ref=e416] [cursor=pointer]:
+                                    - generic [ref=e417]: 
+                                    - text: hngl_pycorp_node3_10.60.23.133
+                                - listitem [ref=e418]:
+                                  - generic "10.60.23.121 IDC海南NG-NG" [ref=e420] [cursor=pointer]:
+                                    - generic [ref=e421]: 
+                                    - text: hngl_pycorp_webnginx_10.60.23.121
+                                - listitem [ref=e422]:
+                                  - generic "10.60.23.123 IDC海南NG-NG" [ref=e424] [cursor=pointer]:
+                                    - generic [ref=e425]: 
+                                    - text: hngl_pycorp_wsnginx_10.60.23.123
+                                - listitem [ref=e426]:
+                                  - generic "10.60.23.124 IDC海南NG-NG" [ref=e428] [cursor=pointer]:
+                                    - generic [ref=e429]: 
+                                    - text: hngl_pycorp_wsnginx_10.60.23.124
+                                - listitem [ref=e430]:
+                                  - generic "10.60.23.28 IDC海南ZK-ZK" [ref=e432] [cursor=pointer]:
+                                    - generic [ref=e433]: 
+                                    - text: hngl_pycorp_zk_10.60.23.28
+                                - listitem [ref=e434]:
+                                  - generic "10.60.23.26 IDC海南ZK-ZK" [ref=e436] [cursor=pointer]:
+                                    - generic [ref=e437]: 
+                                    - text: hngl_pycorp_zk_mqslave_10.60.23.26
+                                - listitem [ref=e438]:
+                                  - generic "10.60.23.27 IDC海南ZK-ZK" [ref=e440] [cursor=pointer]:
+                                    - generic [ref=e441]: 
+                                    - text: hngl_pycorp_zk_mqslave_10.60.23.27
+                                - listitem [ref=e442]:
+                                  - generic "10.60.19.50 IDC海南运维平台-运维平台" [ref=e444] [cursor=pointer]:
+                                    - generic [ref=e445]: 
+                                    - text: hngl_splunk_searchhead_10.60.19.50
+                                - listitem [ref=e446]:
+                                  - generic "10.60.15.76 IDC海南企业搜索-starrocks" [ref=e448] [cursor=pointer]:
+                                    - generic [ref=e449]: 
+                                    - text: hngl_starrocks_be_10.60.15.76
+                                - listitem [ref=e450]:
+                                  - generic "10.60.15.77 IDC海南企业搜索-starrocks" [ref=e452] [cursor=pointer]:
+                                    - generic [ref=e453]: 
+                                    - text: hngl_starrocks_be_10.60.15.77
+                                - listitem [ref=e454]:
+                                  - generic "10.60.15.78 IDC海南企业搜索-starrocks" [ref=e456] [cursor=pointer]:
+                                    - generic [ref=e457]: 
+                                    - text: hngl_starrocks_be_10.60.15.78
+                                - listitem [ref=e458]:
+                                  - generic "10.60.15.72 IDC海南企业搜索-starrocks" [ref=e460] [cursor=pointer]:
+                                    - generic [ref=e461]: 
+                                    - text: hngl_starrocks_fe_10.60.15.72
+                                - listitem [ref=e462]:
+                                  - generic "10.60.23.16 IDC海南运维平台-运维平台" [ref=e464] [cursor=pointer]:
+                                    - generic [ref=e465]: 
+                                    - text: hngl_zabbix_proxy_10.60.23.16
+                                - listitem [ref=e466]:
+                                  - generic "10.60.23.17 IDC海南运维平台-运维平台" [ref=e468] [cursor=pointer]:
+                                    - generic [ref=e469]: 
+                                    - text: hngl_zabbix_proxy_10.60.23.17
+                                - listitem [ref=e470]:
+                                  - generic "10.60.23.139 IDC海南未知-未知" [ref=e472] [cursor=pointer]:
+                                    - generic [ref=e473]: 
+                                    - text: localhost.localdomain_10.60.23.139
+                                - listitem [ref=e474]:
+                                  - generic "10.60.10.151 IDC海南NG-NG" [ref=e476] [cursor=pointer]:
+                                    - generic [ref=e477]: 
+                                    - text: szgl_txxy_search_nginx_10.60.10.151
+                                - listitem [ref=e478]:
+                                  - generic "10.60.10.152 IDC海南NG-NG" [ref=e480] [cursor=pointer]:
+                                    - generic [ref=e481]: 
+                                    - text: szgl_txxy_search_nginx_10.60.10.152
+                        - listitem [ref=e128]:
+                          - generic [ref=e129] [cursor=pointer]: 
+                          - generic "管理机 (7)" [ref=e130] [cursor=pointer]:
+                            - generic [ref=e131]: 
+                            - text: 管理机 (7)
+                        - listitem [ref=e132]:
+                          - generic [ref=e133] [cursor=pointer]: 
+                          - generic "鹏元征信 (129)" [ref=e134] [cursor=pointer]:
+                            - generic [ref=e135]: 
+                            - text: 鹏元征信 (129)
+                        - listitem [ref=e136]:
+                          - generic "http://dm.txxy.com" [ref=e138] [cursor=pointer]: dm
+                        - listitem [ref=e140]:
+                          - generic "192.168.201.248" [ref=e142] [cursor=pointer]:
+                            - generic [ref=e143]: 
+                            - text: hnyum_k8smanager_192.168.201.248
+                        - listitem [ref=e144]:
+                          - generic "192.168.196.22 华为云_hwy_fisco_chainmaker_192.168.196.22" [ref=e146] [cursor=pointer]:
+                            - generic [ref=e147]: 
+                            - text: hwy_fisco_chainmaker_192.168.196.22
+                        - listitem [ref=e148]:
+                          - generic "192.168.196.23 华为云_hwy_fisco_chainmaker_192.168.196.23" [ref=e150] [cursor=pointer]:
+                            - generic [ref=e151]: 
+                            - text: hwy_fisco_chainmaker_192.168.196.23
+                        - listitem [ref=e152]:
+                          - generic "192.168.197.22 华为云_hwy_fisco_chainmaker_192.168.197.22" [ref=e154] [cursor=pointer]:
+                            - generic [ref=e155]: 
+                            - text: hwy_fisco_chainmaker_192.168.197.22
+                        - listitem [ref=e156]:
+                          - generic "192.168.197.23 华为云_hwy_fisco_chainmaker_192.168.197.23" [ref=e158] [cursor=pointer]:
+                            - generic [ref=e159]: 
+                            - text: hwy_fisco_chainmaker_192.168.197.23
+                        - listitem [ref=e160]:
+                          - generic "192.168.196.177 华为云_hwy_k8snode_192.168.196.177" [ref=e162] [cursor=pointer]:
+                            - generic [ref=e163]: 
+                            - text: hwy_k8snode_192.168.196.177
+                        - listitem [ref=e164]:
+                          - generic "192.168.196.186 华为云_hwy_k8snode_192.168.196.186" [ref=e166] [cursor=pointer]:
+                            - generic [ref=e167]: 
+                            - text: hwy_k8snode_192.168.196.186
+                        - listitem [ref=e168]:
+                          - generic "192.168.197.242 华为云_hwy_k8snode_192.168.197.242" [ref=e170] [cursor=pointer]:
+                            - generic [ref=e171]: 
+                            - text: hwy_k8snode_192.168.197.242
+                        - listitem [ref=e172]:
+                          - generic "192.168.197.247 华为云_hwy_k8snode_192.168.197.247" [ref=e174] [cursor=pointer]:
+                            - generic [ref=e175]: 
+                            - text: hwy_k8snode_192.168.197.247
+                        - listitem [ref=e176]:
+                          - generic "192.168.196.20 华为云_hwy_nginx_192.168.196.20" [ref=e178] [cursor=pointer]:
+                            - generic [ref=e179]: 
+                            - text: hwy_nginx_192.168.196.20
+                        - listitem [ref=e180]:
+                          - generic "192.168.197.20 华为云_hwy_nginx_192.168.197.20" [ref=e182] [cursor=pointer]:
+                            - generic [ref=e183]: 
+                            - text: hwy_nginx_192.168.197.20
+                        - listitem [ref=e184]:
+                          - generic "192.168.199.6 6楼数陶陶和区块链项目-prod(196,197,199)>0_192.168.199.6_saltmaster_jenkins_splunk" [ref=e186] [cursor=pointer]:
+                            - generic [ref=e187]: 
+                            - text: hwy_ops_admin_192.168.199.6
+                        - listitem [ref=e188]:
+                          - generic "192.168.196.53 华为云_hwy_txxy_chainmaker_192.168.196.53" [ref=e190] [cursor=pointer]:
+                            - generic [ref=e191]: 
+                            - text: hwy_txxy_chainmaker_192.168.196.53
+                        - listitem [ref=e192]:
+                          - generic "192.168.196.86 华为云_hwy_txxy_chainmaker_192.168.196.86" [ref=e194] [cursor=pointer]:
+                            - generic [ref=e195]: 
+                            - text: hwy_txxy_chainmaker_192.168.196.86
+                        - listitem [ref=e196]:
+                          - generic "192.168.197.143 华为云_hwy_txxy_chainmaker_192.168.197.143" [ref=e198] [cursor=pointer]:
+                            - generic [ref=e199]: 
+                            - text: hwy_txxy_chainmaker_192.168.197.143
+                        - listitem [ref=e200]:
+                          - generic "192.168.197.167 华为云_hwy_txxy_chainmaker_192.168.197.167" [ref=e202] [cursor=pointer]:
+                            - generic [ref=e203]: 
+                            - text: hwy_txxy_chainmaker_192.168.197.167
+            - generic [ref=e58]:
+              - generic [ref=e59] [cursor=pointer]:
+                - generic [ref=e60]: 
+                - generic [ref=e61]: Type tree
+              - generic [ref=e62]:
+                - generic [ref=e63] [cursor=pointer]: 
+                - generic [ref=e64] [cursor=pointer]: 
+          - generic [ref=e65]:
+            - generic [ref=e67] [cursor=pointer]: 
+            - paragraph [ref=e68]:
+              - text: Version
+              - strong [ref=e69]: v4.4.0
+      - generic [ref=e73]:
+        - generic [ref=e74]:
+          - text: 
+          - generic [ref=e75] [cursor=pointer]:
+            - generic [ref=e77]: 
+            - generic [ref=e79]: 
+          - list [ref=e81]
+        - list [ref=e86]:
+          - listitem [ref=e87]: Right click on the asset Reselect asset connection method
+          - listitem [ref=e88]: Right click node Expand all assets under the current node
+          - listitem [ref=e89]: Settings → Basic Settings Configure Asset Tree Loading Method
+          - listitem [ref=e90]: Help → Download Download the latest client
+          - listitem [ref=e91]: Switch session → Shortcut keys Option + Shift + Left / Right

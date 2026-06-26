@@ -30,8 +30,7 @@ pub const DEFAULT_SYSTEM_HOTKEY_MACOS: &str = "cmd-alt-m";
 pub const DEFAULT_SYSTEM_HOTKEY_OTHER: &str = "ctrl-space";
 
 pub use one_core::settings::{
-    AppSettings, GlobalProxySettings,
-    LargeTextCellEditorOpenMode, ProxyType,
+    AppSettings, GlobalProxySettings, LargeTextCellEditorOpenMode, ProxyType,
 };
 use one_core::tab_container::{TabContent, TabContentEvent};
 use one_core::utils::auto_save_config::AutoSaveConfig;
@@ -333,9 +332,7 @@ impl SettingsPanel {
                             SettingItem::new(
                                 t!("Settings.General.Terminal.autocomplete"),
                                 SettingField::switch(
-                                    |cx: &App| {
-                                        AppSettings::global(cx).terminal_enable_autocomplete
-                                    },
+                                    |cx: &App| AppSettings::global(cx).terminal_enable_autocomplete,
                                     |val: bool, cx: &mut App| {
                                         AppSettings::update_and_save(cx, |settings| {
                                             settings.terminal_enable_autocomplete = val;
@@ -350,9 +347,7 @@ impl SettingsPanel {
                             SettingItem::new(
                                 t!("Settings.General.Terminal.middle_click_paste"),
                                 SettingField::switch(
-                                    |cx: &App| {
-                                        AppSettings::global(cx).terminal_middle_click_paste
-                                    },
+                                    |cx: &App| AppSettings::global(cx).terminal_middle_click_paste,
                                     |val: bool, cx: &mut App| {
                                         AppSettings::update_and_save(cx, |settings| {
                                             settings.terminal_middle_click_paste = val;
@@ -368,8 +363,7 @@ impl SettingsPanel {
                                 t!("Settings.General.Terminal.confirm_multiline_paste"),
                                 SettingField::switch(
                                     |cx: &App| {
-                                        AppSettings::global(cx)
-                                            .terminal_confirm_multiline_paste
+                                        AppSettings::global(cx).terminal_confirm_multiline_paste
                                     },
                                     |val: bool, cx: &mut App| {
                                         AppSettings::update_and_save(cx, |settings| {
@@ -377,9 +371,7 @@ impl SettingsPanel {
                                         });
                                     },
                                 )
-                                .default_value(
-                                    default_settings.terminal_confirm_multiline_paste,
-                                ),
+                                .default_value(default_settings.terminal_confirm_multiline_paste),
                             )
                             .description(
                                 t!("Settings.General.Terminal.confirm_multiline_paste_desc")
@@ -389,8 +381,7 @@ impl SettingsPanel {
                                 t!("Settings.General.Terminal.confirm_high_risk"),
                                 SettingField::switch(
                                     |cx: &App| {
-                                        AppSettings::global(cx)
-                                            .terminal_confirm_high_risk_command
+                                        AppSettings::global(cx).terminal_confirm_high_risk_command
                                     },
                                     |val: bool, cx: &mut App| {
                                         AppSettings::update_and_save(cx, |settings| {
@@ -398,9 +389,7 @@ impl SettingsPanel {
                                         });
                                     },
                                 )
-                                .default_value(
-                                    default_settings.terminal_confirm_high_risk_command,
-                                ),
+                                .default_value(default_settings.terminal_confirm_high_risk_command),
                             )
                             .description(
                                 t!("Settings.General.Terminal.confirm_high_risk_desc").to_string(),
@@ -430,11 +419,11 @@ impl SettingsPanel {
                         })),
                 ]),
             // 快捷键页面
-            SettingPage::new(t!("Settings.Shortcuts.title")).group(
-                SettingGroup::new().item(SettingItem::render(move |_options, window, cx| {
+            SettingPage::new(t!("Settings.Shortcuts.title")).group(SettingGroup::new().item(
+                SettingItem::render(move |_options, window, cx| {
                     render_shortcuts_section(default_system_hotkey.clone(), window, cx)
-                })),
-            ),
+                }),
+            )),
             // 关于页面
             SettingPage::new(t!("Settings.About.title")).group(SettingGroup::new().item(
                 SettingItem::render(move |_options, _window, cx| render_about_section(cx)),
@@ -1164,16 +1153,13 @@ const TERMINAL_SHORTCUTS: &[ShortcutEntry] = &[
     },
 ];
 
-const DATABASE_SHORTCUTS: &[ShortcutEntry] = &[
-    ShortcutEntry {
-        keys_macos: &["cmd-f"],
-        keys_other: &["ctrl-f"],
-        label_key: "Settings.Shortcuts.database_focus_search",
-        action_id: Some(action_id::DB_FOCUS_SEARCH),
-        system_hotkey: false,
-    },
-];
-
+const DATABASE_SHORTCUTS: &[ShortcutEntry] = &[ShortcutEntry {
+    keys_macos: &["cmd-f"],
+    keys_other: &["ctrl-f"],
+    label_key: "Settings.Shortcuts.database_focus_search",
+    action_id: Some(action_id::DB_FOCUS_SEARCH),
+    system_hotkey: false,
+}];
 
 const REMOTE_EDITOR_SHORTCUTS: &[ShortcutEntry] = &[
     ShortcutEntry {
@@ -1191,7 +1177,6 @@ const REMOTE_EDITOR_SHORTCUTS: &[ShortcutEntry] = &[
         system_hotkey: false,
     },
 ];
-
 
 const SHORTCUT_GROUPS: &[ShortcutGroup] = &[
     ShortcutGroup {

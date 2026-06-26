@@ -48,7 +48,8 @@ use crate::pty_backend::{GpuiEventProxy, LocalPtyBackend};
 #[cfg(not(target_os = "windows"))]
 use crate::shell_integration::embedded_shell_integration_script;
 
-use crate::{LocalConfig, SshBackend, TerminalBackend, TerminalEvent, TerminalSize};
+use crate::{KokoBackend, LocalConfig, SshBackend, TerminalBackend, TerminalEvent, TerminalSize};
+use jms::KokoConnectParams;
 use ssh::{
     ChannelEvent, KeyboardInteractiveRequest, KeyboardInteractiveResponder,
     KeyboardInteractiveTarget, SshChannel, SshSessionManager,
@@ -95,13 +96,17 @@ pub enum ConnectionState {
 pub enum TerminalConnectionKind {
     Local,
     Ssh,
+    /// JumpServer Koko WebSocket 隧道
+    JmsKoko,
 }
 
 const SSH_CLEAR_SCREEN_REDRAW_BYTES: &[u8] = b"\x0c";
 
 fn clear_screen_remote_redraw_bytes(kind: TerminalConnectionKind) -> Option<&'static [u8]> {
     match kind {
-        TerminalConnectionKind::Ssh => Some(SSH_CLEAR_SCREEN_REDRAW_BYTES),
+        TerminalConnectionKind::Ssh | TerminalConnectionKind::JmsKoko => {
+            Some(SSH_CLEAR_SCREEN_REDRAW_BYTES)
+        }
         TerminalConnectionKind::Local => None,
     }
 }
@@ -1031,6 +1036,158 @@ impl Terminal {
     fn next_connection_generation(&mut self) -> u64 {
         self.connection_generation = self.connection_generation.wrapping_add(1).max(1);
         self.connection_generation
+    }
+
+    /// 创建 JumpServer Koko WebSocket 终端
+    pub fn new_jms_koko(params: KokoConnectParams, cx: &mut Context<Self>) -> Self {
+        let title = params.title.clone();
+        let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
+
+        let cols = 80usize;
+        let rows = 24usize;
+        let (term, event_proxy, _colors) = Self::create_term(cols, rows, event_tx.clone());
+        let (disconnect_tx, disconnect_rx) = oneshot::channel::<()>();
+        let connection_generation = 1;
+
+        Self::spawn_disconnect_handler(disconnect_rx, connection_generation, cx);
+        Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
+        Self::spawn_koko_connect(
+            params,
+            term.clone(),
+            event_proxy.clone(),
+            event_tx.clone(),
+            Some(disconnect_tx),
+            cols as u16,
+            rows as u16,
+            connection_generation,
+            cx,
+        );
+
+        Self {
+            term,
+            backend: None,
+            title,
+            current_working_dir: None,
+            child_exited: None,
+            connection_state: ConnectionState::Connecting,
+            cols,
+            rows,
+            pixel_width: 0,
+            pixel_height: 0,
+            ssh_config: None,
+            ssh_session_manager: None,
+            ssh_mfa_responder: None,
+            event_tx: Some(event_tx),
+            event_proxy: Some(event_proxy),
+            connection_id: None,
+            connection_name: None,
+            init_commands: None,
+            session_history: VecDeque::new(),
+            persisted_history: Vec::new(),
+            connection_generation,
+            connection_kind: TerminalConnectionKind::JmsKoko,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_koko_connect(
+        params: KokoConnectParams,
+        term: Arc<FairMutex<Term<GpuiEventProxy>>>,
+        event_proxy: GpuiEventProxy,
+        event_tx: UnboundedSender<TerminalEvent>,
+        on_disconnect: Option<oneshot::Sender<()>>,
+        init_cols: u16,
+        init_rows: u16,
+        generation: u64,
+        cx: &mut Context<Self>,
+    ) {
+        let (notify_tx, mut notify_rx) = unbounded_channel::<()>();
+
+        let task = Tokio::spawn(cx, async move {
+            // 转发通知到事件通道（必须在 tokio runtime 内部）
+            let event_tx_clone = event_tx.clone();
+            tokio::spawn(async move {
+                while notify_rx.recv().await.is_some() {
+                    let _ = event_tx_clone.send(TerminalEvent::Wakeup);
+                }
+            });
+
+            let disconnect_tx = on_disconnect.map(|tx| {
+                let (sender, mut receiver) = unbounded_channel::<()>();
+                tokio::spawn(async move {
+                    if receiver.recv().await.is_some() {
+                        let _ = tx.send(());
+                    }
+                });
+                sender
+            });
+
+            KokoBackend::connect(
+                params,
+                term,
+                event_proxy,
+                event_tx,
+                notify_tx,
+                disconnect_tx,
+                init_cols,
+                init_rows,
+            )
+            .await
+        });
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.handle_koko_result(result, generation, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn handle_koko_result(
+        &mut self,
+        result: Result<Result<KokoBackend, anyhow::Error>, tokio::task::JoinError>,
+        generation: u64,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.is_current_connection_generation(generation) {
+            if let Ok(Ok(backend)) = result {
+                backend.shutdown();
+            }
+            return;
+        }
+
+        match result {
+            Ok(Ok(backend)) => {
+                self.connection_state = ConnectionState::Connected;
+                self.set_connection_active(true, cx);
+                self.term.lock().resize(TermDimensions {
+                    cols: self.cols,
+                    rows: self.rows,
+                });
+                tracing::info!("Koko 连接成功，同步终端尺寸: {}x{}", self.cols, self.rows);
+                backend.resize(TerminalSize {
+                    rows: self.rows as u16,
+                    cols: self.cols as u16,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                });
+                self.backend = Some(Box::new(backend));
+            }
+            Ok(Err(e)) => {
+                self.connection_state = ConnectionState::Disconnected {
+                    error: Some(format_connection_error(&e)),
+                };
+                self.set_connection_active(false, cx);
+            }
+            Err(e) => {
+                self.connection_state = ConnectionState::Disconnected {
+                    error: Some(e.to_string()),
+                };
+                self.set_connection_active(false, cx);
+            }
+        }
+        cx.emit(TerminalModelEvent::Wakeup);
     }
 
     fn is_current_connection_generation(&self, generation: u64) -> bool {

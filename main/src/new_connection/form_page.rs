@@ -35,7 +35,13 @@ impl NewConnectionFormPage for NewConnectionKind {
             Self::Ssh => build_ssh_form(parent, window, cx),
             Self::PortForwarding => build_port_forwarding_form(parent, window, cx),
             Self::Terminal => {
-                // Terminal doesn't need a form
+                // 打开本地终端 - 使用 defer 确保在主窗口上执行
+                let parent_clone = parent.clone();
+                window.defer(cx, move |window, cx| {
+                    parent_clone.update(cx, |home, cx| {
+                        home.add_terminal_tab(window, cx);
+                    });
+                });
                 NewConnectionFormResult::Done
             }
         }

@@ -1,4 +1,4 @@
-use gpui_component::{Icon, IconName, Size, Sizable};
+use gpui_component::{Icon, IconName, Sizable, Size};
 use one_core::storage::DbConnectionConfig;
 use std::path::Path;
 

@@ -16,6 +16,7 @@ pub(crate) fn build_connection_open_strategy(
             workspace,
         }),
         ConnectionType::PortForwarding => Box::new(PortForwardingOpenStrategy { connection }),
+        ConnectionType::Jms => Box::new(JmsOpenStrategy { connection }),
         _ => Box::new(NoopOpenStrategy),
     }
 }
@@ -40,6 +41,16 @@ struct PortForwardingOpenStrategy {
 impl ConnectionOpenStrategy for PortForwardingOpenStrategy {
     fn open(self: Box<Self>, home: &mut HomePage, window: &mut Window, cx: &mut Context<HomePage>) {
         home.open_port_forwarding(self.connection, window, cx);
+    }
+}
+
+struct JmsOpenStrategy {
+    connection: StoredConnection,
+}
+
+impl ConnectionOpenStrategy for JmsOpenStrategy {
+    fn open(self: Box<Self>, home: &mut HomePage, window: &mut Window, cx: &mut Context<HomePage>) {
+        home.open_jms_connection_prefilled(self.connection, window, cx);
     }
 }
 

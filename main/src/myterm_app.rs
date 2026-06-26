@@ -456,10 +456,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let path = std::env::temp_dir()
-            .join(format!(
-                "myterm-log-permission-test-{}",
-                std::process::id()
-            ))
+            .join(format!("myterm-log-permission-test-{}", std::process::id()))
             .join("app.log");
         let _file = log_file_appender(&path).expect("应创建日志文件");
 

@@ -128,6 +128,8 @@ pub struct HomePage {
     port_forwarding_runtime: Arc<tokio::sync::Mutex<PortForwardingRuntime>>,
     master_key_dialog_open: bool,
     master_key_unlock_prompt_pending: bool,
+    pub(crate) pending_jms_connections: Vec<StoredConnection>,
+    pub(crate) pending_jms_koko: Vec<jms::KokoConnectParams>,
 }
 
 
@@ -180,6 +182,8 @@ impl HomePage {
             ),
             master_key_dialog_open: false,
             master_key_unlock_prompt_pending: false,
+            pending_jms_connections: Vec::new(),
+            pending_jms_koko: Vec::new(),
         };
 
         // 异步加载工作区
@@ -262,7 +266,7 @@ impl HomePage {
         .detach();
     }
 
-    fn load_connections(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn load_connections(&mut self, cx: &mut Context<Self>) {
         if self.saved_connections_locked() {
             tracing::warn!("主密钥未解锁，暂缓加载本地连接，避免将加密密码解密为空");
             self.connections.clear();
@@ -497,6 +501,69 @@ impl HomePage {
             PopupWindowOptions::new(t!("Home.new_connection").to_string()).size(1100.0, 700.0),
             move |window, cx| {
                 cx.new(|cx| NewConnectionWindow::new(parent, parent_window, window, cx))
+            },
+            cx,
+        );
+    }
+
+    pub(crate) fn show_jms_connection_dialog(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::jms_connection_window::JmsConnectionWindow;
+        use one_core::popup_window::{PopupWindowOptions, open_popup_window};
+
+        let parent = cx.entity();
+        let parent_window = window.window_handle();
+        open_popup_window(
+            PopupWindowOptions::new("JMS 连接".to_string()).size(800.0, 600.0),
+            move |window, cx| {
+                cx.new(|cx| JmsConnectionWindow::new(parent, parent_window, window, cx))
+            },
+            cx,
+        );
+    }
+
+    /// 从已保存的 JMS 连接打开窗口,自动填充 URL/用户名/密码
+    pub(crate) fn open_jms_connection_prefilled(
+        &mut self,
+        connection: StoredConnection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::jms_connection_window::JmsConnectionWindow;
+        use one_core::popup_window::{PopupWindowOptions, open_popup_window};
+
+        if !self.ensure_master_key_ready_for_saved_connections(window, cx) {
+            return;
+        }
+
+        // 解密 params 后解析(密码字段已加密存储)
+        let decrypted = connection.with_decrypted_params();
+        let params = match decrypted.to_jms_params() {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::error!("解析 JMS 连接参数失败: {e}");
+                return;
+            }
+        };
+        let prefill = Some((connection.id, params));
+
+        let parent = cx.entity();
+        let parent_window = window.window_handle();
+        open_popup_window(
+            PopupWindowOptions::new("JMS 连接".to_string()).size(800.0, 600.0),
+            move |window, cx| {
+                cx.new(|cx| {
+                    JmsConnectionWindow::new_with_prefill(
+                        parent.clone(),
+                        parent_window,
+                        prefill.clone(),
+                        window,
+                        cx,
+                    )
+                })
             },
             cx,
         );
@@ -1105,6 +1172,27 @@ impl HomePage {
                                 this.show_new_connection_dialog(window, cx);
                             })),
                     )
+                    // 本地终端按钮
+                    .child(
+                        Button::new("local-terminal-button")
+                            .icon(IconName::TerminalColor)
+                            .label(t!("Terminal.local"))
+                            .tooltip(t!("Terminal.local"))
+                            .on_click(window.listener_for(&view, move |this, _, window, cx| {
+                                this.add_terminal_tab(window, cx);
+                            })),
+                    )
+                    // 新建JMS连接按钮
+                    .child(
+                        Button::new("new-jms-button")
+                            .icon(IconName::Key)
+                            .label("JMS")
+                            .tooltip("新建JMS连接")
+                            .ghost()
+                            .on_click(window.listener_for(&view, move |this, _, window, cx| {
+                                this.show_jms_connection_dialog(window, cx);
+                            })),
+                    )
                     // 分隔线
                     .child(div().h(px(20.0)).w(px(1.0)).bg(cx.theme().border).mx_1())
                     // 主密钥按钮
@@ -1451,6 +1539,15 @@ impl HomePage {
                     if port_forwarding_connection_info(&params)
                         .to_lowercase()
                         .contains(query)
+                    {
+                        return true;
+                    }
+                }
+            }
+            ConnectionType::Jms => {
+                if let Ok(params) = conn.to_jms_params() {
+                    if params.url.to_lowercase().contains(query)
+                        || params.username.to_lowercase().contains(query)
                     {
                         return true;
                     }
@@ -1820,6 +1917,13 @@ impl HomePage {
                                                 this.editing_connection_id = Some(conn_id);
                                                 this.show_port_forwarding_form(window, cx);
                                             }
+                                            ConnectionType::Jms => {
+                                                this.open_jms_connection_prefilled(
+                                                    edit_conn.clone(),
+                                                    window,
+                                                    cx,
+                                                );
+                                            }
                                             _ => {}
                                         }
                                     }
@@ -1870,6 +1974,10 @@ impl HomePage {
                                     .color()
                                     .with_size(px(40.0))
                                     .text_color(gpui::white()),
+                                ConnectionType::Jms => IconName::Key
+                                    .color()
+                                    .with_size(px(40.0))
+                                    .text_color(gpui::rgb(0x10b981)),
                                 _ => IconName::Server
                                     .color()
                                     .with_size(px(40.0))
@@ -1975,7 +2083,34 @@ impl HomePage {
                                         this
                                     }
                                 },
-                            ),
+                            )
+                            .when(conn.connection_type == ConnectionType::Jms, |this| {
+                                if let Ok(params) = conn.to_jms_params() {
+                                    let conn_info =
+                                        format!("{}@{}", params.username, params.url);
+                                    let tooltip_text: SharedString = conn_info.clone().into();
+                                    this.child(
+                                        div()
+                                            .id(SharedString::from(format!(
+                                                "conn-info-{}",
+                                                conn.id.unwrap_or(0)
+                                            )))
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .whitespace_nowrap()
+                                            .max_w_full()
+                                            .tooltip(move |window, cx| {
+                                                Tooltip::new(tooltip_text.clone())
+                                                    .build(window, cx)
+                                            })
+                                            .child(conn_info),
+                                    )
+                                } else {
+                                    this
+                                }
+                            }),
                     ),
             );
 
@@ -2067,6 +2202,26 @@ impl Render for HomePage {
             window.defer(cx, move |window, cx| {
                 view.update(cx, |this, cx| {
                     this.show_encryption_key_dialog(window, cx);
+                });
+            });
+        }
+
+        // 处理 JMS 待连接队列
+        while let Some(conn) = self.pending_jms_connections.pop() {
+            let view = cx.entity();
+            window.defer(cx, move |window, cx| {
+                view.update(cx, |this, cx| {
+                    this.open_ssh_terminal(conn, None, window, cx);
+                });
+            });
+        }
+
+        // 处理 JMS Koko WebSocket 待连接队列
+        while let Some(params) = self.pending_jms_koko.pop() {
+            let view = cx.entity();
+            window.defer(cx, move |window, cx| {
+                view.update(cx, |this, cx| {
+                    this.open_jms_koko_terminal(params, window, cx);
                 });
             });
         }

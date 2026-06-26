@@ -1,0 +1,31 @@
+- generic [ref=e2]:
+  - link "screen-image" [ref=e4] [cursor=pointer]:
+    - /url: https://github.com/jumpserver/jumpserver.git
+    - img "screen-image" [ref=e5]
+  - generic [ref=e7]:
+    - generic [ref=e8]:
+      - heading "登录" [level=2] [ref=e9]
+      - list [ref=e10]:
+        - listitem [ref=e11]:
+          - link " 中文(简体)" [ref=e12] [cursor=pointer]:
+            - /url: "#"
+            - generic [ref=e13]: 
+            - generic [ref=e14]: 中文(简体)
+    - form [ref=e17]:
+      - generic [ref=e18]:
+        - generic [ref=e19]: 用户名 *
+        - textbox "用户名 *" [ref=e20]:
+          - /placeholder: 用户名
+      - textbox "密码" [ref=e22]
+      - generic [ref=e24]:
+        - generic [ref=e25]: 验证码 *
+        - img "captcha" [ref=e26]
+        - textbox "验证码 *" [ref=e29]:
+          - /placeholder: 验证码
+      - generic [ref=e31]:
+        - generic [ref=e35] [cursor=pointer]:
+          - checkbox "自动登录" [ref=e36]
+          - text: 自动登录
+        - link "忘记密码?" [ref=e38] [cursor=pointer]:
+          - /url: /core/auth/password/forget/previewing/
+      - button "登录" [ref=e40] [cursor=pointer]

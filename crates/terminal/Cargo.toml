@@ -12,6 +12,7 @@ async-trait = { workspace = true }
 one-core = { workspace = true }
 gpui = { workspace = true }
 ssh = { workspace = true }
+jms = { path = "../jms" }
 
 # Terminal emulation
 alacritty_terminal.workspace = true

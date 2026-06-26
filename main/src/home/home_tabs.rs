@@ -55,6 +55,41 @@ impl HomePage {
         });
     }
 
+    /// 打开 JumpServer Koko WebSocket 终端
+    pub(crate) fn open_jms_koko_terminal(
+        &mut self,
+        params: jms::KokoConnectParams,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let tab_id = format!("jms-koko-{}", timestamp);
+
+        // 统计已有 JMS 终端数量，计算序号
+        let existing_count = self
+            .tab_container
+            .read(cx)
+            .tabs()
+            .iter()
+            .filter(|t| t.id().starts_with("jms-koko-"))
+            .count();
+        let tab_index = if existing_count > 0 {
+            Some(existing_count + 1)
+        } else {
+            None
+        };
+
+        let terminal_view =
+            cx.new(|cx| TerminalView::new_jms_koko(params, tab_index, window, cx));
+        self.tab_container.update(cx, |tc, cx| {
+            let tab = TabItem::new(tab_id, "ssh", terminal_view);
+            tc.add_and_activate_tab_with_focus(tab, window, cx);
+        });
+    }
+
     pub(crate) fn open_sftp_view(
         &mut self,
         conn: StoredConnection,
@@ -275,6 +310,9 @@ impl HomePage {
                     TerminalConnectionKind::Local => {
                         // 本地终端：直接新建
                         self.add_terminal_tab(window, cx);
+                    }
+                    TerminalConnectionKind::JmsKoko => {
+                        // JMS Koko 终端依赖一次性连接 token,无法直接复制;需重新走 JMS 连接流程
                     }
                 }
             }

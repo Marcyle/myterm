@@ -6,6 +6,7 @@ mod app_init;
 mod external_driver_display;
 mod home;
 mod home_tab;
+mod jms_connection_window;
 pub mod new_connection;
 mod myterm_app;
 mod setting_tab;

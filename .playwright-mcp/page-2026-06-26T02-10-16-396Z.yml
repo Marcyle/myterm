@@ -1,0 +1,88 @@
+- generic [ref=e1]:
+  - generic:
+    - generic: 
+  - generic [ref=e3]:
+    - generic [ref=e5]:
+      - list [ref=e6]:
+        - listitem [ref=e7]
+        - listitem [ref=e9]:
+          - generic [ref=e10]: File Manager
+        - listitem [ref=e11]:
+          - generic [ref=e12]: View
+        - listitem [ref=e13]:
+          - generic [ref=e14]: Language
+        - listitem [ref=e15]:
+          - generic [ref=e16]: Setting
+        - listitem [ref=e17]:
+          - generic [ref=e18]: Tabs
+        - listitem [ref=e19]:
+          - generic [ref=e20]: Theme
+        - listitem [ref=e21]:
+          - generic [ref=e22]: Help
+      - generic [ref=e27]:
+        - generic [ref=e28]: 
+        - generic [ref=e29]: 徐明远 高级运维工程师
+        - generic [ref=e30]: 
+    - generic [ref=e31]:
+      - generic [ref=e33]:
+        - text:   
+        - generic [ref=e35]:
+          - generic [ref=e39]:
+            - generic [ref=e40]:
+              - generic [ref=e41]:
+                - generic [ref=e42] [cursor=pointer]:
+                  - generic [ref=e43]: 
+                  - generic [ref=e44]: My assets
+                - generic [ref=e45]:
+                  - generic [ref=e46]:
+                    - generic [ref=e47] [cursor=pointer]: 
+                    - textbox [active] [ref=e48]: 10.60.23.100
+                  - generic [ref=e49] [cursor=pointer]: 
+                  - generic [ref=e50] [cursor=pointer]: 
+              - list [ref=e56]:
+                - listitem [ref=e94]:
+                  - generic [ref=e95] [cursor=pointer]: 
+                  - generic "收藏夹 (0)" [ref=e96] [cursor=pointer]:
+                    - generic [ref=e97]: 
+                    - text: 收藏夹 (0)
+                - listitem [ref=e98]:
+                  - generic [ref=e99] [cursor=pointer]: 
+                  - generic "DEFAULT (326)" [ref=e100] [cursor=pointer]:
+                    - generic [ref=e101]: 
+                    - text: DEFAULT (326)
+                  - list [ref=e102]:
+                    - listitem [ref=e103]:
+                      - generic [ref=e104] [cursor=pointer]: 
+                      - generic "安全 (1)" [ref=e105] [cursor=pointer]:
+                        - generic [ref=e106]: 
+                        - text: 安全 (1)
+                    - listitem [ref=e107]:
+                      - generic [ref=e108] [cursor=pointer]: 
+                      - generic "运维 (325)" [ref=e109] [cursor=pointer]:
+                        - generic [ref=e110]: 
+                        - text: 运维 (325)
+            - generic [ref=e58]:
+              - generic [ref=e59] [cursor=pointer]:
+                - generic [ref=e60]: 
+                - generic [ref=e61]: Type tree
+              - generic [ref=e62]:
+                - generic [ref=e63] [cursor=pointer]: 
+                - generic [ref=e64] [cursor=pointer]: 
+          - generic [ref=e65]:
+            - generic [ref=e67] [cursor=pointer]: 
+            - paragraph [ref=e68]:
+              - text: Version
+              - strong [ref=e69]: v4.4.0
+      - generic [ref=e73]:
+        - generic [ref=e74]:
+          - text: 
+          - generic [ref=e75] [cursor=pointer]:
+            - generic [ref=e77]: 
+            - generic [ref=e79]: 
+          - list [ref=e81]
+        - list [ref=e86]:
+          - listitem [ref=e87]: Right click on the asset Reselect asset connection method
+          - listitem [ref=e88]: Right click node Expand all assets under the current node
+          - listitem [ref=e89]: Settings → Basic Settings Configure Asset Tree Loading Method
+          - listitem [ref=e90]: Help → Download Download the latest client
+          - listitem [ref=e91]: Switch session → Shortcut keys Option + Shift + Left / Right
