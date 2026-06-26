@@ -67,6 +67,8 @@ pub struct JmsConnectionWindow {
     parent: gpui::Entity<crate::home_tab::HomePage>,
     #[allow(dead_code)]
     parent_window: gpui::AnyWindowHandle,
+    /// 本弹出窗口自身的 window handle(用于连接成功后关闭自己)
+    own_window: gpui::AnyWindowHandle,
     /// 当前选中资产的可选账号列表
     pending_accounts: Vec<jms::JmsAssetAccount>,
     pending_asset_id: String,
@@ -163,6 +165,7 @@ impl JmsConnectionWindow {
             expanded_ids: HashSet::new(),
             parent,
             parent_window,
+            own_window: window.window_handle(),
             pending_accounts: Vec::new(),
             pending_asset_id: String::new(),
             pending_asset_name: String::new(),
@@ -515,6 +518,7 @@ impl JmsConnectionWindow {
         let asset_id = self.pending_asset_id.clone();
         let asset_name = self.pending_asset_name.clone();
         let parent = self.parent.clone();
+        let own_window = self.own_window;
 
         // 同步读取代理配置(支持 SOCKS5 与 HTTP/HTTPS CONNECT)
         let koko_proxy = if self.use_local_proxy {
@@ -587,9 +591,12 @@ impl JmsConnectionWindow {
                             .push((params, Some(sidebar_ctx)));
                     });
 
-                    // 关闭连接窗口
+                    // 关闭连接窗口:发事件 + 移除自身弹出窗口
                     let _ = this.update(cx, |_this, cx| {
                         cx.emit(JmsConnectionEvent::Closed);
+                    });
+                    let _ = cx.update_window(own_window, |_, window, _| {
+                        window.remove_window();
                     });
                 }
                 Err(e) => {

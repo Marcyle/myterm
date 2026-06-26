@@ -471,7 +471,8 @@ impl JmsAssetTreePanel {
             .map(|m| m.data.id.clone())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| node_id.clone());
-        let title = node.node.title.clone();
+        // 资产叶子节点 name 是完整资产名(title 只是 IP),目录节点两者相同,统一用 name
+        let title = node.node.name.clone();
         let title_tooltip: gpui::SharedString = title.clone().into();
         // 侧栏较窄,缩进收紧到 12px
         let indent = px(depth as f32 * 12.0);
