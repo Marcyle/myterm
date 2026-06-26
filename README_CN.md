@@ -5,7 +5,7 @@
 
   <h1>MyTerm</h1>
 
-  <p><strong>数据库、SSH、SFTP、端口转发、终端、远程桌面、监控与 AI 一体化的原生桌面工作台。</strong></p>
+  <p><strong>数据库、SSH、SFTP、JumpServer 堡垒机、端口转发、终端、远程桌面、监控与 AI 一体化的原生桌面工作台。</strong></p>
 
   <p>
     基于 <a href="https://gpui.rs">GPUI</a> 构建 · Rust 原生桌面应用 · GPU 加速渲染
@@ -37,6 +37,7 @@
     <img src="https://img.shields.io/badge/MongoDB-47A248?logo=mongodb&logoColor=white" alt="MongoDB" />
     <img src="https://img.shields.io/badge/SSH-111827?logo=gnubash&logoColor=white" alt="SSH" />
     <img src="https://img.shields.io/badge/SFTP-2563EB?logo=filezilla&logoColor=white" alt="SFTP" />
+    <img src="https://img.shields.io/badge/JumpServer-1F2937" alt="JumpServer" />
     <img src="https://img.shields.io/badge/Port%20Forwarding-0F766E" alt="端口转发" />
     <img src="https://img.shields.io/badge/RDP-0078D4" alt="RDP" />
     <img src="https://img.shields.io/badge/VNC-5C2D91" alt="VNC" />
@@ -56,12 +57,12 @@
   </p>
 </div>
 
-## v0.6.5 更新亮点
+## 更新亮点
 
-- 新增端口转发连接，支持 SSH 本地端口转发和动态 SOCKS 隧道。
-- 端口转发可从「新建连接」中创建，支持保存、编辑、搜索、工作区/团队归属和云同步配置。
-- 修复 Windows 上启动数据库 IPC 插件、RDP helper、VNC helper 时弹出 `cmd` 终端窗口的问题。
-- 更新远程桌面、扩展市场数据库驱动相关截图与文档说明。
+- **JumpServer（JMS）堡垒机集成。** 通过 Koko WebSocket 终端协议连接 JumpServer 纳管的资产，支持完整的 Web 登录（图片验证码 + MFA）、资产树侧栏、服务端资产搜索和账号选择。
+- **Web Terminal 风格资产浏览。** 登录后直接进入一个 JMS 终端 tab，资产树常驻侧栏。点资产在当前 tab 连接；再点别的资产则新开 tab —— 每个 JMS 终端都带有自己的资产树。
+- **保存 JMS 连接。** 把 JumpServer 地址、用户名、密码（加密存储）保存为连接卡片，下次打开自动填充。
+- **端口转发连接**，支持 SSH 本地端口转发和动态 SOCKS 隧道，可从「新建连接」中创建并像其他连接一样云同步。
 
 ## 为什么选择 MyTerm？
 
@@ -73,7 +74,7 @@
     </td>
     <td width="50%">
       <h3>日常运维集中到一个工作区</h3>
-      <p>数据库管理、SSH 终端、SFTP 文件传输、端口转发、串口连接、本地终端以及远程桌面（RDP/VNC）都在同一个应用中完成。</p>
+      <p>数据库管理、SSH 终端、SFTP 文件传输、JumpServer 堡垒机接入、端口转发、串口连接、本地终端以及远程桌面（RDP/VNC）都在同一个应用中完成。</p>
     </td>
   </tr>
   <tr>
@@ -107,6 +108,17 @@
 ### SSH、SFTP、端口转发、串口与终端
 
 集成 SSH 会话、SFTP 文件管理、端口转发、串口连接和本地终端，支持多标签页同时操作。终端内置 SFTP 侧边栏，可直接拖拽上传文件，也支持 SFTP 路径收藏和常用目录快速跳转。
+
+### JumpServer（JMS）堡垒机
+
+无需离开 MyTerm 即可连接 JumpServer 堡垒机纳管的资产。该集成采用纯 Web 会话认证 —— 与浏览器走完全相同的路径 —— 因此在强制图片验证码和 MFA 的实例上也能正常使用：
+
+- **完整登录流程：** 密码 RSA + AES 加密、图片验证码、MFA，与 JumpServer Web 客户端一致。
+- **Koko WebSocket 终端：** 通过 JumpServer Koko 组件建立真实可交互会话，支持输入、输出与 resize。
+- **资产树侧栏：** 资产树常驻终端侧边栏，支持目录懒加载展开，点击资产即可内嵌选择账号。
+- **服务端资产搜索：** 在全部授权资产范围内搜索，而不仅限于已加载的部分。
+- **一资产一 tab：** 第一个资产在当前 tab 连接，后续资产各开新 tab，每个 tab 都带有自己的资产树。
+- **保存连接：** 把地址、用户名和加密密码保存为可复用的连接卡片。
 
 ### 端口转发
 
@@ -184,10 +196,11 @@ sudo xattr -rd com.apple.quarantine /Applications/MyTerm.app
 
 1. 打开 MyTerm，创建第一个数据库连接。
 2. 添加 SSH 主机并打开远程终端。
-3. 基于该 SSH 主机创建端口转发连接，用于本地隧道或 SOCKS 代理。
-4. 打开 SFTP 文件管理，浏览远程目录或传输文件。
-5. 尝试 Redis Key 浏览或 MongoDB 文档浏览。
-6. 在 SQL 或数据分析工作流中使用 AI 助手。
+3. 连接 JumpServer 堡垒机，使用验证码 / MFA 登录，从侧栏资产树选择资产。
+4. 基于 SSH 主机创建端口转发连接，用于本地隧道或 SOCKS 代理。
+5. 打开 SFTP 文件管理，浏览远程目录或传输文件。
+6. 尝试 Redis Key 浏览或 MongoDB 文档浏览。
+7. 在 SQL 或数据分析工作流中使用 AI 助手。
 
 ## 从源码构建
 
@@ -244,6 +257,7 @@ cargo fmt --check
 | 数据库扩展 | 达梦 DM、金仓 KingbaseES、GBase 8s、OceanBase、openGauss、Apache IoTDB、纯 Go Oracle |
 | Redis / MongoDB | redis, mongodb |
 | SSH / SFTP / 端口转发 | russh, russh-sftp, 基于 SSH direct-tcpip 的 SOCKS5 |
+| JumpServer（JMS） | Koko WebSocket 终端, tokio-tungstenite, rustls, RSA + AES Web 登录 |
 | 远程桌面 | 经扩展运行时加载的 RDP / VNC provider |
 | 终端仿真 | alacritty_terminal |
 | 文本编辑 | ropey, tree-sitter, sqlparser |
@@ -257,6 +271,12 @@ cargo fmt --check
 <summary><strong>支持哪些数据库？</strong></summary>
 
 MyTerm 内置支持 MySQL、PostgreSQL、SQLite、DuckDB、SQL Server、Oracle 和 ClickHouse，同时包含专用 Redis 与 MongoDB 视图。扩展市场还提供达梦 DM、金仓 KingbaseES、GBase 8s、OceanBase、openGauss、Apache IoTDB 以及纯 Go Oracle 驱动，让国产和特色数据库也能纳入同一个工作台。
+</details>
+
+<details>
+<summary><strong>JumpServer 集成是怎么工作的？</strong></summary>
+
+MyTerm 与浏览器走完全相同的方式认证 JumpServer —— 通过 Web 登录表单（密码 RSA + AES 加密、图片验证码、MFA），再经 Koko WebSocket 终端建立可交互会话。它能在强制验证码和 MFA 的实例上正常使用，提供带服务端搜索的资产树侧栏，并支持一资产一 tab。
 </details>
 
 <details>

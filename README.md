@@ -5,7 +5,7 @@
 
   <h1>MyTerm</h1>
 
-  <p><strong>Native all-in-one workspace for databases, SSH, SFTP, port forwarding, terminals, remote desktop, monitoring, and AI.</strong></p>
+  <p><strong>Native all-in-one workspace for databases, SSH, SFTP, JumpServer bastion, port forwarding, terminals, remote desktop, monitoring, and AI.</strong></p>
 
   <p>
     Built with <a href="https://gpui.rs">GPUI</a> · Rust native desktop · GPU-accelerated rendering
@@ -37,6 +37,7 @@
     <img src="https://img.shields.io/badge/MongoDB-47A248?logo=mongodb&logoColor=white" alt="MongoDB" />
     <img src="https://img.shields.io/badge/SSH-111827?logo=gnubash&logoColor=white" alt="SSH" />
     <img src="https://img.shields.io/badge/SFTP-2563EB?logo=filezilla&logoColor=white" alt="SFTP" />
+    <img src="https://img.shields.io/badge/JumpServer-1F2937" alt="JumpServer" />
     <img src="https://img.shields.io/badge/Port%20Forwarding-0F766E" alt="Port Forwarding" />
     <img src="https://img.shields.io/badge/RDP-0078D4" alt="RDP" />
     <img src="https://img.shields.io/badge/VNC-5C2D91" alt="VNC" />
@@ -56,12 +57,12 @@
   </p>
 </div>
 
-## What's New in v0.6.5
+## What's New
 
-- Added Port Forwarding connections for SSH local forwarding and dynamic SOCKS tunnels.
-- Port forwarding entries can be created from the New Connection flow, saved, edited, searched, assigned to workspaces/teams, and synced like other connections.
-- Fixed visible `cmd` windows on Windows when launching database IPC plugins, RDP helpers, and VNC helpers.
-- Updated screenshots and documentation for remote desktop and extension marketplace database drivers.
+- **JumpServer (JMS) bastion integration.** Connect to JumpServer-managed assets over the Koko WebSocket terminal protocol, with full web login (captcha + MFA), an asset tree sidebar, server-side asset search, and account selection.
+- **Web Terminal style asset browsing.** After login you land on a JMS terminal tab with the asset tree docked in the sidebar. Pick an asset to connect in the current tab; pick another to open a new tab — every JMS terminal carries its own asset tree.
+- **Saved JMS connections.** Store JumpServer URL, username, and password (encrypted) as a connection card and reopen it with credentials pre-filled.
+- **Port Forwarding connections** for SSH local forwarding and dynamic SOCKS tunnels, created from the New Connection flow and synced like other connections.
 
 ## Why MyTerm?
 
@@ -73,7 +74,7 @@
     </td>
     <td width="50%">
       <h3>One workspace for daily ops</h3>
-      <p>Database management, SSH terminals, SFTP file transfer, port forwarding, serial connections, local terminals, and remote desktop (RDP/VNC) live in one app.</p>
+      <p>Database management, SSH terminals, SFTP file transfer, JumpServer bastion access, port forwarding, serial connections, local terminals, and remote desktop (RDP/VNC) live in one app.</p>
     </td>
   </tr>
   <tr>
@@ -107,6 +108,17 @@ Use the dedicated Redis viewer for key browsing, value inspection, and cluster c
 ### SSH, SFTP, Port Forwarding, Serial & Terminal
 
 Open integrated SSH sessions, manage SFTP files, start port forwarding tunnels, connect to serial devices, and keep local terminals in multi-tab sessions. The terminal includes an SFTP sidebar with drag-and-drop upload support, path favorites, and quick jumps to frequently used directories.
+
+### JumpServer (JMS) Bastion
+
+Connect to assets managed by a JumpServer bastion without leaving MyTerm. The integration uses pure web-session authentication — the same path your browser takes — so it works on instances that enforce image captcha and MFA:
+
+- **Full login flow:** RSA + AES password encryption, image captcha, and MFA, matching the JumpServer web client.
+- **Koko WebSocket terminal:** real interactive sessions tunneled through JumpServer's Koko component, with input, output, and resize.
+- **Asset tree sidebar:** the asset tree is docked next to the terminal. Expand nodes (lazy-loaded), and click an asset to choose an account inline.
+- **Server-side asset search:** search across all permitted assets, not just the loaded part of the tree.
+- **Tab-per-asset:** the first asset connects in the current tab; subsequent assets open new tabs, each with its own asset tree.
+- **Saved connections:** store URL, username, and encrypted password as a reusable connection card.
 
 ### Port Forwarding
 
@@ -184,10 +196,11 @@ The built-in Oracle driver requires [Oracle Instant Client](https://www.oracle.c
 
 1. Open MyTerm and create your first database connection.
 2. Add an SSH host and open a remote terminal.
-3. Create a port forwarding connection from that SSH host when you need a local tunnel or SOCKS proxy.
-4. Open SFTP file management to browse remote directories or transfer files.
-5. Try Redis key browsing or MongoDB document browsing.
-6. Use the AI assistant in SQL or data analysis workflows.
+3. Connect to a JumpServer bastion, log in with captcha/MFA, and pick an asset from the sidebar asset tree.
+4. Create a port forwarding connection from an SSH host when you need a local tunnel or SOCKS proxy.
+5. Open SFTP file management to browse remote directories or transfer files.
+6. Try Redis key browsing or MongoDB document browsing.
+7. Use the AI assistant in SQL or data analysis workflows.
 
 ## Build From Source
 
@@ -244,6 +257,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
 | Database extensions | Dameng DM, KingbaseES, GBase 8s, OceanBase, openGauss, Apache IoTDB, pure-Go Oracle |
 | Redis / MongoDB | redis, mongodb |
 | SSH / SFTP / Port Forwarding | russh, russh-sftp, SOCKS5 over SSH direct-tcpip |
+| JumpServer (JMS) | Koko WebSocket terminal, tokio-tungstenite, rustls, RSA + AES web login |
 | Remote Desktop | RDP & VNC providers via extension runtime |
 | Terminal | alacritty_terminal |
 | Text Editing | ropey, tree-sitter, sqlparser |
@@ -257,6 +271,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
 <summary><strong>Which databases are supported?</strong></summary>
 
 MyTerm has built-in database support for MySQL, PostgreSQL, SQLite, DuckDB, SQL Server, Oracle, and ClickHouse, plus dedicated Redis and MongoDB views. The extension marketplace adds Dameng DM, KingbaseES, GBase 8s, OceanBase, openGauss, Apache IoTDB, and a pure-Go Oracle driver, so domestic and specialty databases are covered alongside the mainstream ones.
+</details>
+
+<details>
+<summary><strong>How does the JumpServer integration work?</strong></summary>
+
+MyTerm authenticates against JumpServer the same way the browser does — through the web login form with RSA + AES password encryption, image captcha, and MFA — then opens an interactive session over the Koko WebSocket terminal. It works on instances that require captcha and MFA, shows a dockable asset tree with server-side search, and lets you open one tab per asset.
 </details>
 
 <details>
