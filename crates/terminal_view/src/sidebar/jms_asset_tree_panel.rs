@@ -29,6 +29,8 @@ use gpui_component::{
 pub enum JmsAssetTreePanelEvent {
     /// 选完账号,请求打开新的 JMS 终端
     OpenNewTerminal(jms::KokoConnectParams),
+    /// 在当前(占位)终端 tab 上直接连接
+    ConnectInCurrentTab(jms::KokoConnectParams),
     /// 关闭面板
     Close,
 }
@@ -60,6 +62,8 @@ pub struct JmsAssetTreePanel {
     search_results: Vec<jms::JmsAssetTreeNode>,
     /// 搜索请求进行中
     is_searching: bool,
+    /// 本 tab 是否是占位终端(占位时点资产→本 tab 连接;否则→新开 tab)
+    is_placeholder: bool,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -69,6 +73,7 @@ impl JmsAssetTreePanel {
         client: jms::JmsClient,
         tree_roots: Vec<jms::JmsAssetTreeNode>,
         proxy: Option<jms::KokoProxy>,
+        is_placeholder: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -102,6 +107,7 @@ impl JmsAssetTreePanel {
             search_query: String::new(),
             search_results: Vec::new(),
             is_searching: false,
+            is_placeholder,
             focus_handle: cx.focus_handle(),
             _subscriptions: vec![sub],
         }
@@ -326,7 +332,13 @@ impl JmsAssetTreePanel {
                     let _ = this.update(cx, |this, cx| {
                         this.is_busy = false;
                         this.show_account_selector = false;
-                        cx.emit(JmsAssetTreePanelEvent::OpenNewTerminal(params));
+                        if this.is_placeholder {
+                            // 占位 tab:在本 tab 连接;之后本 tab 不再是占位
+                            this.is_placeholder = false;
+                            cx.emit(JmsAssetTreePanelEvent::ConnectInCurrentTab(params));
+                        } else {
+                            cx.emit(JmsAssetTreePanelEvent::OpenNewTerminal(params));
+                        }
                         cx.notify();
                     });
                 }

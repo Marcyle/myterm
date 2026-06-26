@@ -1089,6 +1089,91 @@ impl Terminal {
         }
     }
 
+    /// 创建 JMS Koko 占位终端(未连接,等待用户从资产树选择资产后再连接)
+    ///
+    /// 仿 [`Self::new_local_disconnected`]:无 backend、`Disconnected { error: None }`、
+    /// 保留 event_tx/event_proxy 与事件循环,以便后续 [`Self::connect_jms_koko`] 复用。
+    pub fn new_jms_koko_placeholder(cx: &mut Context<Self>) -> Self {
+        let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
+        let cols = 80usize;
+        let rows = 24usize;
+        let (term, event_proxy, _colors) = Self::create_term(cols, rows, event_tx.clone());
+
+        Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
+
+        Self {
+            term,
+            backend: None,
+            title: String::new(),
+            current_working_dir: None,
+            child_exited: None,
+            connection_state: ConnectionState::Disconnected { error: None },
+            cols,
+            rows,
+            pixel_width: 0,
+            pixel_height: 0,
+            ssh_config: None,
+            ssh_session_manager: None,
+            ssh_mfa_responder: None,
+            event_tx: Some(event_tx),
+            event_proxy: Some(event_proxy),
+            connection_id: None,
+            connection_name: None,
+            init_commands: None,
+            session_history: VecDeque::new(),
+            persisted_history: Vec::new(),
+            connection_generation: 0,
+            connection_kind: TerminalConnectionKind::JmsKoko,
+        }
+    }
+
+    /// 在已有(占位或已断开的)JMS Koko 终端上发起连接
+    ///
+    /// 复用 [`Self::spawn_koko_connect`],通过递增 `connection_generation` 让旧连接的
+    /// 回调失效。连接成功后 [`Self::handle_koko_result`] 会设置 backend 并同步尺寸。
+    pub fn connect_jms_koko(&mut self, params: KokoConnectParams, cx: &mut Context<Self>) {
+        let title = params.title.clone();
+        if !title.is_empty() {
+            self.title = title;
+        }
+
+        // 关闭可能存在的旧 backend
+        if let Some(backend) = self.backend.take() {
+            backend.shutdown();
+        }
+
+        let Some(event_tx) = self.event_tx.clone() else {
+            tracing::error!("占位终端缺少 event_tx,无法连接 Koko");
+            return;
+        };
+        let event_proxy = match self.event_proxy.clone() {
+            Some(p) => p,
+            None => {
+                tracing::error!("占位终端缺少 event_proxy,无法连接 Koko");
+                return;
+            }
+        };
+
+        self.connection_generation += 1;
+        let generation = self.connection_generation;
+        self.connection_state = ConnectionState::Connecting;
+
+        let (disconnect_tx, disconnect_rx) = oneshot::channel::<()>();
+        Self::spawn_disconnect_handler(disconnect_rx, generation, cx);
+        Self::spawn_koko_connect(
+            params,
+            self.term.clone(),
+            event_proxy,
+            event_tx,
+            Some(disconnect_tx),
+            self.cols as u16,
+            self.rows as u16,
+            generation,
+            cx,
+        );
+        cx.emit(TerminalModelEvent::Wakeup);
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn spawn_koko_connect(
         params: KokoConnectParams,

@@ -44,6 +44,17 @@ pub struct JmsSidebarContext {
     pub tree_roots: Vec<jms::JmsAssetTreeNode>,
     /// 预先从全局设置算好的代理配置
     pub proxy: Option<jms::KokoProxy>,
+    /// 所在终端是否为占位终端(占位时点资产→本 tab 连接;否则→新开 tab)
+    pub is_placeholder: bool,
+}
+
+impl std::fmt::Debug for JmsSidebarContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JmsSidebarContext")
+            .field("tree_roots_len", &self.tree_roots.len())
+            .field("has_proxy", &self.proxy.is_some())
+            .finish()
+    }
 }
 
 /// 侧边栏面板类型
@@ -124,6 +135,8 @@ pub enum TerminalSidebarEvent {
     SyncWorkingDir,
     /// 请求打开新的 JMS 终端(从资产树面板冒泡)
     OpenJmsTerminal(jms::KokoConnectParams),
+    /// 在当前(占位)终端 tab 上直接连接 JMS 资产
+    ConnectJmsInCurrentTab(jms::KokoConnectParams),
 }
 
 /// 终端侧边栏组件
@@ -284,7 +297,16 @@ impl TerminalSidebar {
 
         // 仅 JMS 终端时创建资产树面板
         let jms_asset_tree_panel = jms_context.map(|ctx| {
-            cx.new(|cx| JmsAssetTreePanel::new(ctx.client, ctx.tree_roots, ctx.proxy, window, cx))
+            cx.new(|cx| {
+                JmsAssetTreePanel::new(
+                    ctx.client,
+                    ctx.tree_roots,
+                    ctx.proxy,
+                    ctx.is_placeholder,
+                    window,
+                    cx,
+                )
+            })
         });
 
         // 订阅资产树面板事件
@@ -298,14 +320,23 @@ impl TerminalSidebar {
                     JmsAssetTreePanelEvent::OpenNewTerminal(params) => {
                         cx.emit(TerminalSidebarEvent::OpenJmsTerminal(params.clone()));
                     }
+                    JmsAssetTreePanelEvent::ConnectInCurrentTab(params) => {
+                        cx.emit(TerminalSidebarEvent::ConnectJmsInCurrentTab(params.clone()));
+                    }
                 },
             );
             subs.push(jms_sub);
         }
 
+        // JMS 终端默认展开资产树侧栏(Web Terminal 体验)
+        let has_jms = jms_asset_tree_panel.is_some();
         Self {
-            active_panel: None,
-            collapsed: true,
+            active_panel: if has_jms {
+                Some(SidebarPanel::JmsAssetTree)
+            } else {
+                None
+            },
+            collapsed: !has_jms,
             settings_panel,
             quick_command_panel,
             file_manager_panel,

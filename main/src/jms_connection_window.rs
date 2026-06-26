@@ -583,6 +583,7 @@ impl JmsConnectionWindow {
                         client: sidebar_client,
                         tree_roots: sidebar_tree_roots,
                         proxy: sidebar_proxy,
+                        is_placeholder: false,
                     };
 
                     let _ = parent.update(cx, |home_page, _app| {
@@ -650,12 +651,31 @@ impl JmsConnectionWindow {
         match result {
             Ok(nodes) => {
                 let tree = jms::build_asset_tree(nodes);
+                // 登录成功 → 直接构造侧栏上下文并开占位终端 tab,无需先选资产
                 let _ = this.update(cx, |this, cx| {
-                    this.tree_roots = tree;
-                    this.client = Some(client);
-                    this.state = ConnectionState::AssetTree;
-                    cx.notify();
+                    this.tree_roots = tree.clone();
+                    this.client = Some(client.clone());
+
+                    let proxy = this.compute_koko_proxy(cx);
+                    let ctx = terminal_view::JmsSidebarContext {
+                        client,
+                        tree_roots: tree,
+                        proxy,
+                        is_placeholder: true,
+                    };
+                    let parent = this.parent.clone();
+                    let _ = parent.update(cx, |home_page, _app| {
+                        home_page.pending_jms_placeholder.push(ctx);
+                    });
+                    // 关闭登录窗口
+                    cx.emit(JmsConnectionEvent::Closed);
                 });
+                // 移除自身弹出窗口
+                if let Ok(own) = this.read_with(cx, |this, _| this.own_window) {
+                    let _ = cx.update_window(own, |_, window, _| {
+                        window.remove_window();
+                    });
+                }
             }
             Err(e) => {
                 let _ = this.update(cx, |this, cx| {
@@ -666,6 +686,37 @@ impl JmsConnectionWindow {
                 });
             }
         }
+    }
+
+    /// 从全局设置计算 Koko 代理配置(供占位上下文与账号连接复用)
+    fn compute_koko_proxy(&self, cx: &mut Context<Self>) -> Option<jms::KokoProxy> {
+        if !self.use_local_proxy {
+            return None;
+        }
+        cx.read_global(|settings: &one_core::settings::AppSettings, _cx| {
+            let p = &settings.global_proxy;
+            if !p.enabled {
+                return None;
+            }
+            let username = (!p.username.is_empty()).then(|| p.username.clone());
+            let password = (!p.password.is_empty()).then(|| p.password.clone());
+            match p.proxy_type {
+                one_core::settings::ProxyType::Socks5 => Some(jms::KokoProxy::Socks5 {
+                    host: p.host.clone(),
+                    port: p.port,
+                    username,
+                    password,
+                }),
+                one_core::settings::ProxyType::Http | one_core::settings::ProxyType::Https => {
+                    Some(jms::KokoProxy::Http {
+                        host: p.host.clone(),
+                        port: p.port,
+                        username,
+                        password,
+                    })
+                }
+            }
+        })
     }
 
     /// 展开/折叠节点，必要时懒加载子节点

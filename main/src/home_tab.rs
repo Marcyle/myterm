@@ -131,6 +131,8 @@ pub struct HomePage {
     pub(crate) pending_jms_connections: Vec<StoredConnection>,
     pub(crate) pending_jms_koko:
         Vec<(jms::KokoConnectParams, Option<terminal_view::JmsSidebarContext>)>,
+    /// 登录成功后待打开的 JMS 占位终端(只有资产树,无连接)
+    pub(crate) pending_jms_placeholder: Vec<terminal_view::JmsSidebarContext>,
 }
 
 
@@ -185,6 +187,7 @@ impl HomePage {
             master_key_unlock_prompt_pending: false,
             pending_jms_connections: Vec::new(),
             pending_jms_koko: Vec::new(),
+            pending_jms_placeholder: Vec::new(),
         };
 
         // 异步加载工作区
@@ -2223,6 +2226,16 @@ impl Render for HomePage {
             window.defer(cx, move |window, cx| {
                 view.update(cx, |this, cx| {
                     this.open_jms_koko_terminal(params, jms_context, window, cx);
+                });
+            });
+        }
+
+        // 处理 JMS 占位终端队列(登录成功后直接开,只有资产树)
+        while let Some(ctx) = self.pending_jms_placeholder.pop() {
+            let view = cx.entity();
+            window.defer(cx, move |window, cx| {
+                view.update(cx, |this, cx| {
+                    this.open_jms_placeholder_terminal(ctx, window, cx);
                 });
             });
         }

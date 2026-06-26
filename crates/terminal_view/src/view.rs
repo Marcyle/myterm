@@ -766,6 +766,8 @@ pub struct TerminalView {
 
     scrollbar_metrics: Rc<RefCell<TerminalScrollbarMetrics>>,
     scrollbar_handle: TerminalScrollbarHandle,
+    /// JMS 资产树侧栏上下文(若为 JMS 终端),用于侧栏点资产开新 tab 时随事件传递
+    jms_context: Option<crate::sidebar::JmsSidebarContext>,
 }
 
 /// Mouse interaction state
@@ -1011,6 +1013,27 @@ impl TerminalView {
         )
     }
 
+    /// 创建 JMS Koko 占位终端(未连接,只有资产树侧栏,等用户从树里选资产)
+    pub fn new_jms_koko_placeholder(
+        jms_context: Option<crate::sidebar::JmsSidebarContext>,
+        tab_index: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let terminal = cx.new(|cx| Terminal::new_jms_koko_placeholder(cx));
+        Self::new_with_terminal(
+            terminal,
+            None,
+            None,
+            false,
+            None,
+            tab_index,
+            jms_context,
+            window,
+            cx,
+        )
+    }
+
     pub fn new_ssh_with_index(
         conn: StoredConnection,
         tab_index: Option<usize>,
@@ -1065,6 +1088,7 @@ impl TerminalView {
         let ssh_session_manager = terminal.read(cx).ssh_session_manager().cloned();
 
         // 创建侧边栏（传递 StoredConnection 用于文件管理器）
+        let jms_context_for_view = jms_context.clone();
         let sidebar = cx.new(|cx| {
             TerminalSidebar::new(
                 connection_id,
@@ -1181,6 +1205,7 @@ impl TerminalView {
             view_bounds: Bounds::default(),
             scrollbar_metrics,
             scrollbar_handle,
+            jms_context: jms_context_for_view,
         };
         let initial_settings = current_settings(cx);
         this.apply_settings_snapshot(&initial_settings, window, cx);
@@ -1304,8 +1329,17 @@ impl TerminalView {
                 }
             }
             TerminalSidebarEvent::OpenJmsTerminal(params) => {
-                // 冒泡到 HomePage,由其新建一个 JMS 终端 tab
-                cx.emit(TerminalViewEvent::OpenJmsTerminal(params.clone()));
+                // 冒泡到 HomePage,由其新建一个 JMS 终端 tab,并携带资产树上下文
+                cx.emit(TerminalViewEvent::OpenJmsTerminal(
+                    params.clone(),
+                    self.jms_context.clone(),
+                ));
+            }
+            TerminalSidebarEvent::ConnectJmsInCurrentTab(params) => {
+                // 在本 tab(占位终端)上直接连接,不新开 tab
+                self.terminal.update(cx, |t, cx| {
+                    t.connect_jms_koko(params.clone(), cx);
+                });
             }
         }
     }
@@ -3258,6 +3292,59 @@ impl TerminalView {
         menu
     }
 
+    /// 是否为 JMS 占位终端(尚未连接任何资产:JmsKoko + Disconnected 且无错误)
+    fn is_jms_placeholder(&self, cx: &App) -> bool {
+        let term = self.terminal.read(cx);
+        term.connection_kind() == TerminalConnectionKind::JmsKoko
+            && matches!(
+                term.connection_state(),
+                ConnectionState::Disconnected { error: None }
+            )
+    }
+
+    /// JMS 占位终端的引导提示(请从左侧资产树选择资产)
+    fn render_jms_placeholder_overlay(&self, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(Hsla {
+                h: 0.,
+                s: 0.,
+                l: 0.,
+                a: 0.6,
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_3()
+                    .p_6()
+                    .child(
+                        Icon::new(IconName::Server)
+                            .color()
+                            .with_size(px(40.0))
+                            .text_color(rgb(0x10b981)),
+                    )
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(0xffffff))
+                            .child("已登录 JumpServer"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0xa0a0a0))
+                            .child("请从右侧资产树选择一个资产开始连接"),
+                    ),
+            )
+    }
+
     fn render_connection_overlay(
         &self,
         can_reconnect: bool,
@@ -3901,8 +3988,11 @@ impl EventEmitter<TabContentEvent> for TerminalView {}
 /// TerminalView 对外事件(供 HomePage 订阅)
 #[derive(Clone, Debug)]
 pub enum TerminalViewEvent {
-    /// 请求打开新的 JMS 终端(资产树侧栏点击资产→选账号后冒泡)
-    OpenJmsTerminal(jms::KokoConnectParams),
+    /// 请求打开新的 JMS 终端(资产树侧栏点击资产→选账号后冒泡),携带资产树上下文
+    OpenJmsTerminal(
+        jms::KokoConnectParams,
+        Option<crate::sidebar::JmsSidebarContext>,
+    ),
 }
 
 impl EventEmitter<TerminalViewEvent> for TerminalView {}
@@ -4192,7 +4282,13 @@ impl Render for TerminalView {
                     .when(
                         matches!(connection_state, ConnectionState::Disconnected { .. })
                             || matches!(connection_state, ConnectionState::Connecting),
-                        |this| this.child(self.render_connection_overlay(can_reconnect, cx)),
+                        |this| {
+                            if self.is_jms_placeholder(cx) {
+                                this.child(self.render_jms_placeholder_overlay(cx))
+                            } else {
+                                this.child(self.render_connection_overlay(can_reconnect, cx))
+                            }
+                        },
                     );
 
                 div()

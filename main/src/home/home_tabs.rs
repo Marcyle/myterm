@@ -88,13 +88,61 @@ impl HomePage {
             TerminalView::new_jms_koko_with_context(params, jms_context, tab_index, window, cx)
         });
 
-        // 订阅资产树侧栏冒泡的"打开新 JMS 终端"事件,递归开新 tab
+        // 订阅资产树侧栏冒泡的"打开新 JMS 终端"事件,递归开新 tab(携带资产树上下文)
         let sub = cx.subscribe_in(
             &terminal_view,
             window,
             move |this, _view, event: &TerminalViewEvent, window, cx| match event {
-                TerminalViewEvent::OpenJmsTerminal(params) => {
-                    this.open_jms_koko_terminal(params.clone(), None, window, cx);
+                TerminalViewEvent::OpenJmsTerminal(params, ctx) => {
+                    this.open_jms_koko_terminal(params.clone(), ctx.clone(), window, cx);
+                }
+            },
+        );
+        self._subscriptions.push(sub);
+
+        self.tab_container.update(cx, |tc, cx| {
+            let tab = TabItem::new(tab_id, "ssh", terminal_view);
+            tc.add_and_activate_tab_with_focus(tab, window, cx);
+        });
+    }
+
+    /// 打开 JMS 占位终端(登录成功后立即开,只有资产树,等用户选资产连接)
+    pub(crate) fn open_jms_placeholder_terminal(
+        &mut self,
+        jms_context: terminal_view::JmsSidebarContext,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let tab_id = format!("jms-koko-{}", timestamp);
+
+        let existing_count = self
+            .tab_container
+            .read(cx)
+            .tabs()
+            .iter()
+            .filter(|t| t.id().starts_with("jms-koko-"))
+            .count();
+        let tab_index = if existing_count > 0 {
+            Some(existing_count + 1)
+        } else {
+            None
+        };
+
+        let terminal_view = cx.new(|cx| {
+            TerminalView::new_jms_koko_placeholder(Some(jms_context), tab_index, window, cx)
+        });
+
+        // 订阅资产树侧栏的开新 tab 事件
+        let sub = cx.subscribe_in(
+            &terminal_view,
+            window,
+            move |this, _view, event: &TerminalViewEvent, window, cx| match event {
+                TerminalViewEvent::OpenJmsTerminal(params, ctx) => {
+                    this.open_jms_koko_terminal(params.clone(), ctx.clone(), window, cx);
                 }
             },
         );
