@@ -5,7 +5,7 @@
 
   <h1>MyTerm</h1>
 
-  <p><strong>Native all-in-one workspace for databases, SSH, SFTP, JumpServer bastion, port forwarding, terminals, remote desktop, monitoring, and AI.</strong></p>
+  <p><strong>Native desktop workspace for SSH, SFTP, local terminals, JumpServer bastion access, and port forwarding.</strong></p>
 
   <p>
     Built with <a href="https://gpui.rs">GPUI</a> · Rust native desktop · GPU-accelerated rendering
@@ -14,33 +14,18 @@
   <p>
     <a href="https://github.com/feigeCode/myterm/releases"><img src="https://img.shields.io/github/downloads/feigeCode/myterm/total?style=for-the-badge&color=blue" alt="Downloads" /></a>
     <a href="https://github.com/feigeCode/myterm/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/feigeCode/myterm/ci.yml?branch=main&style=for-the-badge" alt="CI" /></a>
-    <a href="LICENSE-APACHE"><img src="https://img.shields.io/badge/license-Apache--2.0%20%2B%20Supplementary-blue?style=for-the-badge" alt="License" /></a>
+    <a href="LICENSE-APACHE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge" alt="License" /></a>
     <a href="https://qm.qq.com/cgi-bin/qm/qr?k=&group_code=860670605"><img src="https://img.shields.io/badge/QQ%20Group-860670605-EB1923?style=for-the-badge&logo=tencentqq&logoColor=white" alt="QQ Group 860670605" /></a>
-    <a href="https://docs.qq.com/doc/DVEFFd2RnSnJLcFBD"><img src="https://img.shields.io/badge/WeChat%20Group-Join-07C160?style=for-the-badge&logo=wechat&logoColor=white" alt="Join WeChat Group" /></a>
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/MySQL-4479A1?logo=mysql&logoColor=white" alt="MySQL" />
-    <img src="https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL" />
-    <img src="https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white" alt="SQLite" />
-    <img src="https://img.shields.io/badge/DuckDB-FFF000?logo=duckdb&logoColor=black" alt="DuckDB" />
-    <img src="https://img.shields.io/badge/ClickHouse-FFCC01?logo=clickhouse&logoColor=black" alt="ClickHouse" />
-    <img src="https://img.shields.io/badge/SQL%20Server-CC2927?logo=microsoftsqlserver&logoColor=white" alt="SQL Server" />
-    <img src="https://img.shields.io/badge/Oracle-F80000?logo=oracle&logoColor=white" alt="Oracle" />
-    <img src="https://img.shields.io/badge/Dameng%20DM-C71D23" alt="Dameng DM" />
-    <img src="https://img.shields.io/badge/KingbaseES-005BAC" alt="KingbaseES" />
-    <img src="https://img.shields.io/badge/GBase%208s-1E73BE" alt="GBase 8s" />
-    <img src="https://img.shields.io/badge/OceanBase-1B9A8C" alt="OceanBase" />
-    <img src="https://img.shields.io/badge/openGauss-005EB8" alt="openGauss" />
-    <img src="https://img.shields.io/badge/Apache%20IoTDB-1B3A6B?logo=apache&logoColor=white" alt="Apache IoTDB" />
-    <img src="https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white" alt="Redis" />
-    <img src="https://img.shields.io/badge/MongoDB-47A248?logo=mongodb&logoColor=white" alt="MongoDB" />
     <img src="https://img.shields.io/badge/SSH-111827?logo=gnubash&logoColor=white" alt="SSH" />
     <img src="https://img.shields.io/badge/SFTP-2563EB?logo=filezilla&logoColor=white" alt="SFTP" />
+    <img src="https://img.shields.io/badge/Terminal-0F172A?logo=gnometerminal&logoColor=white" alt="Terminal" />
     <img src="https://img.shields.io/badge/JumpServer-1F2937" alt="JumpServer" />
     <img src="https://img.shields.io/badge/Port%20Forwarding-0F766E" alt="Port Forwarding" />
-    <img src="https://img.shields.io/badge/RDP-0078D4" alt="RDP" />
-    <img src="https://img.shields.io/badge/VNC-5C2D91" alt="VNC" />
+    <img src="https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white" alt="Rust" />
+    <img src="https://img.shields.io/badge/GPUI-DEA584" alt="GPUI" />
   </p>
 
   <p>
@@ -48,21 +33,15 @@
     <a href="#install">Install</a> ·
     <a href="https://github.com/feigeCode/myterm/releases/latest">Latest Release</a> ·
     <a href="#features">Features</a> ·
-    <a href="#screenshots">Screenshots</a> ·
     <a href="CONTRIBUTING.md">Contributing</a>
-  </p>
-
-  <p>
-    <img src="app.png" alt="MyTerm overview" width="820" />
   </p>
 </div>
 
-## What's New
+## Overview
 
-- **JumpServer (JMS) bastion integration.** Connect to JumpServer-managed assets over the Koko WebSocket terminal protocol, with full web login (captcha + MFA), an asset tree sidebar, server-side asset search, and account selection.
-- **Web Terminal style asset browsing.** After login you land on a JMS terminal tab with the asset tree docked in the sidebar. Pick an asset to connect in the current tab; pick another to open a new tab — every JMS terminal carries its own asset tree.
-- **Saved JMS connections.** Store JumpServer URL, username, and password (encrypted) as a connection card and reopen it with credentials pre-filled.
-- **Port Forwarding connections** for SSH local forwarding and dynamic SOCKS tunnels, created from the New Connection flow and synced like other connections.
+MyTerm is a native, cross-platform desktop client that brings remote-access tooling into a single tabbed workspace. It is written in Rust on top of [GPUI](https://gpui.rs), the GPU-accelerated UI framework from Zed, so the interface stays responsive without running inside a browser shell.
+
+Connections are organized into **workspaces** on a home page. Each connection — SSH/SFTP, port forwarding, or JumpServer — is a card you can open, edit, duplicate, or delete. Open connections become tabs, with keyboard shortcuts for fast tab switching.
 
 ## Why MyTerm?
 
@@ -70,107 +49,81 @@
   <tr>
     <td width="50%">
       <h3>Native desktop, not a browser shell</h3>
-      <p>MyTerm is built with Rust and GPUI for a native desktop experience with GPU-accelerated rendering.</p>
+      <p>Built with Rust and GPUI for GPU-accelerated rendering and a true native desktop feel on macOS, Windows, and Linux.</p>
     </td>
     <td width="50%">
-      <h3>One workspace for daily ops</h3>
-      <p>Database management, SSH terminals, SFTP file transfer, JumpServer bastion access, port forwarding, serial connections, local terminals, and remote desktop (RDP/VNC) live in one app.</p>
+      <h3>One workspace for remote access</h3>
+      <p>SSH terminals, SFTP file transfer, local terminals, JumpServer bastion access, and port forwarding all live in the same tabbed window.</p>
     </td>
   </tr>
   <tr>
     <td>
-      <h3>AI next to your data</h3>
-      <p>Use the built-in AI assistant for natural language to SQL, query explanation, BI-style analysis, and chart generation.</p>
+      <h3>Bastion access that just works</h3>
+      <p>Connect to JumpServer-managed assets over the Koko WebSocket terminal, including the full web login flow with captcha and MFA.</p>
     </td>
     <td>
-      <h3>Remote work without context switching</h3>
-      <p>Open a remote terminal, browse files through SFTP, drag files into the sidebar, and edit remote files with syntax highlighting.</p>
+      <h3>Encrypted connections</h3>
+      <p>Credentials are encrypted at rest with a master key (AES-GCM), with an optional repository password to lock saved connections.</p>
     </td>
   </tr>
 </table>
 
 ## Features
 
-### Database Workspace
+### SSH & Local Terminal
 
-Connect to MySQL, PostgreSQL, SQLite, DuckDB, SQL Server, Oracle, and ClickHouse from a single interface. Browse schemas, tables, columns, indexes, foreign keys, procedures, functions, triggers, and sequences where supported.
+A full terminal experience powered by `alacritty_terminal`, with multi-tab sessions for both local shells and remote SSH hosts. The terminal layer includes:
 
-Beyond the built-in drivers, MyTerm ships an extension marketplace that adds database drivers for Dameng DM, KingbaseES, GBase 8s, OceanBase, openGauss, Apache IoTDB, and a pure-Go Oracle driver that runs without Oracle Instant Client. Install the ones you need and they appear alongside the built-in connections.
+- Search within the buffer (forward/backward), text selection, and copy/paste with configurable behavior (auto-copy, middle-click paste, multi-line paste confirmation).
+- Command autocomplete and a path-sync option that keeps the working directory aligned across panes.
+- A high-risk command confirmation guard, vi-style navigation mode, and adjustable font size with zoom shortcuts.
+- A quick-command panel for saving, pinning, and reusing frequently run commands.
 
-### SQL Editor & Schema Tools
+### SFTP File Management
 
-Work with a SQL editor backed by syntax tooling, schema-aware browsing, table structure editing, query execution, explain support, and ER diagrams.
+Browse and transfer files on remote hosts through an SFTP sidebar docked next to the terminal:
 
-### Redis & MongoDB
-
-Use the dedicated Redis viewer for key browsing, value inspection, and cluster connections. Explore MongoDB collections, inspect documents, and run queries from the same workspace.
-
-### SSH, SFTP, Port Forwarding, Serial & Terminal
-
-Open integrated SSH sessions, manage SFTP files, start port forwarding tunnels, connect to serial devices, and keep local terminals in multi-tab sessions. The terminal includes an SFTP sidebar with drag-and-drop upload support, path favorites, and quick jumps to frequently used directories.
+- Drag-and-drop upload, directory navigation, and file operations.
+- Path favorites and quick jumps to frequently used directories.
+- Built on `russh` / `russh-sftp` for a pure-Rust SSH stack.
 
 ### JumpServer (JMS) Bastion
 
-Connect to assets managed by a JumpServer bastion without leaving MyTerm. The integration uses pure web-session authentication — the same path your browser takes — so it works on instances that enforce image captcha and MFA:
+Connect to assets managed by a JumpServer bastion without leaving MyTerm. The integration uses the same web-session path your browser takes, so it works on instances that enforce image captcha and MFA:
 
-- **Full login flow:** RSA + AES password encryption, image captcha, and MFA, matching the JumpServer web client.
-- **Koko WebSocket terminal:** real interactive sessions tunneled through JumpServer's Koko component, with input, output, and resize.
-- **Asset tree sidebar:** the asset tree is docked next to the terminal. Expand nodes (lazy-loaded), and click an asset to choose an account inline.
+- **Full login flow:** RSA + AES password encryption, image captcha, and MFA.
+- **Koko WebSocket terminal:** interactive sessions tunneled through JumpServer's Koko component, with input, output, and resize.
+- **Asset tree sidebar:** the asset tree is docked next to the terminal; expand nodes (lazy-loaded) and pick an account inline.
 - **Server-side asset search:** search across all permitted assets, not just the loaded part of the tree.
 - **Tab-per-asset:** the first asset connects in the current tab; subsequent assets open new tabs, each with its own asset tree.
-- **Saved connections:** store URL, username, and encrypted password as a reusable connection card.
+- **Saved connections:** store URL, username, and encrypted password as a reusable connection card with credentials pre-filled.
 
 ### Port Forwarding
 
-Create reusable SSH port forwarding connections from existing SSH/SFTP servers. MyTerm supports local forwarding for services such as databases or internal HTTP endpoints, plus dynamic SOCKS tunnels for routing tools through a remote host.
+Create reusable SSH port forwarding connections from existing SSH/SFTP servers:
+
+- **Local forwarding** for reaching databases or internal HTTP endpoints through a remote host.
+- **Dynamic SOCKS tunnels** for routing tools through a remote host, implemented over SSH `direct-tcpip`.
 
 ### Remote File Editing
 
-Edit remote files directly inside MyTerm with syntax highlighting and autocomplete. No need to open another editor or switch back and forth between terminal and file tools.
+Edit remote files directly inside MyTerm with syntax highlighting and search/replace, without switching to a separate editor.
 
-### Remote Desktop (RDP & VNC)
+### Workspaces & Connection Management
 
-Open RDP and VNC sessions through installable remote desktop providers. Connect to Windows machines over RDP, or to any VNC server, and drive the remote desktop from the same workspace where your databases, terminals, and files live.
+- Group connections into workspaces and filter the home page by workspace or connection type.
+- Quick-open dialog and search across connection name, host, username, and port.
+- Duplicate, edit, and delete connections inline from the connection card.
 
-### Monitoring & Charts
+### Security, Theming & i18n
 
-Use built-in server monitoring and native rendered charts to inspect remote machine status and data analysis output.
-
-### AI Assistant
-
-Chat with AI inside the app. MyTerm supports natural language to SQL, query explanation, BI-style data analysis, chart generation, and streaming LLM responses. It can also generate terminal commands that you can quickly paste into a terminal session and run.
-
-### Sync, Security & i18n
-
-Sync connections and settings across devices with encrypted key storage based on AES-GCM and Ed25519. MyTerm supports light and dark themes, English, Simplified Chinese, and Traditional Chinese.
-
-## Screenshots
-
-| Database | SSH |
-|:-:|:-:|
-| [![Database](database.png)](database.png) | [![SSH](ssh.png)](ssh.png) |
-
-| SFTP | Redis |
-|:-:|:-:|
-| [![SFTP](sftp.png)](sftp.png) | [![Redis](redis.png)](redis.png) |
-
-| MongoDB | AI Chat |
-|:-:|:-:|
-| [![MongoDB](mongodb.png)](mongodb.png) | [![AI Chat](chatdb.png)](chatdb.png) |
-
-| Monitoring | SFTP Sidebar |
-|:-:|:-:|
-| [![Monitoring](monitor.png)](monitor.png) | [![SFTP Sidebar](sftp_sidebar.png)](sftp_sidebar.png) |
-
-| Remote File Editor | ER Diagram |
-|:-:|:-:|
-| [![Remote File Editor](remote_file_editor.png)](remote_file_editor.png) | [![ER Diagram](er.png)](er.png) |
+- Connection credentials are encrypted at rest with a master key (AES-GCM); an optional repository password unlocks saved connections.
+- Light and dark themes with a token-based design system, plus a configurable global HTTP proxy.
+- Localized in English, Simplified Chinese, and Traditional Chinese.
 
 ## Install
 
 Download the latest build from the [Releases](https://github.com/feigeCode/myterm/releases/latest) page.
-
-Release artifacts are currently published by platform:
 
 | Platform | Architecture | Artifact |
 |----------|--------------|----------|
@@ -188,25 +141,19 @@ If macOS blocks the app after installing the DMG with "Apple cannot check it for
 sudo xattr -rd com.apple.quarantine /Applications/MyTerm.app
 ```
 
-### Oracle Support
-
-The built-in Oracle driver requires [Oracle Instant Client](https://www.oracle.com/database/technologies/instant-client/downloads.html) (Basic package). Download the version matching your platform and ensure the libraries are in your library search path. Alternatively, install the pure-Go Oracle driver from the extension marketplace, which has no Instant Client dependency.
-
 ## Getting Started
 
-1. Open MyTerm and create your first database connection.
-2. Add an SSH host and open a remote terminal.
-3. Connect to a JumpServer bastion, log in with captcha/MFA, and pick an asset from the sidebar asset tree.
-4. Create a port forwarding connection from an SSH host when you need a local tunnel or SOCKS proxy.
-5. Open SFTP file management to browse remote directories or transfer files.
-6. Try Redis key browsing or MongoDB document browsing.
-7. Use the AI assistant in SQL or data analysis workflows.
+1. Open MyTerm and create your first connection from the home page.
+2. Add an SSH host and open a remote terminal, or start a local terminal.
+3. Open the SFTP sidebar to browse remote directories or drag files in to upload.
+4. Connect to a JumpServer bastion, log in with captcha/MFA, and pick an asset from the sidebar asset tree.
+5. Create a port forwarding connection from an SSH host when you need a local tunnel or SOCKS proxy.
 
 ## Build From Source
 
 ### Prerequisites
 
-- Rust 2024 edition
+- Rust (2024 edition)
 - Platform-specific system dependencies
 
 ### System Dependencies
@@ -239,7 +186,7 @@ cargo build
 cargo test --all
 
 # Lint
-cargo clippy --workspace --all-targets
+cargo clippy -- --deny warnings
 
 # Format check
 cargo fmt --check
@@ -247,54 +194,63 @@ cargo fmt --check
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
 
+## Architecture
+
+MyTerm is a Cargo workspace (Rust 2024 edition). Key crates:
+
+| Layer | Crate | Responsibility |
+|-------|-------|----------------|
+| Application | `main` | Entry point, home page, connection windows, settings, tab orchestration |
+| Core | `crates/core` | Connection storage, encryption, configuration, tab container |
+| UI library | `crates/ui` (gpui-component) | Reusable component library (60+ components) and theming |
+| App UI | `crates/one_ui` | Application-specific components (cards, tables, editors) |
+| Terminal | `crates/terminal`, `crates/terminal_view` | Terminal engine and view, sidebars (SFTP, quick commands) |
+| SSH / SFTP | `crates/ssh`, `crates/sftp`, `crates/sftp_view` | SSH transport and SFTP file operations |
+| Port forwarding | `crates/port_forwarding`, `crates/port_forwarding_view` | Local and dynamic SSH tunnels |
+| JumpServer | `crates/jms` | JumpServer web login + Koko WebSocket terminal client |
+| Remote editing | `crates/remote_file_editor` | Remote file editor with syntax highlighting |
+| ER rendering | `crates/er_flow` | Diagram rendering (based on ferrum-flow) |
+| WebView | `crates/webview` (gpui-wry) | WebView integration via Wry |
+
 ## Tech Stack
 
 | Category | Technologies |
 |----------|--------------|
 | UI Framework | [GPUI](https://gpui.rs) |
-| Language | Rust |
-| Databases | tokio-postgres, mysql_async, rusqlite, tiberius, oracle, clickhouse, duckdb |
-| Database extensions | Dameng DM, KingbaseES, GBase 8s, OceanBase, openGauss, Apache IoTDB, pure-Go Oracle |
-| Redis / MongoDB | redis, mongodb |
+| Language | Rust (2024 edition) |
+| Terminal | alacritty_terminal |
 | SSH / SFTP / Port Forwarding | russh, russh-sftp, SOCKS5 over SSH direct-tcpip |
 | JumpServer (JMS) | Koko WebSocket terminal, tokio-tungstenite, rustls, RSA + AES web login |
-| Remote Desktop | RDP & VNC providers via extension runtime |
-| Terminal | alacritty_terminal |
-| Text Editing | ropey, tree-sitter, sqlparser |
-| AI | llm-connector |
+| Text Editing | ropey, tree-sitter |
+| Local Storage | rusqlite |
 | Encryption | aes-gcm, sha2, ed25519 |
+| HTTP Client | reqwest (Zed fork) |
 | i18n | rust-i18n |
 
 ## FAQ
 
 <details>
-<summary><strong>Which databases are supported?</strong></summary>
+<summary><strong>What can MyTerm connect to?</strong></summary>
 
-MyTerm has built-in database support for MySQL, PostgreSQL, SQLite, DuckDB, SQL Server, Oracle, and ClickHouse, plus dedicated Redis and MongoDB views. The extension marketplace adds Dameng DM, KingbaseES, GBase 8s, OceanBase, openGauss, Apache IoTDB, and a pure-Go Oracle driver, so domestic and specialty databases are covered alongside the mainstream ones.
+MyTerm focuses on remote access: SSH terminals, SFTP file transfer, local terminals, JumpServer bastion assets (over the Koko WebSocket terminal), and SSH port forwarding (local and dynamic SOCKS).
 </details>
 
 <details>
 <summary><strong>How does the JumpServer integration work?</strong></summary>
 
-MyTerm authenticates against JumpServer the same way the browser does — through the web login form with RSA + AES password encryption, image captcha, and MFA — then opens an interactive session over the Koko WebSocket terminal. It works on instances that require captcha and MFA, shows a dockable asset tree with server-side search, and lets you open one tab per asset.
+MyTerm authenticates against JumpServer the same way the browser does — through the web login form with RSA + AES password encryption, image captcha, and MFA — then opens an interactive session over the Koko WebSocket terminal. It shows a dockable asset tree with server-side search and lets you open one tab per asset.
 </details>
 
 <details>
-<summary><strong>Does Oracle need extra setup?</strong></summary>
+<summary><strong>Are my credentials safe?</strong></summary>
 
-Yes. The built-in Oracle driver requires Oracle Instant Client to be installed and available through your system library search path. You can also install the pure-Go Oracle driver from the extension marketplace, which runs without Instant Client.
+Connection credentials are encrypted at rest using a master key (AES-GCM). When a repository password is set, saved connections stay locked until you unlock them.
 </details>
 
 <details>
 <summary><strong>Where can I download MyTerm?</strong></summary>
 
-Use the GitHub [Releases](https://github.com/feigeCode/myterm/releases/latest) page. The current release workflow publishes macOS, Linux, and Windows artifacts with checksums.
-</details>
-
-<details>
-<summary><strong>Is MyTerm free?</strong></summary>
-
-All features are available without sponsorship. The source is licensed under Apache License 2.0, and distribution or product use is also subject to the MyTerm Supplementary License.
+Use the GitHub [Releases](https://github.com/feigeCode/myterm/releases/latest) page. The release workflow publishes macOS, Linux, and Windows artifacts with checksums.
 </details>
 
 <details>
@@ -303,20 +259,9 @@ All features are available without sponsorship. The source is licensed under Apa
 Open an issue on [GitHub Issues](https://github.com/feigeCode/myterm/issues). For code changes, please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 </details>
 
-## Support
-
-MyTerm is maintained by one person over the long term. If it saves you time, you can support the project through donations, stars, bug reports, or focused pull requests.
-
-### Donation
-
-Donation is optional and does not unlock or restrict any features. See [DONATE.md](DONATE.md) for WeChat Pay, Alipay, and PayPal options.
-
-### Community Contacts
-
-Official community channels:
+## Community
 
 - QQ Group: [860670605](https://qm.qq.com/cgi-bin/qm/qr?k=&group_code=860670605)
-- WeChat Group: [Join](https://docs.qq.com/doc/DVEFFd2RnSnJLcFBD)
 
 ## Credits
 
@@ -325,12 +270,6 @@ ER diagram rendering is based on [ferrum-flow](https://github.com/tu6ge/ferrum-f
 ## License
 
 Licensed under [Apache License 2.0](LICENSE-APACHE).
-
-The distribution and use of the MyTerm application are additionally subject to the [MyTerm Supplementary License](ONETCLI_LICENSE), which adds the following restrictions on top of Apache 2.0:
-
-- No redistribution, resale, or repackaging as a standalone product
-- No creating competing products or services based on this software
-- No hosting on unauthorized distribution platforms
 
 For licensing inquiries, contact xiaofei.hf@gmail.com.
 

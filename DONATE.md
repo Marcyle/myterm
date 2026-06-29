@@ -4,20 +4,6 @@ If MyTerm helps your daily database or remote operations work, you can support t
 
 Donation is optional. All MyTerm features remain available whether you donate or not.
 
-## Donation Methods
-
-### WeChat Pay
-
-![WeChat Pay](main/assets/encourage/wechat.png)
-
-### Alipay
-
-![Alipay](main/assets/encourage/alipay.png)
-
-### PayPal
-
-![PayPal](main/assets/encourage/paypal.png)
-
 ## How Donations Are Used
 
 - Cloud services and infrastructure

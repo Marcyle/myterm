@@ -5,42 +5,27 @@
 
   <h1>MyTerm</h1>
 
-  <p><strong>数据库、SSH、SFTP、JumpServer 堡垒机、端口转发、终端、远程桌面、监控与 AI 一体化的原生桌面工作台。</strong></p>
+  <p><strong>原生桌面工作台：SSH、SFTP、本地终端、JumpServer 堡垒机、端口转发，一站式集成。</strong></p>
 
   <p>
-    基于 <a href="https://gpui.rs">GPUI</a> 构建 · Rust 原生桌面应用 · GPU 加速渲染
+    基于 <a href="https://gpui.rs">GPUI</a> 构建 · Rust 原生桌面 · GPU 加速渲染
   </p>
 
   <p>
-    <a href="https://github.com/feigeCode/myterm/releases"><img src="https://img.shields.io/github/downloads/feigeCode/myterm/total?style=for-the-badge&color=blue" alt="下载量" /></a>
+    <a href="https://github.com/feigeCode/myterm/releases"><img src="https://img.shields.io/github/downloads/feigeCode/myterm/total?style=for-the-badge&color=blue" alt="Downloads" /></a>
     <a href="https://github.com/feigeCode/myterm/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/feigeCode/myterm/ci.yml?branch=main&style=for-the-badge" alt="CI" /></a>
-    <a href="LICENSE-APACHE"><img src="https://img.shields.io/badge/license-Apache--2.0%20%2B%20Supplementary-blue?style=for-the-badge" alt="许可证" /></a>
-    <a href="https://qm.qq.com/cgi-bin/qm/qr?k=&group_code=860670605"><img src="https://img.shields.io/badge/QQ%20Group-860670605-EB1923?style=for-the-badge&logo=tencentqq&logoColor=white" alt="QQ 群 860670605" /></a>
-    <a href="https://docs.qq.com/doc/DVEFFd2RnSnJLcFBD"><img src="https://img.shields.io/badge/WeChat%20Group-Join-07C160?style=for-the-badge&logo=wechat&logoColor=white" alt="加入微信群" /></a>
+    <a href="LICENSE-APACHE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge" alt="License" /></a>
+    <a href="https://qm.qq.com/cgi-bin/qm/qr?k=&group_code=860670605"><img src="https://img.shields.io/badge/QQ%20群-860670605-EB1923?style=for-the-badge&logo=tencentqq&logoColor=white" alt="QQ 群 860670605" /></a>
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/MySQL-4479A1?logo=mysql&logoColor=white" alt="MySQL" />
-    <img src="https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL" />
-    <img src="https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white" alt="SQLite" />
-    <img src="https://img.shields.io/badge/DuckDB-FFF000?logo=duckdb&logoColor=black" alt="DuckDB" />
-    <img src="https://img.shields.io/badge/ClickHouse-FFCC01?logo=clickhouse&logoColor=black" alt="ClickHouse" />
-    <img src="https://img.shields.io/badge/SQL%20Server-CC2927?logo=microsoftsqlserver&logoColor=white" alt="SQL Server" />
-    <img src="https://img.shields.io/badge/Oracle-F80000?logo=oracle&logoColor=white" alt="Oracle" />
-    <img src="https://img.shields.io/badge/Dameng%20DM-C71D23" alt="达梦 DM" />
-    <img src="https://img.shields.io/badge/KingbaseES-005BAC" alt="金仓 KingbaseES" />
-    <img src="https://img.shields.io/badge/GBase%208s-1E73BE" alt="GBase 8s" />
-    <img src="https://img.shields.io/badge/OceanBase-1B9A8C" alt="OceanBase" />
-    <img src="https://img.shields.io/badge/openGauss-005EB8" alt="openGauss" />
-    <img src="https://img.shields.io/badge/Apache%20IoTDB-1B3A6B?logo=apache&logoColor=white" alt="Apache IoTDB" />
-    <img src="https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white" alt="Redis" />
-    <img src="https://img.shields.io/badge/MongoDB-47A248?logo=mongodb&logoColor=white" alt="MongoDB" />
     <img src="https://img.shields.io/badge/SSH-111827?logo=gnubash&logoColor=white" alt="SSH" />
     <img src="https://img.shields.io/badge/SFTP-2563EB?logo=filezilla&logoColor=white" alt="SFTP" />
+    <img src="https://img.shields.io/badge/Terminal-0F172A?logo=gnometerminal&logoColor=white" alt="Terminal" />
     <img src="https://img.shields.io/badge/JumpServer-1F2937" alt="JumpServer" />
-    <img src="https://img.shields.io/badge/Port%20Forwarding-0F766E" alt="端口转发" />
-    <img src="https://img.shields.io/badge/RDP-0078D4" alt="RDP" />
-    <img src="https://img.shields.io/badge/VNC-5C2D91" alt="VNC" />
+    <img src="https://img.shields.io/badge/Port%20Forwarding-0F766E" alt="Port Forwarding" />
+    <img src="https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white" alt="Rust" />
+    <img src="https://img.shields.io/badge/GPUI-DEA584" alt="GPUI" />
   </p>
 
   <p>
@@ -48,129 +33,97 @@
     <a href="#安装">安装</a> ·
     <a href="https://github.com/feigeCode/myterm/releases/latest">最新版本</a> ·
     <a href="#功能特性">功能特性</a> ·
-    <a href="#应用截图">应用截图</a> ·
     <a href="CONTRIBUTING.md">参与贡献</a>
-  </p>
-
-  <p>
-    <img src="app.png" alt="MyTerm 概览" width="820" />
   </p>
 </div>
 
-## 更新亮点
+## 概述
 
-- **JumpServer（JMS）堡垒机集成。** 通过 Koko WebSocket 终端协议连接 JumpServer 纳管的资产，支持完整的 Web 登录（图片验证码 + MFA）、资产树侧栏、服务端资产搜索和账号选择。
-- **Web Terminal 风格资产浏览。** 登录后直接进入一个 JMS 终端 tab，资产树常驻侧栏。点资产在当前 tab 连接；再点别的资产则新开 tab —— 每个 JMS 终端都带有自己的资产树。
-- **保存 JMS 连接。** 把 JumpServer 地址、用户名、密码（加密存储）保存为连接卡片，下次打开自动填充。
-- **端口转发连接**，支持 SSH 本地端口转发和动态 SOCKS 隧道，可从「新建连接」中创建并像其他连接一样云同步。
+MyTerm 是一款原生跨平台桌面客户端，将远程访问工具整合到一个多标签工作台中。它使用 Rust 编写，基于 Zed 的 GPU 加速 UI 框架 [GPUI](https://gpui.rs)，无需运行在浏览器壳中，界面流畅且响应迅速。
+
+连接在首页按**工作区**组织。每个连接（SSH/SFTP、端口转发或 JumpServer）都是一张卡片，可打开、编辑、复制或删除。打开的连接以标签页形式呈现，并支持快捷键快速切换标签。
 
 ## 为什么选择 MyTerm？
 
 <table>
   <tr>
     <td width="50%">
-      <h3>原生桌面体验，而不是浏览器外壳</h3>
-      <p>MyTerm 使用 Rust 和 GPUI 构建，提供原生桌面体验与 GPU 加速渲染。</p>
+      <h3>原生桌面，而非浏览器壳</h3>
+      <p>基于 Rust 与 GPUI 构建，在 macOS、Windows、Linux 上提供 GPU 加速渲染与真正的原生桌面体验。</p>
     </td>
     <td width="50%">
-      <h3>日常运维集中到一个工作区</h3>
-      <p>数据库管理、SSH 终端、SFTP 文件传输、JumpServer 堡垒机接入、端口转发、串口连接、本地终端以及远程桌面（RDP/VNC）都在同一个应用中完成。</p>
+      <h3>远程访问，一窗搞定</h3>
+      <p>SSH 终端、SFTP 文件传输、本地终端、JumpServer 堡垒机访问、端口转发，全部集中在同一个多标签窗口。</p>
     </td>
   </tr>
   <tr>
     <td>
-      <h3>AI 就在数据旁边</h3>
-      <p>内置 AI 助手支持自然语言生成 SQL、查询解释、BI 数据分析和图表生成。</p>
+      <h3>开箱即用的堡垒机接入</h3>
+      <p>通过 Koko WebSocket 终端连接 JumpServer 托管的资产，完整支持图形验证码与 MFA 的 Web 登录流程。</p>
     </td>
     <td>
-      <h3>远程工作少切换上下文</h3>
-      <p>打开远程终端，通过 SFTP 浏览文件，把文件拖进侧边栏上传，并直接编辑带语法高亮的远程文件。</p>
+      <h3>加密的连接</h3>
+      <p>凭据基于主密钥（AES-GCM）静态加密存储，并可选设置仓库密码以锁定已保存的连接。</p>
     </td>
   </tr>
 </table>
 
 ## 功能特性
 
-### 数据库工作区
+### SSH 与本地终端
 
-在同一界面连接 MySQL、PostgreSQL、SQLite、DuckDB、SQL Server、Oracle 和 ClickHouse。可浏览数据库、Schema、表、字段、索引、外键、过程、函数、触发器和序列等对象，具体能力取决于数据库类型。
+由 `alacritty_terminal` 驱动的完整终端体验，支持本地 Shell 与远程 SSH 主机的多标签会话：
 
-在内置驱动之外，MyTerm 还提供扩展市场，可按需安装达梦 DM、金仓 KingbaseES、南大通用 GBase 8s、OceanBase、openGauss、Apache IoTDB 的数据库驱动，以及一个无需 Oracle Instant Client 的纯 Go Oracle 驱动。安装后会与内置数据库一同出现在连接列表中。
+- 缓冲区内搜索（向前/向后）、文本选择，以及可配置的复制粘贴行为（自动复制、中键粘贴、多行粘贴确认）。
+- 命令自动补全，以及在面板间保持工作目录一致的路径同步选项。
+- 高危命令二次确认、vi 风格导航模式，以及带缩放快捷键的字号调节。
+- 快捷命令面板，可保存、置顶、复用常用命令。
 
-### SQL 编辑器与 Schema 工具
+### SFTP 文件管理
 
-提供 SQL 编辑、语法相关能力、Schema 浏览、表结构编辑、查询执行、Explain 支持与 ER 图等数据库工作流。
+通过停靠在终端旁的 SFTP 侧边栏浏览与传输远程主机文件：
 
-### Redis 与 MongoDB
-
-专用 Redis 视图支持键浏览、值查看与集群连接。MongoDB 视图支持集合浏览、文档查看与查询。
-
-### SSH、SFTP、端口转发、串口与终端
-
-集成 SSH 会话、SFTP 文件管理、端口转发、串口连接和本地终端，支持多标签页同时操作。终端内置 SFTP 侧边栏，可直接拖拽上传文件，也支持 SFTP 路径收藏和常用目录快速跳转。
+- 拖拽上传、目录导航与文件操作。
+- 路径收藏与常用目录快速跳转。
+- 基于 `russh` / `russh-sftp` 的纯 Rust SSH 栈。
 
 ### JumpServer（JMS）堡垒机
 
-无需离开 MyTerm 即可连接 JumpServer 堡垒机纳管的资产。该集成采用纯 Web 会话认证 —— 与浏览器走完全相同的路径 —— 因此在强制图片验证码和 MFA 的实例上也能正常使用：
+无需离开 MyTerm 即可连接 JumpServer 托管的资产。集成采用与浏览器一致的 Web 会话路径，因此在强制图形验证码与 MFA 的实例上同样可用：
 
-- **完整登录流程：** 密码 RSA + AES 加密、图片验证码、MFA，与 JumpServer Web 客户端一致。
-- **Koko WebSocket 终端：** 通过 JumpServer Koko 组件建立真实可交互会话，支持输入、输出与 resize。
-- **资产树侧栏：** 资产树常驻终端侧边栏，支持目录懒加载展开，点击资产即可内嵌选择账号。
-- **服务端资产搜索：** 在全部授权资产范围内搜索，而不仅限于已加载的部分。
-- **一资产一 tab：** 第一个资产在当前 tab 连接，后续资产各开新 tab，每个 tab 都带有自己的资产树。
-- **保存连接：** 把地址、用户名和加密密码保存为可复用的连接卡片。
+- **完整登录流程：** RSA + AES 密码加密、图形验证码与 MFA。
+- **Koko WebSocket 终端：** 通过 JumpServer 的 Koko 组件建立交互式会话，支持输入、输出与窗口尺寸调整。
+- **资产树侧边栏：** 资产树停靠在终端旁，节点懒加载展开，可内联选择账号。
+- **服务端资产搜索：** 在全部有权限的资产中搜索，而非仅在已加载的部分。
+- **一资产一标签：** 第一个资产在当前标签连接，后续资产各自打开新标签，每个标签拥有独立的资产树。
+- **保存连接：** 将 URL、用户名与加密密码保存为可复用的连接卡片，并自动回填凭据。
 
 ### 端口转发
 
-基于已有 SSH/SFTP 服务器创建可复用的 SSH 端口转发连接。MyTerm 支持用于数据库、内部 HTTP 服务等场景的本地端口转发，也支持动态 SOCKS 隧道，方便把本地工具流量经远程主机转发。
+基于已有 SSH/SFTP 服务器创建可复用的 SSH 端口转发连接：
+
+- **本地转发：** 通过远程主机访问数据库或内网 HTTP 端点。
+- **动态 SOCKS 隧道：** 基于 SSH `direct-tcpip` 实现，将工具流量路由经远程主机。
 
 ### 远程文件编辑
 
-可直接在 MyTerm 内编辑远程文件，支持语法高亮和自动补全。无需额外打开其他编辑器，也无需在终端和文件工具之间来回切换。
+直接在 MyTerm 中编辑远程文件，支持语法高亮与查找替换，无需切换到独立编辑器。
 
-### 远程桌面（RDP 与 VNC）
+### 工作区与连接管理
 
-通过可安装的远程桌面 provider 打开 RDP 和 VNC 会话。可经 RDP 连接 Windows 机器，或连接任意 VNC 服务端，在数据库、终端和文件所在的同一个工作台里直接操作远程桌面。
+- 将连接归入工作区，并在首页按工作区或连接类型筛选。
+- 快速打开对话框，支持按连接名称、主机、用户名、端口搜索。
+- 在连接卡片上内联复制、编辑、删除连接。
 
-### 监控与图表
+### 安全、主题与多语言
 
-内置简易服务器监控和原生渲染图表，可查看远程机器状态，也可用于数据分析结果展示。
-
-### AI 助手
-
-应用内直接与 AI 对话，支持自然语言生成 SQL、查询解释、BI 数据分析、图表生成和流式 LLM 响应。AI 还可以生成终端命令，快速粘贴到终端会话中执行。
-
-### 同步、安全与国际化
-
-支持跨设备同步连接和设置，密钥使用 AES-GCM 与 Ed25519 加密存储。支持亮色 / 暗色主题，以及 English、简体中文、繁体中文。
-
-## 应用截图
-
-| 数据库 | SSH |
-|:-:|:-:|
-| [![数据库](database.png)](database.png) | [![SSH](ssh.png)](ssh.png) |
-
-| SFTP | Redis |
-|:-:|:-:|
-| [![SFTP](sftp.png)](sftp.png) | [![Redis](redis.png)](redis.png) |
-
-| MongoDB | AI 对话 |
-|:-:|:-:|
-| [![MongoDB](mongodb.png)](mongodb.png) | [![AI 对话](chatdb.png)](chatdb.png) |
-
-| 服务器监控 | SFTP 侧边栏 |
-|:-:|:-:|
-| [![服务器监控](monitor.png)](monitor.png) | [![SFTP 侧边栏](sftp_sidebar.png)](sftp_sidebar.png) |
-
-| 远程文件编辑 | ER 图 |
-|:-:|:-:|
-| [![远程文件编辑](remote_file_editor.png)](remote_file_editor.png) | [![ER 图](er.png)](er.png) |
+- 连接凭据基于主密钥（AES-GCM）静态加密；设置仓库密码后，保存的连接在解锁前保持锁定。
+- 基于 Token 的设计系统，支持浅色/深色主题，以及可配置的全局 HTTP 代理。
+- 支持英文、简体中文、繁体中文。
 
 ## 安装
 
-请从 [Releases](https://github.com/feigeCode/myterm/releases/latest) 页面下载最新版本。
-
-当前发布产物按平台提供：
+从 [Releases](https://github.com/feigeCode/myterm/releases/latest) 页面下载最新构建。
 
 | 平台 | 架构 | 产物 |
 |------|------|------|
@@ -178,36 +131,30 @@
 | Linux | x86_64 | `.tar.gz` |
 | Windows | x86_64 | `.zip` |
 
-每个版本会同时发布 `sha256sums.txt` 校验文件。
+每个版本都会发布 `sha256sums.txt` 校验和。
 
 ### macOS Gatekeeper
 
-如果 macOS 安装 DMG 后提示无法打开（"Apple 无法检查其是否包含恶意软件"），请执行：
+如果通过 DMG 安装后 macOS 提示"无法验证开发者"而阻止运行，请执行：
 
 ```bash
 sudo xattr -rd com.apple.quarantine /Applications/MyTerm.app
 ```
 
-### Oracle 支持
+## 快速上手
 
-内置 Oracle 驱动需要安装 [Oracle Instant Client](https://www.oracle.com/database/technologies/instant-client/downloads.html)（Basic 包），请下载与平台匹配的版本并确保库文件位于系统库搜索路径中。如果不想依赖 Instant Client，可从扩展市场安装纯 Go 版 Oracle 驱动。
-
-## 快速开始
-
-1. 打开 MyTerm，创建第一个数据库连接。
-2. 添加 SSH 主机并打开远程终端。
-3. 连接 JumpServer 堡垒机，使用验证码 / MFA 登录，从侧栏资产树选择资产。
-4. 基于 SSH 主机创建端口转发连接，用于本地隧道或 SOCKS 代理。
-5. 打开 SFTP 文件管理，浏览远程目录或传输文件。
-6. 尝试 Redis Key 浏览或 MongoDB 文档浏览。
-7. 在 SQL 或数据分析工作流中使用 AI 助手。
+1. 打开 MyTerm，在首页创建第一个连接。
+2. 添加 SSH 主机并打开远程终端，或直接启动本地终端。
+3. 打开 SFTP 侧边栏浏览远程目录，或拖入文件进行上传。
+4. 连接 JumpServer 堡垒机，通过验证码/MFA 登录，并从侧边栏资产树选择资产。
+5. 基于 SSH 主机创建端口转发连接，按需建立本地隧道或 SOCKS 代理。
 
 ## 从源码构建
 
-### 前置条件
+### 环境要求
 
-- Rust 2024 edition
-- 各平台系统依赖
+- Rust（2024 edition）
+- 平台相关系统依赖
 
 ### 系统依赖
 
@@ -239,84 +186,82 @@ cargo build
 cargo test --all
 
 # Lint
-cargo clippy --workspace --all-targets
+cargo clippy -- --deny warnings
 
 # 格式检查
 cargo fmt --check
 ```
 
-完整开发指南请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)。
+完整开发指南见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 架构
+
+MyTerm 是一个 Cargo workspace（Rust 2024 edition），主要 crate 如下：
+
+| 层级 | Crate | 职责 |
+|------|-------|------|
+| 应用 | `main` | 入口、首页、连接窗口、设置、标签编排 |
+| 核心 | `crates/core` | 连接存储、加密、配置、标签容器 |
+| UI 组件库 | `crates/ui`（gpui-component） | 可复用组件库（60+ 组件）与主题 |
+| 应用 UI | `crates/one_ui` | 应用专属组件（卡片、表格、编辑器） |
+| 终端 | `crates/terminal`、`crates/terminal_view` | 终端引擎与视图，侧边栏（SFTP、快捷命令） |
+| SSH / SFTP | `crates/ssh`、`crates/sftp`、`crates/sftp_view` | SSH 传输与 SFTP 文件操作 |
+| 端口转发 | `crates/port_forwarding`、`crates/port_forwarding_view` | 本地与动态 SSH 隧道 |
+| JumpServer | `crates/jms` | JumpServer Web 登录 + Koko WebSocket 终端客户端 |
+| 远程编辑 | `crates/remote_file_editor` | 带语法高亮的远程文件编辑器 |
+| ER 渲染 | `crates/er_flow` | 图表渲染（基于 ferrum-flow） |
+| WebView | `crates/webview`（gpui-wry） | 通过 Wry 集成 WebView |
 
 ## 技术栈
 
 | 类别 | 技术 |
 |------|------|
 | UI 框架 | [GPUI](https://gpui.rs) |
-| 编程语言 | Rust |
-| 数据库驱动 | tokio-postgres, mysql_async, rusqlite, tiberius, oracle, clickhouse, duckdb |
-| 数据库扩展 | 达梦 DM、金仓 KingbaseES、GBase 8s、OceanBase、openGauss、Apache IoTDB、纯 Go Oracle |
-| Redis / MongoDB | redis, mongodb |
-| SSH / SFTP / 端口转发 | russh, russh-sftp, 基于 SSH direct-tcpip 的 SOCKS5 |
-| JumpServer（JMS） | Koko WebSocket 终端, tokio-tungstenite, rustls, RSA + AES Web 登录 |
-| 远程桌面 | 经扩展运行时加载的 RDP / VNC provider |
-| 终端仿真 | alacritty_terminal |
-| 文本编辑 | ropey, tree-sitter, sqlparser |
-| AI | llm-connector |
-| 加密 | aes-gcm, sha2, ed25519 |
-| 国际化 | rust-i18n |
+| 语言 | Rust（2024 edition） |
+| 终端 | alacritty_terminal |
+| SSH / SFTP / 端口转发 | russh、russh-sftp、SSH direct-tcpip 之上的 SOCKS5 |
+| JumpServer（JMS） | Koko WebSocket 终端、tokio-tungstenite、rustls、RSA + AES Web 登录 |
+| 文本编辑 | ropey、tree-sitter |
+| 本地存储 | rusqlite |
+| 加密 | aes-gcm、sha2、ed25519 |
+| HTTP 客户端 | reqwest（Zed fork） |
+| 多语言 | rust-i18n |
 
 ## 常见问题
 
 <details>
-<summary><strong>支持哪些数据库？</strong></summary>
+<summary><strong>MyTerm 能连接哪些目标？</strong></summary>
 
-MyTerm 内置支持 MySQL、PostgreSQL、SQLite、DuckDB、SQL Server、Oracle 和 ClickHouse，同时包含专用 Redis 与 MongoDB 视图。扩展市场还提供达梦 DM、金仓 KingbaseES、GBase 8s、OceanBase、openGauss、Apache IoTDB 以及纯 Go Oracle 驱动，让国产和特色数据库也能纳入同一个工作台。
+MyTerm 专注于远程访问：SSH 终端、SFTP 文件传输、本地终端、JumpServer 堡垒机资产（通过 Koko WebSocket 终端），以及 SSH 端口转发（本地与动态 SOCKS）。
 </details>
 
 <details>
-<summary><strong>JumpServer 集成是怎么工作的？</strong></summary>
+<summary><strong>JumpServer 集成是如何工作的？</strong></summary>
 
-MyTerm 与浏览器走完全相同的方式认证 JumpServer —— 通过 Web 登录表单（密码 RSA + AES 加密、图片验证码、MFA），再经 Koko WebSocket 终端建立可交互会话。它能在强制验证码和 MFA 的实例上正常使用，提供带服务端搜索的资产树侧栏，并支持一资产一 tab。
+MyTerm 以与浏览器一致的方式向 JumpServer 认证——通过 Web 登录表单完成 RSA + AES 密码加密、图形验证码与 MFA——随后通过 Koko WebSocket 终端打开交互式会话。它提供可停靠、支持服务端搜索的资产树，并支持一资产一标签。
 </details>
 
 <details>
-<summary><strong>Oracle 是否需要额外配置？</strong></summary>
+<summary><strong>我的凭据安全吗？</strong></summary>
 
-内置 Oracle 驱动需要 Oracle Instant Client，且库文件需位于系统库搜索路径中。你也可以从扩展市场安装纯 Go 版 Oracle 驱动，无需依赖 Instant Client。
+连接凭据使用主密钥（AES-GCM）静态加密。设置仓库密码后，保存的连接在解锁前保持锁定。
 </details>
 
 <details>
 <summary><strong>在哪里下载 MyTerm？</strong></summary>
 
-请使用 GitHub [Releases](https://github.com/feigeCode/myterm/releases/latest) 页面。当前发布流程会生成 macOS、Linux、Windows 平台产物，并附带校验文件。
+请使用 GitHub [Releases](https://github.com/feigeCode/myterm/releases/latest) 页面。发布流程会发布带校验和的 macOS、Linux、Windows 产物。
 </details>
 
 <details>
-<summary><strong>MyTerm 是免费的吗？</strong></summary>
+<summary><strong>如何反馈 Bug 或提交功能需求？</strong></summary>
 
-所有功能不依赖赞助解锁。源码基于 Apache License 2.0 开源，分发和产品化使用还需要遵守 MyTerm 补充协议。
+在 [GitHub Issues](https://github.com/feigeCode/myterm/issues) 提交 issue。如需提交代码变更，请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
 </details>
 
-<details>
-<summary><strong>如何反馈 Bug 或提出功能建议？</strong></summary>
-
-请在 [GitHub Issues](https://github.com/feigeCode/myterm/issues) 提交。若要贡献代码，请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
-</details>
-
-## 支持
-
-MyTerm 由个人长期维护。如果它节省了你的时间，可以通过捐赠、Star、提交 Bug 或贡献聚焦的小型 PR 支持项目。
-
-### 捐赠
-
-捐赠完全自愿，不会解锁或限制任何功能。微信支付、支付宝和 PayPal 捐赠方式请查看 [DONATE_CN.md](DONATE_CN.md)。
-
-### 社区联系
-
-官方社区入口：
+## 社区
 
 - QQ 群：[860670605](https://qm.qq.com/cgi-bin/qm/qr?k=&group_code=860670605)
-- 微信群：[加入](https://docs.qq.com/doc/DVEFFd2RnSnJLcFBD)
 
 ## 致谢
 
@@ -324,22 +269,6 @@ ER 图渲染基于 [ferrum-flow](https://github.com/tu6ge/ferrum-flow.git)。
 
 ## 许可证
 
-本项目基于 [Apache License 2.0](LICENSE-APACHE) 开源。
+基于 [Apache License 2.0](LICENSE-APACHE) 授权。
 
-MyTerm 应用的分发与使用须同时遵守 [MyTerm 补充协议](ONETCLI_LICENSE)，该补充协议在 Apache 2.0 基础上增加以下限制：
-
-- 禁止二次分发、转售或将本软件作为独立产品再分发
-- 禁止基于本软件代码创建竞争性产品或服务
-- 禁止将本软件托管于未经授权的分发平台
-
-如有许可证与版权相关问题，请联系 xiaofei.hf@gmail.com。
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=feigeCode%2Fmyterm&type=date&logscale=&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=feigeCode/myterm&type=date&theme=dark&logscale&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=feigeCode/myterm&type=date&logscale&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=feigeCode/myterm&type=date&logscale&legend=top-left" />
- </picture>
-</a>
+许可相关咨询请联系 xiaofei.hf@gmail.com。

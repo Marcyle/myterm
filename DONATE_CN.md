@@ -4,20 +4,6 @@
 
 捐赠完全自愿。不论是否捐赠，MyTerm 的功能都不会被解锁或限制。
 
-## 捐赠方式
-
-### 微信支付
-
-![微信支付](main/assets/encourage/wechat.png)
-
-### 支付宝
-
-![支付宝](main/assets/encourage/alipay.png)
-
-### PayPal
-
-![PayPal](main/assets/encourage/paypal.png)
-
 ## 捐赠用途
 
 - 云端服务与基础设施

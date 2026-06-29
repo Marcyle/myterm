@@ -4,20 +4,6 @@ If this project is helpful to you, you can invite the author to have a KFC or a 
 
 MyTerm is maintained by one person over the long term. If it saves you time, feel free to support it in a way that is comfortable for you. No support is also completely fine.
 
-## QR Codes
-
-### WeChat Pay
-
-![WeChat Pay](main/assets/encourage/wechat.png)
-
-### Alipay
-
-![Alipay](main/assets/encourage/alipay.png)
-
-### PayPal
-
-![PayPal](main/assets/encourage/paypal.png)
-
 ## Your Support Will Be Used For
 
 - Cloud services and infrastructure
@@ -41,20 +27,6 @@ All features remain fully available without support. Sponsorship does not unlock
 如果这个项目对你有帮助，想请作者吃顿肯德基（KFC）或者喝杯咖啡，都是可以的。
 
 MyTerm 由个人长期维护。如果它帮你节省了时间，欢迎用你觉得舒服的方式支持我；不支持也完全没关系。
-
-## 赞助码
-
-### 微信支付
-
-![微信支付](main/assets/encourage/wechat.png)
-
-### 支付宝
-
-![支付宝](main/assets/encourage/alipay.png)
-
-### PayPal
-
-![PayPal](main/assets/encourage/paypal.png)
 
 ## 你的支持将用于
 
