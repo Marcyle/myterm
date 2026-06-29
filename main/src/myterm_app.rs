@@ -361,17 +361,17 @@ pub struct MyApp {
 impl MyApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let tab_container = cx.new(|cx| {
+            let theme = cx.theme();
+            let tab_bar = theme.tab_bar;
+            let tab = theme.tab;
+            let tab_active = theme.tab_active;
+            let tab_active_foreground = theme.tab_active_foreground;
+            let tab_foreground = theme.tab_foreground;
             let mut container = TabContainer::new(window, cx)
-                .with_tab_bar_colors(
-                    Some(gpui::rgb(0x2b2b2b).into()),
-                    Some(gpui::rgb(0x1e1e1e).into()),
-                )
-                .with_tab_item_colors(
-                    Some(gpui::rgb(0x555555).into()),
-                    Some(gpui::rgb(0x3a3a3a).into()),
-                )
-                .with_inactive_tab_bg_color(Some(gpui::rgb(0x3a3a3a).into()))
-                .with_tab_content_colors(Some(gpui::white()), Some(gpui::rgb(0xaaaaaa).into()));
+                .with_tab_bar_colors(Some(tab_bar), Some(tab))
+                .with_tab_item_colors(Some(tab_active), Some(tab))
+                .with_inactive_tab_bg_color(Some(tab))
+                .with_tab_content_colors(Some(tab_active_foreground), Some(tab_foreground));
 
             #[cfg(target_os = "macos")]
             {

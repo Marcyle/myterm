@@ -51,12 +51,27 @@ pub struct ThemeConfig {
     #[serde(rename = "mono_font.size")]
     pub mono_font_size: Option<f32>,
 
-    /// The border radius for general elements, default is 6.
+    /// The border radius for general elements, default is 8.
     #[serde(rename = "radius")]
     pub radius: Option<usize>,
-    /// The border radius for large elements like Dialogs and Notifications, default is 8.
+    /// The border radius for large elements like Dialogs and Notifications, default is 12.
     #[serde(rename = "radius.lg")]
     pub radius_lg: Option<usize>,
+    /// Extra small border radius, default is 2.
+    #[serde(rename = "radius.xs")]
+    pub radius_xs: Option<usize>,
+    /// Small border radius, default is 4.
+    #[serde(rename = "radius.sm")]
+    pub radius_sm: Option<usize>,
+    /// Medium border radius, default is 8.
+    #[serde(rename = "radius.md")]
+    pub radius_md: Option<usize>,
+    /// Extra large border radius, default is 16.
+    #[serde(rename = "radius.xl")]
+    pub radius_xl: Option<usize>,
+    /// 2x large border radius, default is 24.
+    #[serde(rename = "radius.2xl")]
+    pub radius_2xl: Option<usize>,
     /// Set shadows in the theme, for example the Input and Button, default is true.
     #[serde(rename = "shadow")]
     pub shadow: Option<bool>,
@@ -367,6 +382,46 @@ pub struct ThemeConfigColors {
     #[serde(rename = "window.border")]
     pub window_border: Option<SharedString>,
 
+    /// Base surface color.
+    #[serde(rename = "surface")]
+    pub surface: Option<SharedString>,
+    /// Elevated surface color.
+    #[serde(rename = "surface.elevated")]
+    pub surface_elevated: Option<SharedString>,
+    /// Overlay surface color.
+    #[serde(rename = "surface.overlay")]
+    pub surface_overlay: Option<SharedString>,
+
+    /// Primary text color.
+    #[serde(rename = "text.primary")]
+    pub text_primary: Option<SharedString>,
+    /// Secondary text color.
+    #[serde(rename = "text.secondary")]
+    pub text_secondary: Option<SharedString>,
+    /// Tertiary text color.
+    #[serde(rename = "text.tertiary")]
+    pub text_tertiary: Option<SharedString>,
+
+    /// Subtle border color.
+    #[serde(rename = "border.subtle")]
+    pub border_subtle: Option<SharedString>,
+    /// Strong border color.
+    #[serde(rename = "border.strong")]
+    pub border_strong: Option<SharedString>,
+
+    /// SSH/SFTP connection accent color.
+    #[serde(rename = "connection.ssh")]
+    pub connection_ssh: Option<SharedString>,
+    /// Database connection accent color.
+    #[serde(rename = "connection.db")]
+    pub connection_db: Option<SharedString>,
+    /// JMS connection accent color.
+    #[serde(rename = "connection.jms")]
+    pub connection_jms: Option<SharedString>,
+    /// Port forwarding connection accent color.
+    #[serde(rename = "connection.port_forwarding")]
+    pub connection_port_forwarding: Option<SharedString>,
+
     /// Base blue color.
     #[serde(rename = "base.blue")]
     blue: Option<String>,
@@ -628,6 +683,37 @@ impl ThemeColor {
         apply_color!(overlay);
         apply_color!(window_border, fallback = self.border);
 
+        // Semantic surface/text/border tokens for modern UI.
+        apply_color!(surface, fallback = self.background);
+        let is_dark = config.mode.is_dark();
+        apply_color!(
+            surface_elevated,
+            fallback = if is_dark {
+                self.background.darken(0.03)
+            } else {
+                self.background.lighten(0.03)
+            }
+        );
+        apply_color!(surface_overlay, fallback = self.foreground.opacity(0.45));
+        apply_color!(text_primary, fallback = self.foreground);
+        apply_color!(text_secondary, fallback = self.muted_foreground);
+        apply_color!(text_tertiary, fallback = self.muted_foreground.opacity(0.7));
+        apply_color!(border_subtle, fallback = self.border.opacity(0.55));
+        apply_color!(
+            border_strong,
+            fallback = if is_dark {
+                self.border.lighten(0.12)
+            } else {
+                self.border.darken(0.12)
+            }
+        );
+
+        // Connection type accent colors.
+        apply_color!(connection_ssh, fallback = crate::hsl(258.0, 90.0, 66.0));
+        apply_color!(connection_db, fallback = crate::hsl(217.0, 91.0, 60.0));
+        apply_color!(connection_jms, fallback = crate::hsl(160.0, 84.0, 39.0));
+        apply_color!(connection_port_forwarding, fallback = self.foreground);
+
         // TODO: Apply default fallback colors to highlight.
 
         // Ensure opacity for list_active, table_active
@@ -689,6 +775,31 @@ impl Theme {
             self.radius_lg = px(radius_lg as f32);
         } else {
             self.radius_lg = default_theme.radius_lg;
+        }
+        if let Some(radius_xs) = config.radius_xs {
+            self.radius_xs = px(radius_xs as f32);
+        } else {
+            self.radius_xs = default_theme.radius_xs;
+        }
+        if let Some(radius_sm) = config.radius_sm {
+            self.radius_sm = px(radius_sm as f32);
+        } else {
+            self.radius_sm = default_theme.radius_sm;
+        }
+        if let Some(radius_md) = config.radius_md {
+            self.radius_md = px(radius_md as f32);
+        } else {
+            self.radius_md = default_theme.radius_md;
+        }
+        if let Some(radius_xl) = config.radius_xl {
+            self.radius_xl = px(radius_xl as f32);
+        } else {
+            self.radius_xl = default_theme.radius_xl;
+        }
+        if let Some(radius_2xl) = config.radius_2xl {
+            self.radius_2xl = px(radius_2xl as f32);
+        } else {
+            self.radius_2xl = default_theme.radius_2xl;
         }
         if let Some(shadow) = config.shadow {
             self.shadow = shadow;

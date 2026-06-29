@@ -39,6 +39,7 @@ impl RenderOnce for Skeleton {
         div()
             .w_full()
             .h_4()
+            .rounded(cx.theme().radius_sm)
             .bg(if self.secondary {
                 cx.theme().skeleton.opacity(0.5)
             } else {
@@ -47,11 +48,12 @@ impl RenderOnce for Skeleton {
             .refine_style(&self.style)
             .with_animation(
                 "skeleton",
-                Animation::new(Duration::from_secs(2))
+                Animation::new(Duration::from_millis(1400))
                     .repeat()
                     .with_easing(bounce(ease_in_out)),
                 move |this, delta| {
-                    let v = 1.0 - delta * 0.5;
+                    // 在 0.4~1.0 之间呼吸，避免完全消失带来的闪烁感
+                    let v = 1.0 - delta * 0.6;
                     this.opacity(v)
                 },
             )

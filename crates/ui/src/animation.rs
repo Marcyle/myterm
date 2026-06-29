@@ -1,3 +1,27 @@
+use std::time::Duration;
+
+/// 快速过渡时长，适用于 hover、按钮按压等高频交互（约 100ms）。
+pub const DURATION_FAST: Duration = Duration::from_millis(100);
+/// 标准过渡时长，适用于卡片、列表项状态变化（约 180ms）。
+pub const DURATION_NORMAL: Duration = Duration::from_millis(180);
+/// 缓慢过渡时长，适用于弹窗、面板等较大元素入场（约 280ms）。
+pub const DURATION_SLOW: Duration = Duration::from_millis(280);
+
+/// 标准缓动曲线（CSS `cubic-bezier(0.4, 0, 0.2, 1)`），用于大多数过渡。
+pub fn easing_standard() -> impl Fn(f32) -> f32 {
+    cubic_bezier(0.4, 0.0, 0.2, 1.0)
+}
+
+/// 减速缓动曲线（CSS `cubic-bezier(0, 0, 0.2, 1)`），用于元素入场。
+pub fn easing_decelerate() -> impl Fn(f32) -> f32 {
+    cubic_bezier(0.0, 0.0, 0.2, 1.0)
+}
+
+/// 加速缓动曲线（CSS `cubic-bezier(0.4, 0, 1, 1)`），用于元素退场。
+pub fn easing_accelerate() -> impl Fn(f32) -> f32 {
+    cubic_bezier(0.4, 0.0, 1.0, 1.0)
+}
+
 /// A cubic bezier function like CSS `cubic-bezier`.
 ///
 /// Builder:

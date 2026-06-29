@@ -5,18 +5,17 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, AsyncApp, Context, ElementId, Entity, EventEmitter, FocusHandle,
     Focusable, FontWeight, InteractiveElement, IntoElement, KeyBinding, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, actions,
-    div, px,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, actions, div, px,
 };
 use gpui_component::{
-    ActiveTheme, Icon, IconName, InteractiveElementExt, Sizable, Size, WindowExt,
+    ActiveTheme, Icon, IconName, Sizable, Size, WindowExt,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputEvent, InputState},
     list::{List, ListState},
     popover::Popover,
-    tooltip::Tooltip,
+    sidebar::{Sidebar, SidebarMenu, SidebarMenuItem, SidebarToggleButton},
     v_flex,
 };
 use one_core::connection_notifier::{ConnectionDataEvent, emit_connection_event, get_notifier};
@@ -26,8 +25,8 @@ use one_core::keybindings::{action_id, rebind_keybindings, shortcuts_for};
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
 use one_core::storage::traits::Repository;
 use one_core::storage::{
-    ActiveConnections, ConnectionRepository, ConnectionType, GlobalStorageState,
-    StoredConnection, Workspace, WorkspaceRepository,
+    ActiveConnections, ConnectionRepository, ConnectionType, GlobalStorageState, StoredConnection,
+    Workspace, WorkspaceRepository,
 };
 use one_core::tab_container::{TabContainer, TabContent, TabContentEvent};
 use port_forwarding::{
@@ -42,6 +41,7 @@ use crate::home::home_connection_quick_open::ConnectionQuickOpenDelegate;
 use crate::home::home_strategy::build_connection_open_strategy;
 use crate::home::home_workspace_filter::{WorkspaceFilterDelegate, show_workspace_dialog};
 use crate::new_connection::NewConnectionWindow;
+use one_ui::{ConnectionCard, EmptyState};
 
 actions!(home_tab, [OpenConnectionQuickOpen, NewConnectionShortcut]);
 
@@ -129,12 +129,15 @@ pub struct HomePage {
     master_key_dialog_open: bool,
     master_key_unlock_prompt_pending: bool,
     pub(crate) pending_jms_connections: Vec<StoredConnection>,
-    pub(crate) pending_jms_koko:
-        Vec<(jms::KokoConnectParams, Option<terminal_view::JmsSidebarContext>)>,
+    pub(crate) pending_jms_koko: Vec<(
+        jms::KokoConnectParams,
+        Option<terminal_view::JmsSidebarContext>,
+    )>,
     /// 登录成功后待打开的 JMS 占位终端(只有资产树,无连接)
     pub(crate) pending_jms_placeholder: Vec<terminal_view::JmsSidebarContext>,
+    /// 侧边栏是否收起
+    pub(crate) sidebar_collapsed: bool,
 }
-
 
 impl HomePage {
     pub fn new(
@@ -188,6 +191,7 @@ impl HomePage {
             pending_jms_connections: Vec::new(),
             pending_jms_koko: Vec::new(),
             pending_jms_placeholder: Vec::new(),
+            sidebar_collapsed: false,
         };
 
         // 异步加载工作区
@@ -1428,77 +1432,53 @@ impl HomePage {
     }
 
     fn render_sidebar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let collapsed = self.sidebar_collapsed;
         let filter_types = ConnectionType::all();
 
-        v_flex()
-            .w(px(200.0))
-            .h_full()
-            .bg(cx.theme().sidebar)
-            .border_r_1()
-            .border_color(cx.theme().border)
-            .child(
-                // 侧边栏过滤选项
-                v_flex()
-                    .flex_1()
-                    .w_full()
-                    .p_2()
-                    .gap_2()
-                    .children(filter_types.into_iter().map(|filter_type| {
-                        let is_selected = self.selected_filter == filter_type;
-                        let filter_type_clone = filter_type;
-
-                        div()
-                            .id(filter_type.label())
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .w_full()
-                            .px_3()
-                            .py_2()
-                            .cursor_pointer()
-                            .rounded_lg()
-                            .overflow_hidden()
-                            .when(is_selected, |this| {
-                                this.bg(cx.theme().list_active)
-                                    .border_l_3()
-                                    .border_color(cx.theme().list_active_border)
-                            })
-                            .when(!is_selected, |this| {
-                                this.bg(cx.theme().sidebar)
-                                    .hover(|style| style.bg(cx.theme().sidebar_accent))
-                            })
-                            .on_click(cx.listener(move |this: &mut HomePage, _, _window, cx| {
-                                this.selected_filter = filter_type_clone;
-                                cx.notify();
-                            }))
-                            .child(Icon::new(filter_type.icon()).color().with_size(Size::Large))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().foreground)
-                                    .when(is_selected, |this| this.font_weight(FontWeight::MEDIUM))
-                                    .child(filter_type.label()),
-                            )
-                    })),
-            )
-            .child(
-                // 底部区域：设置
-                v_flex()
-                    .w_full()
-                    .p_4()
-                    .gap_3()
-                    .border_t_1()
-                    .border_color(cx.theme().border)
+        Sidebar::new("home-filter-sidebar")
+            .collapsible(true)
+            .collapsed(collapsed)
+            .header(
+                h_flex()
+                    .items_center()
+                    .justify_between()
                     .child(
-                        Button::new("open_settings")
-                            .icon(IconName::Settings)
-                            .label(t!("Common.settings"))
-                            .w_full()
-                            .justify_start()
-                            .on_click(cx.listener(|this: &mut HomePage, _, window, cx| {
-                                this.add_settings_tab(window, cx);
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .when(!collapsed, |this| this.child(t!("Home.title"))),
+                    )
+                    .child(
+                        SidebarToggleButton::new()
+                            .collapsed(collapsed)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.sidebar_collapsed = !this.sidebar_collapsed;
+                                cx.notify();
                             })),
                     ),
+            )
+            .child(
+                SidebarMenu::new().children(filter_types.into_iter().map(|filter_type| {
+                    let is_selected = self.selected_filter == filter_type;
+                    SidebarMenuItem::new(filter_type.label())
+                        .icon(Icon::new(filter_type.icon()).color().with_size(Size::Large))
+                        .active(is_selected)
+                        .on_click(cx.listener(move |this: &mut HomePage, _, _, cx| {
+                            this.selected_filter = filter_type;
+                            cx.notify();
+                        }))
+                })),
+            )
+            .footer(
+                Button::new("open_settings")
+                    .icon(IconName::Settings)
+                    .label(t!("Common.settings"))
+                    .w_full()
+                    .justify_start()
+                    .when(collapsed, |this| this.label(""))
+                    .on_click(cx.listener(|this: &mut HomePage, _, window, cx| {
+                        this.add_settings_tab(window, cx);
+                    })),
             )
     }
 
@@ -1617,12 +1597,14 @@ impl HomePage {
             .p_6()
             .child({
                 let mut container = v_flex().gap_8().w_full();
+                let mut has_content = false;
 
                 // 过滤掉空的工作区
                 for (workspace, connections) in workspaces_with_connections {
                     if connections.is_empty() {
                         continue;
                     }
+                    has_content = true;
                     container = container.child(self.render_workspace_section(
                         workspace,
                         connections,
@@ -1633,6 +1615,7 @@ impl HomePage {
 
                 // 如果用户没有设置工作区，直接显示连接列表；否则显示未分配工作区
                 if !unassigned_connections.is_empty() {
+                    has_content = true;
                     let has_workspaces = self.workspaces.iter().any(|ws| ws.id.is_some());
                     if has_workspaces {
                         container = container.child(self.render_unassigned_section(
@@ -1650,7 +1633,22 @@ impl HomePage {
                     }
                 }
 
-                container
+                if has_content {
+                    container.into_any_element()
+                } else {
+                    EmptyState::new(t!("Home.no_connections"))
+                        .icon(IconName::Search)
+                        .description(t!("Home.no_connections_hint"))
+                        .action(
+                            Button::new("empty-new-connection")
+                                .primary()
+                                .label(t!("Home.new_connection"))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.show_new_connection_dialog(window, cx);
+                                })),
+                        )
+                        .into_any_element()
+                }
             })
     }
 
@@ -1703,8 +1701,9 @@ impl HomePage {
                 for conn in connections {
                     container = container.child(
                         div()
-                            .w(px(320.0)) // 固定宽度，不增长
-                            .flex_shrink_0() // 不收缩
+                            .flex_1()
+                            .min_w(px(260.0))
+                            .max_w(px(360.0))
                             .child(self.render_connection_card(conn, selected_id, cx)),
                     );
                 }
@@ -1724,8 +1723,9 @@ impl HomePage {
         for conn in connections {
             container = container.child(
                 div()
-                    .w(px(320.0))
-                    .flex_shrink_0()
+                    .flex_1()
+                    .min_w(px(260.0))
+                    .max_w(px(360.0))
                     .child(self.render_connection_card(conn, selected_id, cx)),
             );
         }
@@ -1773,8 +1773,9 @@ impl HomePage {
                 for conn in connections {
                     container = container.child(
                         div()
-                            .w(px(320.0)) // 固定宽度，不增长
-                            .flex_shrink_0() // 不收缩
+                            .flex_1()
+                            .min_w(px(260.0))
+                            .max_w(px(360.0))
                             .child(self.render_connection_card(conn, selected_id, cx)),
                     );
                 }
@@ -1789,334 +1790,146 @@ impl HomePage {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let conn_id = conn.id;
-        let clone_conn = conn.clone();
-        let sftp_hover_conn = conn.clone();
-        let edit_conn = conn.clone();
-        let edit_conn_type = conn.connection_type;
-        let duplicate_conn = conn.clone();
-        let delete_conn_id = conn.id;
-        let delete_conn_name = conn.name.clone();
         let is_selected = selected_id == conn.id;
-
         let is_active = conn
             .id
             .map_or(false, |id| cx.global::<ActiveConnections>().is_active(id));
-
-        let can_edit = true;
         let has_team = conn.team_id.is_some();
 
-        let card = v_flex()
-            .justify_center()
-            .id(SharedString::from(format!(
-                "conn-card-{}",
-                conn.id.unwrap_or(0)
-            )))
-            .w_full()
-            .h(px(90.))
-            .rounded(px(8.0))
-            .bg(cx.theme().background)
-            .p_3()
-            .border_1()
-            .rounded_lg()
-            .relative()
-            .overflow_hidden()
-            .shadow_sm()
-            .group("")
-            .when(is_selected, |this| {
-                this.border_color(cx.theme().list_active_border)
-                    .shadow_lg()
-                    .border_l_3()
-            })
-            .when(!is_selected, |this| this.border_color(cx.theme().border))
-            .cursor_pointer()
-            .hover(|style| {
-                style
-                    .shadow_lg()
-                    .border_color(cx.theme().list_active_border)
-            })
-            .on_double_click(cx.listener(move |this, _, w, cx| {
-                this.open_connection_from_quick(&clone_conn, w, cx);
-                cx.notify()
-            }))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.selected_connection_id = conn_id;
-                cx.notify();
-            }))
-            .when(is_active, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .top(px(6.0))
-                        .left(px(6.0))
-                        .w(px(10.0))
-                        .h(px(10.0))
-                        .rounded_full()
-                        .bg(cx.theme().success)
-                        .shadow_lg(),
-                )
-            })
-            .child(
-                // hover时显示的编辑和删除按钮
-                h_flex()
-                    .absolute()
-                    .top_2()
-                    .right_2()
-                    .gap_1()
-                    .group_hover("", |style| style.opacity(1.0))
-                    .opacity(0.0)
-                    .when(conn.connection_type == ConnectionType::SshSftp, |this| {
-                        this.child(
-                            Button::new(SharedString::from(format!(
-                                "sftp-conn-{}",
-                                conn.id.unwrap_or(0)
-                            )))
-                            .icon(IconName::Folder1.color())
-                            .with_size(Size::Small)
-                            .primary()
-                            .tooltip(t!("Home.open_sftp"))
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    this.open_sftp_view(sftp_hover_conn.clone(), window, cx);
-                                },
-                            )),
-                        )
-                    })
-                    .when(can_edit, |this| {
-                        this.child(
-                            Button::new(SharedString::from(format!(
-                                "duplicate-conn-{}",
-                                conn.id.unwrap_or(0)
-                            )))
-                            .icon(IconName::Copy)
-                            .with_size(Size::Small)
-                            .primary()
-                            .tooltip(t!("Home.duplicate_connection"))
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    this.duplicate_connection(duplicate_conn.clone(), window, cx);
-                                },
-                            )),
-                        )
-                        .child(
-                            Button::new(SharedString::from(format!(
-                                "edit-conn-{}",
-                                conn.id.unwrap_or(0)
-                            )))
-                            .icon(IconName::Edit)
-                            .with_size(Size::Small)
-                            .primary()
-                            .tooltip(t!("Home.edit_connection"))
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    if let Some(conn_id) = edit_conn.id {
-                                        match edit_conn_type {
-                                            ConnectionType::SshSftp => {
-                                                this.editing_connection_id = Some(conn_id);
-                                                this.show_ssh_form(window, cx);
-                                            }
-                                            ConnectionType::PortForwarding => {
-                                                this.editing_connection_id = Some(conn_id);
-                                                this.show_port_forwarding_form(window, cx);
-                                            }
-                                            ConnectionType::Jms => {
-                                                this.open_jms_connection_prefilled(
-                                                    edit_conn.clone(),
-                                                    window,
-                                                    cx,
-                                                );
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                },
-                            )),
-                        )
-                        .child(
-                            Button::new(SharedString::from(format!(
-                                "delete-conn-{}",
-                                conn.id.unwrap_or(0)
-                            )))
-                            .icon(IconName::Remove)
-                            .with_size(Size::Small)
-                            .danger()
-                            .tooltip(t!("Home.delete_connection"))
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    if let Some(conn_id) = delete_conn_id {
-                                        let conn_name = delete_conn_name.clone();
-                                        this.confirm_delete_connection(
-                                            conn_id, conn_name, window, cx,
-                                        );
-                                    }
-                                },
-                            )),
-                        )
-                    }),
-            )
-            .child(
-                h_flex()
-                    .items_center()
-                    .gap_2()
-                    .w_full()
-                    .child(
-                        div()
-                            .h(px(48.0))
-                            .rounded(px(8.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(match conn.connection_type {
-                                ConnectionType::SshSftp => IconName::TerminalColor
-                                    .color()
-                                    .with_size(px(40.0))
-                                    .text_color(gpui::rgb(0x8b5cf6)),
-                                ConnectionType::PortForwarding => IconName::Network
-                                    .color()
-                                    .with_size(px(40.0))
-                                    .text_color(gpui::white()),
-                                ConnectionType::Jms => IconName::Key
-                                    .color()
-                                    .with_size(px(40.0))
-                                    .text_color(gpui::rgb(0x10b981)),
-                                _ => IconName::Server
-                                    .color()
-                                    .with_size(px(40.0))
-                                    .text_color(gpui::white()),
-                            }),
-                    )
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_0p5()
-                            .overflow_hidden()
-                            .child({
-                                let name_tooltip: SharedString = conn.name.clone().into();
-                                h_flex()
-                                    .gap_1()
-                                    .overflow_hidden()
-                                    .child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "conn-name-{}",
-                                                conn.id.unwrap_or(0)
-                                            )))
-                                            .text_sm()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(cx.theme().foreground)
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .flex_shrink()
-                                            .min_w_0()
-                                            .tooltip(move |window, cx| {
-                                                Tooltip::new(name_tooltip.clone()).build(window, cx)
-                                            })
-                                            .child(conn.name.clone()),
-                                    )
-                                    .when(has_team, |this| {
-                                        this.child(
-                                            div()
-                                                .flex_shrink_0()
-                                                .px_1()
-                                                .rounded(px(3.0))
-                                                .bg(cx.theme().accent.opacity(0.15))
-                                                .text_color(cx.theme().accent)
-                                                .text_xs()
-                                                .child(t!("Home.team_badge").to_string()),
-                                        )
-                                    })
-                            })
-                            .when(conn.connection_type == ConnectionType::SshSftp, |this| {
-                                if let Ok(params) = conn.to_ssh_params() {
-                                    let conn_info = format!(
-                                        "{}@{}:{}",
-                                        params.username, params.host, params.port
-                                    );
-                                    let tooltip_text: SharedString = conn_info.clone().into();
-                                    this.child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "conn-info-{}",
-                                                conn.id.unwrap_or(0)
-                                            )))
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .max_w_full()
-                                            .tooltip(move |window, cx| {
-                                                Tooltip::new(tooltip_text.clone()).build(window, cx)
-                                            })
-                                            .child(conn_info),
-                                    )
-                                } else {
-                                    this
-                                }
-                            })
-                            .when(
-                                conn.connection_type == ConnectionType::PortForwarding,
-                                |this| {
-                                    if let Ok(params) = conn.to_port_forwarding_params() {
-                                        let conn_info = port_forwarding_connection_info(&params);
-                                        let tooltip_text: SharedString = conn_info.clone().into();
-                                        this.child(
-                                            div()
-                                                .id(SharedString::from(format!(
-                                                    "conn-info-{}",
-                                                    conn.id.unwrap_or(0)
-                                                )))
-                                                .text_xs()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .whitespace_nowrap()
-                                                .max_w_full()
-                                                .tooltip(move |window, cx| {
-                                                    Tooltip::new(tooltip_text.clone())
-                                                        .build(window, cx)
-                                                })
-                                                .child(conn_info),
-                                        )
-                                    } else {
-                                        this
-                                    }
-                                },
-                            )
-                            .when(conn.connection_type == ConnectionType::Jms, |this| {
-                                if let Ok(params) = conn.to_jms_params() {
-                                    let conn_info =
-                                        format!("{}@{}", params.username, params.url);
-                                    let tooltip_text: SharedString = conn_info.clone().into();
-                                    this.child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "conn-info-{}",
-                                                conn.id.unwrap_or(0)
-                                            )))
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .max_w_full()
-                                            .tooltip(move |window, cx| {
-                                                Tooltip::new(tooltip_text.clone())
-                                                    .build(window, cx)
-                                            })
-                                            .child(conn_info),
-                                    )
-                                } else {
-                                    this
-                                }
-                            }),
-                    ),
+        let icon = match conn.connection_type {
+            ConnectionType::SshSftp => IconName::TerminalColor
+                .color()
+                .with_size(px(40.0))
+                .text_color(cx.theme().connection_ssh),
+            ConnectionType::PortForwarding => IconName::Network
+                .color()
+                .with_size(px(40.0))
+                .text_color(cx.theme().connection_port_forwarding),
+            ConnectionType::Jms => IconName::Key
+                .color()
+                .with_size(px(40.0))
+                .text_color(cx.theme().connection_jms),
+            _ => IconName::Server
+                .color()
+                .with_size(px(40.0))
+                .text_color(cx.theme().connection_db),
+        };
+
+        let subtitle: Option<String> = match conn.connection_type {
+            ConnectionType::SshSftp => conn
+                .to_ssh_params()
+                .ok()
+                .map(|params| format!("{}@{}:{}", params.username, params.host, params.port)),
+            ConnectionType::PortForwarding => conn
+                .to_port_forwarding_params()
+                .ok()
+                .map(|params| port_forwarding_connection_info(&params)),
+            ConnectionType::Jms => conn
+                .to_jms_params()
+                .ok()
+                .map(|params| format!("{}@{}", params.username, params.url)),
+            _ => None,
+        };
+
+        let open_conn = conn.clone();
+        let mut card = ConnectionCard::new(
+            SharedString::from(format!("conn-card-{}", conn.id.unwrap_or(0))),
+            icon,
+            conn.name.clone(),
+        )
+        .selected(is_selected)
+        .active(is_active)
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.selected_connection_id = conn_id;
+            cx.notify();
+        }))
+        .on_double_click(cx.listener(move |this, _, window, cx| {
+            this.open_connection_from_quick(&open_conn, window, cx);
+            cx.notify();
+        }));
+
+        let card_id = conn.id.unwrap_or(0);
+
+        if has_team {
+            card = card.team_badge(t!("Home.team_badge"));
+        }
+
+        if let Some(subtitle) = subtitle {
+            card = card.subtitle(subtitle);
+        }
+
+        if conn.connection_type == ConnectionType::SshSftp {
+            let sftp_conn = conn.clone();
+            card = card.action(
+                Button::new(SharedString::from(format!("sftp-conn-{}", card_id)))
+                    .icon(IconName::Folder1.color())
+                    .with_size(Size::Small)
+                    .primary()
+                    .tooltip(t!("Home.open_sftp"))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.open_sftp_view(sftp_conn.clone(), window, cx);
+                    })),
             );
+        }
+
+        let duplicate_conn = conn.clone();
+        card = card.action(
+            Button::new(SharedString::from(format!("duplicate-conn-{}", card_id)))
+                .icon(IconName::Copy)
+                .with_size(Size::Small)
+                .primary()
+                .tooltip(t!("Home.duplicate_connection"))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    cx.stop_propagation();
+                    this.duplicate_connection(duplicate_conn.clone(), window, cx);
+                })),
+        );
+
+        let edit_conn = conn.clone();
+        let edit_conn_type = conn.connection_type;
+        card = card.action(
+            Button::new(SharedString::from(format!("edit-conn-{}", card_id)))
+                .icon(IconName::Edit)
+                .with_size(Size::Small)
+                .primary()
+                .tooltip(t!("Home.edit_connection"))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    cx.stop_propagation();
+                    if let Some(conn_id) = edit_conn.id {
+                        match edit_conn_type {
+                            ConnectionType::SshSftp => {
+                                this.editing_connection_id = Some(conn_id);
+                                this.show_ssh_form(window, cx);
+                            }
+                            ConnectionType::PortForwarding => {
+                                this.editing_connection_id = Some(conn_id);
+                                this.show_port_forwarding_form(window, cx);
+                            }
+                            ConnectionType::Jms => {
+                                this.open_jms_connection_prefilled(edit_conn.clone(), window, cx);
+                            }
+                            _ => {}
+                        }
+                    }
+                })),
+        );
+
+        let delete_conn_name = conn.name.clone();
+        card = card.action(
+            Button::new(SharedString::from(format!("delete-conn-{}", card_id)))
+                .icon(IconName::Remove)
+                .with_size(Size::Small)
+                .danger()
+                .tooltip(t!("Home.delete_connection"))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    cx.stop_propagation();
+                    if let Some(conn_id) = conn.id {
+                        let conn_name = delete_conn_name.clone();
+                        this.confirm_delete_connection(conn_id, conn_name, window, cx);
+                    }
+                })),
+        );
 
         card.into_any_element()
     }

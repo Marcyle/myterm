@@ -214,10 +214,14 @@ impl SettingsPanel {
                                 t!("Settings.General.Font.font_family"),
                                 SettingField::dropdown(
                                     vec![
-                                        ("Arial".into(), "Arial".into()),
-                                        ("Helvetica".into(), "Helvetica".into()),
-                                        ("Times New Roman".into(), "Times New Roman".into()),
-                                        ("Courier New".into(), "Courier New".into()),
+                                        ("system-ui".into(), "System UI".into()),
+                                        ("Inter".into(), "Inter".into()),
+                                        ("SF Pro".into(), "SF Pro".into()),
+                                        ("Segoe UI".into(), "Segoe UI".into()),
+                                        ("PingFang SC".into(), "PingFang SC".into()),
+                                        ("Microsoft YaHei".into(), "Microsoft YaHei".into()),
+                                        ("Menlo".into(), "Menlo".into()),
+                                        ("Consolas".into(), "Consolas".into()),
                                     ],
                                     |cx: &App| {
                                         SharedString::from(

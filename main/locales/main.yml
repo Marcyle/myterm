@@ -197,6 +197,14 @@ Home:
     en: Team
     zh-CN: 团队
     zh-HK: 團隊
+  no_connections:
+    en: No connections found
+    zh-CN: 没有找到连接
+    zh-HK: 沒有找到連線
+  no_connections_hint:
+    en: Try adjusting your search or create a new connection.
+    zh-CN: 尝试调整搜索条件，或新建一个连接。
+    zh-HK: 嘗試調整搜尋條件，或新增一個連線。
   duplicate_name:
     en: "%{name} (Copy)"
     zh-CN: "%{name} (副本)"

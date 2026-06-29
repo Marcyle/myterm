@@ -66,6 +66,16 @@ pub struct Theme {
     pub radius: Pixels,
     /// Radius for the large elements, e.g.: Dialog, Notification border radius.
     pub radius_lg: Pixels,
+    /// Extra small radius.
+    pub radius_xs: Pixels,
+    /// Small radius.
+    pub radius_sm: Pixels,
+    /// Medium radius, same as `radius`.
+    pub radius_md: Pixels,
+    /// Extra large radius.
+    pub radius_xl: Pixels,
+    /// 2x large radius.
+    pub radius_2xl: Pixels,
     pub shadow: bool,
     pub transparent: Hsla,
     /// Show the scrollbar mode, default: Scrolling
@@ -214,8 +224,13 @@ impl From<&ThemeColor> for Theme {
                 "DejaVu Sans Mono".into()
             },
             mono_font_size: px(13.),
-            radius: px(6.),
-            radius_lg: px(8.),
+            radius: px(8.),
+            radius_lg: px(12.),
+            radius_xs: px(2.),
+            radius_sm: px(4.),
+            radius_md: px(8.),
+            radius_xl: px(16.),
+            radius_2xl: px(24.),
             shadow: true,
             scrollbar_show: ScrollbarShow::default(),
             notification: NotificationSettings::default(),

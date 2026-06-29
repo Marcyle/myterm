@@ -206,6 +206,34 @@ pub struct ThemeColor {
     /// This is only works on Linux, other platforms we can't change the window border color.
     pub window_border: Hsla,
 
+    /// Base surface color, used for lowest layer backgrounds.
+    pub surface: Hsla,
+    /// Elevated surface color, used for cards, popovers, dialogs.
+    pub surface_elevated: Hsla,
+    /// Overlay surface color, used for scrims and backdrops.
+    pub surface_overlay: Hsla,
+
+    /// Primary text color.
+    pub text_primary: Hsla,
+    /// Secondary text color.
+    pub text_secondary: Hsla,
+    /// Tertiary text color.
+    pub text_tertiary: Hsla,
+
+    /// Subtle border color.
+    pub border_subtle: Hsla,
+    /// Strong border color.
+    pub border_strong: Hsla,
+
+    /// SSH/SFTP connection accent color.
+    pub connection_ssh: Hsla,
+    /// Database connection accent color.
+    pub connection_db: Hsla,
+    /// JMS connection accent color.
+    pub connection_jms: Hsla,
+    /// Port forwarding connection accent color.
+    pub connection_port_forwarding: Hsla,
+
     /// The base red color.
     pub red: Hsla,
     /// The base red light color.

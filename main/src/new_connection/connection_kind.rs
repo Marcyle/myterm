@@ -1,5 +1,5 @@
 use gpui::{Styled, px};
-use gpui_component::{Icon, IconName, Sizable};
+use gpui_component::{ActiveTheme, Icon, IconName, Sizable};
 use rust_i18n::t;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,12 +62,12 @@ impl NewConnectionKind {
         }
     }
 
-    pub(super) fn icon(&self) -> Icon {
+    pub(super) fn icon(&self, cx: &gpui::App) -> Icon {
         match self {
             Self::Ssh => IconName::TerminalColor.color().with_size(px(40.0)),
             Self::Terminal => IconName::Terminal
                 .mono()
-                .text_color(gpui::rgb(0x8b5cf6))
+                .text_color(cx.theme().connection_ssh)
                 .with_size(px(40.0)),
             Self::PortForwarding => IconName::Network.color().with_size(px(40.0)),
         }
