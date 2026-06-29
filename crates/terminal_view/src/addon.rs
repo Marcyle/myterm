@@ -1001,6 +1001,13 @@ impl FilePathAddon {
             let (path_part, _line_number, _column_number) = split_path_line_column(candidate);
             let cleaned_path = trim_trailing_punctuation(&path_part);
 
+            // 跳过 UNC/网络路径：对不可达主机调用 `Path::exists()` 会发起 SMB 连接，
+            // 在主线程上最长阻塞约 41s（SMB 超时），导致整个应用窗口僵死。
+            // 悬停高亮属于辅助功能，对网络路径直接放弃存在性校验即可。
+            if is_unc_path(&cleaned_path) {
+                continue;
+            }
+
             if let Some(resolved_path) = resolve_path(&cleaned_path, base_dir) {
                 if resolved_path.exists() {
                     self.hovered_path = Some(HoveredPath {
@@ -1164,6 +1171,14 @@ fn trim_trailing_punctuation(candidate: &str) -> String {
     let trimmed =
         candidate.trim_end_matches(|char: char| matches!(char, ')' | ']' | '}' | ',' | ';'));
     trimmed.to_string()
+}
+
+/// 判断是否为 UNC / 网络路径（`\\server\share` 或 `//server/share`）。
+///
+/// 对这类路径调用 `Path::exists()` / `canonicalize()` 会发起 SMB 连接，
+/// 主机不可达时在主线程上阻塞最长约 41s（SMB 超时），冻结整个应用窗口。
+fn is_unc_path(raw_path: &str) -> bool {
+    raw_path.starts_with("\\\\") || raw_path.starts_with("//")
 }
 
 fn resolve_path(raw_path: &str, base_dir: Option<&Path>) -> Option<PathBuf> {
