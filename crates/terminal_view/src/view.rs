@@ -10,7 +10,9 @@ use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::notification::Notification;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
-use gpui_component::{BlinkCursor, Icon, IconName, Sizable, Size, WindowExt, h_flex, kbd::Kbd, v_flex};
+use gpui_component::{
+    BlinkCursor, Icon, IconName, Sizable, Size, WindowExt, h_flex, kbd::Kbd, v_flex,
+};
 use one_core::gpui_tokio::Tokio;
 use one_core::keybindings::{
     action_id, keystroke_matches_shortcuts, rebind_keybindings, shortcuts_for,
@@ -3325,7 +3327,7 @@ impl TerminalView {
                     .p_6()
                     .child(
                         Icon::new(IconName::Server)
-                            .color()
+                            .mono()
                             .with_size(px(40.0))
                             .text_color(rgb(0x10b981)),
                     )
@@ -3394,7 +3396,7 @@ impl TerminalView {
                                 } else {
                                     IconName::CircleX
                                 })
-                                .color()
+                                .mono()
                                 .with_size(px(24.0))
                                 .text_color(if is_connecting {
                                     rgb(0xfbbf24)
@@ -4021,7 +4023,7 @@ impl TabContent for TerminalView {
     }
 
     fn icon(&self, _cx: &App) -> Option<Icon> {
-        Some(IconName::TerminalColor.color())
+        Some(IconName::SquareTerminal.mono())
     }
 
     fn closeable(&self, _cx: &App) -> bool {
@@ -4349,12 +4351,14 @@ impl Render for TerminalView {
                             a: 0.6,
                         })
                         .cursor_pointer()
-                        .hover(|s| s.bg(Hsla {
-                            h: 0.,
-                            s: 0.,
-                            l: 0.3,
-                            a: 0.7,
-                        }))
+                        .hover(|s| {
+                            s.bg(Hsla {
+                                h: 0.,
+                                s: 0.,
+                                l: 0.3,
+                                a: 0.7,
+                            })
+                        })
                         .on_click(move |_, _window, cx| {
                             sidebar.update(cx, |sidebar, cx| {
                                 sidebar.expand(cx);

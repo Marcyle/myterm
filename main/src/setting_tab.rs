@@ -454,7 +454,7 @@ impl TabContent for SettingsPanel {
     }
 
     fn icon(&self, _cx: &App) -> Option<Icon> {
-        Some(IconName::SettingColor.color())
+        Some(IconName::Settings.mono())
     }
 
     fn closeable(&self, _cx: &App) -> bool {

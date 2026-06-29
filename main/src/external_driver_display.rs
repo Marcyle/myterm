@@ -8,17 +8,17 @@ pub(crate) fn external_driver_icon_for_config(
     size: impl Into<Size>,
 ) -> Option<Icon> {
     // Database support removed - return default icon
-    Some(IconName::Database.color().with_size(size))
+    Some(IconName::Database.mono().with_size(size))
 }
 
 #[allow(dead_code)]
 pub(crate) fn external_driver_icon_from_path(_path: &str, size: impl Into<Size>) -> Icon {
     // Database support removed - return default icon
-    IconName::Database.color().with_size(size)
+    IconName::Database.mono().with_size(size)
 }
 
 #[allow(dead_code)]
 pub(crate) fn external_driver_icon_from_file_path(_path: &Path, size: impl Into<Size>) -> Icon {
     // Database support removed - return default icon
-    IconName::Database.color().with_size(size)
+    IconName::Database.mono().with_size(size)
 }

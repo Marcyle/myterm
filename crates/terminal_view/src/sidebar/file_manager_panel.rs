@@ -3691,7 +3691,7 @@ impl FileManagerPanel {
                             IconName::File
                         })
                         .with_size(Size::Small)
-                        .color(),
+                        .mono(),
                     )
                     .child({
                         let tooltip_name = name.clone();
@@ -3744,7 +3744,7 @@ impl FileManagerPanel {
                     .flex_1()
                     .gap_1()
                     .items_center()
-                    .child(Icon::new(IconName::Folder1).with_size(Size::Small).color())
+                    .child(Icon::new(IconName::Folder1).with_size(Size::Small).mono())
                     .child(div().text_sm().child("..")),
             )
             .child(div().w(px(50.)))
@@ -4176,7 +4176,7 @@ impl FileManagerPanel {
             .p_4()
             .child(
                 Icon::new(IconName::CircleX)
-                    .color()
+                    .mono()
                     .with_size(Size::Large)
                     .text_color(cx.theme().danger),
             )
@@ -4219,7 +4219,7 @@ impl FileManagerPanel {
             .p_4()
             .child(
                 Icon::new(IconName::FolderOpen)
-                    .color()
+                    .mono()
                     .with_size(Size::Large)
                     .text_color(cx.theme().muted_foreground),
             )

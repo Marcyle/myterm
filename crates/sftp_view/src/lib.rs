@@ -4859,7 +4859,7 @@ impl TabContent for SftpView {
     }
 
     fn icon(&self, _cx: &App) -> Option<Icon> {
-        Some(Icon::new(IconName::Folder1).color().with_size(Size::Medium))
+        Some(Icon::new(IconName::Folder1).mono().with_size(Size::Medium))
     }
 
     fn closeable(&self, _cx: &App) -> bool {

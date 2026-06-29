@@ -503,7 +503,7 @@ impl FileListPanel {
                             IconName::File
                         })
                         .with_size(Size::Large)
-                        .color(),
+                        .mono(),
                     )
                     .child({
                         let tooltip_name = name.clone();
@@ -576,7 +576,7 @@ impl FileListPanel {
                     .w(px(250.))
                     .gap_2()
                     .items_center()
-                    .child(Icon::new(IconName::Folder1).with_size(Size::Large).color())
+                    .child(Icon::new(IconName::Folder1).with_size(Size::Large).mono())
                     .child(div().text_base().child("..")),
             )
             .child(div().w(px(180.)).px_2())

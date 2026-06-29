@@ -172,7 +172,7 @@ impl NewConnectionWindow {
             NewConnectionCategory::all().into_iter().map(|category| {
                 let is_selected = self.selected_category == category;
                 SidebarMenuItem::new(category.label())
-                    .icon(Icon::new(category.icon()).color().with_size(Size::Medium))
+                    .icon(Icon::new(category.icon()).mono().with_size(Size::Medium))
                     .active(is_selected)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.selected_category = category;

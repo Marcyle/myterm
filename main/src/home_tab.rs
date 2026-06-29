@@ -1183,7 +1183,7 @@ impl HomePage {
                     // 本地终端按钮
                     .child(
                         Button::new("local-terminal-button")
-                            .icon(IconName::TerminalColor)
+                            .icon(IconName::SquareTerminal)
                             .label(t!("Terminal.local"))
                             .tooltip(t!("Terminal.local"))
                             .on_click(window.listener_for(&view, move |this, _, window, cx| {
@@ -1461,7 +1461,7 @@ impl HomePage {
                 SidebarMenu::new().children(filter_types.into_iter().map(|filter_type| {
                     let is_selected = self.selected_filter == filter_type;
                     SidebarMenuItem::new(filter_type.label())
-                        .icon(Icon::new(filter_type.icon()).color().with_size(Size::Large))
+                        .icon(Icon::new(filter_type.icon()).mono().with_size(Size::Large))
                         .active(is_selected)
                         .on_click(cx.listener(move |this: &mut HomePage, _, _, cx| {
                             this.selected_filter = filter_type;
@@ -1669,8 +1669,9 @@ impl HomePage {
                     .px_2()
                     .py_1()
                     .child(
-                        Icon::new(IconName::AppsColor)
-                            .color()
+                        Icon::new(IconName::Apps)
+                            .mono()
+                            .text_color(cx.theme().muted_foreground)
                             .with_size(Size::Medium),
                     )
                     .child(
@@ -1797,21 +1798,21 @@ impl HomePage {
         let has_team = conn.team_id.is_some();
 
         let icon = match conn.connection_type {
-            ConnectionType::SshSftp => IconName::TerminalColor
-                .color()
-                .with_size(px(40.0))
+            ConnectionType::SshSftp => IconName::SquareTerminal
+                .mono()
+                .with_size(px(28.0))
                 .text_color(cx.theme().connection_ssh),
             ConnectionType::PortForwarding => IconName::Network
-                .color()
-                .with_size(px(40.0))
+                .mono()
+                .with_size(px(28.0))
                 .text_color(cx.theme().connection_port_forwarding),
             ConnectionType::Jms => IconName::Key
-                .color()
-                .with_size(px(40.0))
+                .mono()
+                .with_size(px(28.0))
                 .text_color(cx.theme().connection_jms),
             _ => IconName::Server
-                .color()
-                .with_size(px(40.0))
+                .mono()
+                .with_size(px(28.0))
                 .text_color(cx.theme().connection_db),
         };
 
@@ -1862,7 +1863,7 @@ impl HomePage {
             let sftp_conn = conn.clone();
             card = card.action(
                 Button::new(SharedString::from(format!("sftp-conn-{}", card_id)))
-                    .icon(IconName::Folder1.color())
+                    .icon(IconName::Folder1.mono())
                     .with_size(Size::Small)
                     .primary()
                     .tooltip(t!("Home.open_sftp"))
@@ -1999,7 +2000,7 @@ impl TabContent for HomePage {
     }
 
     fn icon(&self, _cx: &App) -> Option<Icon> {
-        Some(IconName::Home.color())
+        Some(IconName::Home.mono())
     }
 
     fn closeable(&self, _cx: &App) -> bool {

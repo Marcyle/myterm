@@ -91,7 +91,7 @@ impl ConnectionType {
     pub fn icon(&self) -> IconName {
         match self {
             ConnectionType::All => IconName::Server,
-            ConnectionType::SshSftp => IconName::TerminalColor,
+            ConnectionType::SshSftp => IconName::SquareTerminal,
             ConnectionType::PortForwarding => IconName::Network,
             ConnectionType::Jms => IconName::Key,
         }
@@ -194,28 +194,10 @@ impl DatabaseType {
     }
 
     pub fn as_icon(&self) -> Icon {
-        match self {
-            DatabaseType::MySQL => IconName::MySQLColor.color().with_size(Large),
-            DatabaseType::PostgreSQL => IconName::PostgreSQLColor.color().with_size(Large),
-            DatabaseType::SQLite => IconName::SQLiteColor.color().with_size(Large),
-            DatabaseType::DuckDB => IconName::DuckDB.color().with_size(Large),
-            DatabaseType::MSSQL => IconName::MSSQLColor.color().with_size(Large),
-            DatabaseType::Oracle => IconName::OracleColor.color().with_size(Large),
-            DatabaseType::ClickHouse => IconName::ClickHouseColor.color().with_size(Large),
-            DatabaseType::External { .. } => IconName::Database.color().with_size(Large),
-        }
+        IconName::Database.mono().with_size(Large)
     }
     pub fn as_node_icon(&self) -> Icon {
-        match self {
-            DatabaseType::MySQL => IconName::MySQLLineColor.color().with_size(Large),
-            DatabaseType::PostgreSQL => IconName::PostgreSQLLineColor.color().with_size(Large),
-            DatabaseType::SQLite => IconName::SQLiteLineColor.color().with_size(Large),
-            DatabaseType::DuckDB => IconName::DuckDB.color().with_size(Large),
-            DatabaseType::MSSQL => IconName::MSSQLLineColor.color().with_size(Large),
-            DatabaseType::Oracle => IconName::OracleLineColor.color().with_size(Large),
-            DatabaseType::ClickHouse => IconName::ClickHouseLineColor.color().with_size(Large),
-            DatabaseType::External { .. } => IconName::Database.color().with_size(Large),
-        }
+        IconName::Database.mono().with_size(Large)
     }
 }
 

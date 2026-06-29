@@ -22,7 +22,7 @@ impl NewConnectionCategory {
 
     pub(super) fn icon(self) -> IconName {
         match self {
-            Self::All => IconName::AppsColor,
+            Self::All => IconName::Apps,
             Self::Terminal => IconName::Terminal,
         }
     }
@@ -63,13 +63,20 @@ impl NewConnectionKind {
     }
 
     pub(super) fn icon(&self, cx: &gpui::App) -> Icon {
+        let color = cx.theme().connection_ssh;
         match self {
-            Self::Ssh => IconName::TerminalColor.color().with_size(px(40.0)),
+            Self::Ssh => IconName::SquareTerminal
+                .mono()
+                .text_color(color)
+                .with_size(px(28.0)),
             Self::Terminal => IconName::Terminal
                 .mono()
-                .text_color(cx.theme().connection_ssh)
-                .with_size(px(40.0)),
-            Self::PortForwarding => IconName::Network.color().with_size(px(40.0)),
+                .text_color(color)
+                .with_size(px(28.0)),
+            Self::PortForwarding => IconName::Network
+                .mono()
+                .text_color(cx.theme().connection_port_forwarding)
+                .with_size(px(28.0)),
         }
     }
 }
