@@ -2,7 +2,6 @@ use gpui::App;
 
 rust_i18n::i18n!("locales", fallback = "zh-CN");
 
-pub mod cloud_sync;
 pub mod command_registry;
 pub mod config;
 pub mod connection_notifier;

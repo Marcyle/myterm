@@ -20,7 +20,7 @@ use one_core::keybindings::{
 use one_core::settings::AppSettings;
 use std::borrow::Cow;
 use std::cell::{Cell as StdCell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex as StdMutex};
@@ -289,6 +289,24 @@ fn shell_escape(s: &str) -> String {
         s.to_string()
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
+/// 把多行文本拆分为批量命令队列。
+/// 仅当包含多条非空行时返回 Some，否则返回 None。
+fn split_batch_commands(text: &str) -> Option<Vec<String>> {
+    if multiline_non_empty_line_count(text) <= 1 {
+        return None;
+    }
+    let commands: Vec<String> = text
+        .lines()
+        .map(|l| l.to_string())
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    if commands.len() > 1 {
+        Some(commands)
+    } else {
+        None
     }
 }
 
@@ -728,6 +746,14 @@ pub struct TerminalView {
     shell_prompt_input_active: bool,
     /// 本地 shell 命令是否处于执行阶段，由 OSC 133;C 到下一次 prompt/input 维护。
     local_command_running: bool,
+    /// 批量命令执行队列（多行粘贴时逐行发送）
+    command_queue: VecDeque<String>,
+    /// 是否正在处理批量命令队列
+    command_queue_active: bool,
+    /// 是否已检测到过 OSC 133 shell integration 事件
+    shell_integration_detected: bool,
+    /// 批量命令队列的 fallback 定时器（无 shell integration 时使用）
+    command_queue_fallback_timer: Option<gpui::Task<()>>,
     /// InlineSuggest 防抖任务（30ms 延迟刷新建议）
     suggestion_debounce: Option<gpui::Task<()>>,
     /// `cd` 目录补全的独立 SFTP 连接
@@ -1187,6 +1213,10 @@ impl TerminalView {
             history_prompt: HistoryPromptState::default(),
             shell_prompt_input_active: false,
             local_command_running: false,
+            command_queue: VecDeque::new(),
+            command_queue_active: false,
+            shell_integration_detected: false,
+            command_queue_fallback_timer: None,
             suggestion_debounce: None,
             cd_completion_client: None,
             cd_completion_cache: HashMap::new(),
@@ -1943,18 +1973,24 @@ impl TerminalView {
             TerminalModelEvent::InputStart => {
                 self.shell_prompt_input_active = true;
                 self.local_command_running = false;
+                self.shell_integration_detected = true;
+                self.on_shell_prompt_ready(window, cx);
             }
             TerminalModelEvent::PromptStart => {
                 self.shell_prompt_input_active = false;
                 self.local_command_running = false;
+                self.shell_integration_detected = true;
+                self.on_shell_prompt_ready(window, cx);
             }
             TerminalModelEvent::CommandStart => {
                 self.shell_prompt_input_active = false;
                 self.local_command_running = true;
+                self.shell_integration_detected = true;
             }
             TerminalModelEvent::ChildExit(_) => {
                 self.shell_prompt_input_active = false;
                 self.local_command_running = false;
+                self.clear_command_queue();
             }
             _ => {}
         }
@@ -2836,15 +2872,34 @@ impl TerminalView {
     }
 
     fn paste_text_unchecked(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        // 批量队列执行期间忽略直接粘贴，避免干扰队列节奏
+        if self.command_queue_active {
+            return;
+        }
+
+        // 统一换行符为 LF，避免 Windows CRLF 粘贴到 Unix shell 时 \r 导致
+        // 光标回行首、命令被拆分或输出覆盖/错乱。
+        let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+        let mode = self.terminal.read(cx).mode();
+
+        // 多行且包含多条有效命令时启用批量队列，逐行等待执行。
+        // ALT_SCREEN（Vim/less 等全屏程序）中不走队列，避免把编辑器粘贴拆成命令。
+        if !mode.contains(TermMode::ALT_SCREEN) {
+            if let Some(commands) = split_batch_commands(&normalized) {
+                self.clear_command_queue();
+                self.start_command_queue(commands, window, cx);
+                return;
+            }
+        }
+
         // 仅在应用请求 bracketed paste 模式时才包装，避免把控制序列
         // 原样送进不支持的程序（例如 Vim 未开启时可能导致光标/位置异常）。
-        let mode = self.terminal.read(cx).mode();
-        self.apply_paste_to_history_prompt(text, cx);
+        self.apply_paste_to_history_prompt(&normalized, cx);
         if mode.contains(TermMode::BRACKETED_PASTE) {
-            let paste_text = format!("\x1b[200~{}\x1b[201~", text.replace('\x1b', ""));
+            let paste_text = format!("\x1b[200~{}\x1b[201~", normalized.replace('\x1b', ""));
             self.write_to_pty(paste_text.into_bytes(), cx);
         } else {
-            self.write_to_pty(text.as_bytes().to_vec(), cx);
+            self.write_to_pty(normalized.into_bytes(), cx);
         }
         self.focus_terminal(window, cx);
     }
@@ -2854,6 +2909,80 @@ impl TerminalView {
     /// 内部调用 paste_text，保持统一的粘贴行为
     fn paste_code_block(&mut self, code: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.paste_text(code, window, cx);
+    }
+
+    /// 执行队列中的下一条命令
+    fn execute_next_queued_command(&mut self, cx: &mut Context<Self>) {
+        if let Some(command) = self.command_queue.pop_front() {
+            let mut data = command.into_bytes();
+            data.push(b'\n');
+            self.write_to_pty(data, cx);
+        }
+        if self.command_queue.is_empty() {
+            self.command_queue_active = false;
+            self.command_queue_fallback_timer.take();
+        }
+    }
+
+    /// shell prompt 就绪时触发队列下一条命令
+    fn on_shell_prompt_ready(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // 收到 OSC 133 事件后取消 fallback 定时器，改由事件驱动
+        self.command_queue_fallback_timer.take();
+        if self.command_queue_active && !self.command_queue.is_empty() {
+            self.execute_next_queued_command(cx);
+            self.focus_terminal(window, cx);
+        } else {
+            self.command_queue_active = false;
+        }
+    }
+
+    /// 启动批量命令队列
+    fn start_command_queue(
+        &mut self,
+        commands: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.clear_command_queue();
+        self.command_queue.extend(commands);
+        self.command_queue_active = true;
+
+        if self.shell_prompt_input_active {
+            // shell 已经处于可输入状态，直接发送第一条
+            self.execute_next_queued_command(cx);
+            self.focus_terminal(window, cx);
+        } else if !self.shell_integration_detected {
+            // 未检测到 shell integration，使用 fallback 定时器
+            self.start_fallback_timer(cx);
+        }
+        // 否则等待下一个 InputStart/PromptStart 事件
+    }
+
+    /// 清空批量命令队列
+    fn clear_command_queue(&mut self) {
+        self.command_queue.clear();
+        self.command_queue_active = false;
+        self.command_queue_fallback_timer.take();
+    }
+
+    /// 无 shell integration 时的兜底定时器
+    fn start_fallback_timer(&mut self, cx: &mut Context<Self>) {
+        let task = cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(1500))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.command_queue_active
+                    && !this.command_queue.is_empty()
+                    && !this.shell_integration_detected
+                {
+                    this.execute_next_queued_command(cx);
+                    // 继续 fallback 直到检测 integration 或队列空
+                    this.start_fallback_timer(cx);
+                }
+            });
+        });
+        self.command_queue_fallback_timer = Some(task);
     }
 
     fn paste_preview_text(text: &str) -> String {
@@ -4566,7 +4695,7 @@ mod tests {
         should_dismiss_history_prompt_for_keystroke, should_dismiss_history_prompt_for_mouse,
         should_dismiss_history_prompt_for_scroll, should_reset_history_prompt_for_terminal_event,
         should_scroll_to_bottom_on_user_input, should_start_selection_from_pending_sgr_press,
-        take_whole_scroll_lines,
+        split_batch_commands, take_whole_scroll_lines,
     };
     use crate::history_prompt::{HistoryPromptAccept, HistoryPromptState};
     use alacritty_terminal::index::{Column, Line, Point as AlacPoint};
@@ -4830,6 +4959,49 @@ mod tests {
     fn multiline_non_empty_line_count_ignores_blank_lines() {
         assert_eq!(multiline_non_empty_line_count("echo 1\n\n echo 2\n"), 2);
         assert_eq!(multiline_non_empty_line_count("echo 1"), 1);
+    }
+
+    #[test]
+    fn split_batch_commands_returns_none_for_single_line() {
+        assert_eq!(split_batch_commands("echo hello"), None);
+    }
+
+    #[test]
+    fn split_batch_commands_returns_none_for_empty_lines_only() {
+        assert_eq!(split_batch_commands("\n\n\n"), None);
+    }
+
+    #[test]
+    fn split_batch_commands_returns_none_for_one_nonempty_line_with_blanks() {
+        assert_eq!(split_batch_commands("echo 1\n\n"), None);
+    }
+
+    #[test]
+    fn split_batch_commands_splits_multiple_commands() {
+        assert_eq!(
+            split_batch_commands("echo 1\necho 2\necho 3"),
+            Some(vec![
+                "echo 1".to_string(),
+                "echo 2".to_string(),
+                "echo 3".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn split_batch_commands_filters_blank_lines() {
+        assert_eq!(
+            split_batch_commands("echo 1\n\n\necho 2"),
+            Some(vec!["echo 1".to_string(), "echo 2".to_string()])
+        );
+    }
+
+    #[test]
+    fn split_batch_commands_filters_leading_and_trailing_blank_lines() {
+        assert_eq!(
+            split_batch_commands("\n\necho 1\necho 2\n\n"),
+            Some(vec!["echo 1".to_string(), "echo 2".to_string()])
+        );
     }
 
     #[test]

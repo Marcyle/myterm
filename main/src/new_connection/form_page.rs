@@ -75,7 +75,6 @@ fn build_port_forwarding_form(
             editing_connection,
             ssh_connections,
             workspaces: home.workspaces.clone(),
-            teams: Vec::new(),
         })
     }) else {
         return NewConnectionFormResult::Blocked;
@@ -107,7 +106,6 @@ fn build_ssh_form(
         Some(SshFormWindowConfig {
             editing_connection,
             workspaces: home.workspaces.clone(),
-            teams: Vec::new(),
         })
     }) else {
         return NewConnectionFormResult::Blocked;

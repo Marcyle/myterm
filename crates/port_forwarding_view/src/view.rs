@@ -6,7 +6,6 @@ use gpui::{
 use gpui_component::{
     ActiveTheme, Sizable, TitleBar,
     button::{Button, ButtonVariants as _},
-    checkbox::Checkbox,
     h_flex,
     input::Input,
     select::Select,
@@ -75,7 +74,11 @@ impl PortForwardingFormWindow {
         )
     }
 
-    fn render_content(&self, kind: PortForwardingKind, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_content(
+        &self,
+        kind: PortForwardingKind,
+        _cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         div()
             .id("forwarding-port-form-content")
             .flex_1()
@@ -116,11 +119,6 @@ impl PortForwardingFormWindow {
                         Select::new(&self.workspace_select).w_full(),
                     ))
                     .child(self.render_row(
-                        t!("TeamSync.team_label").to_string(),
-                        Select::new(&self.team_select).w_full(),
-                    ))
-                    .child(self.render_sync_row(cx))
-                    .child(self.render_row(
                         t!("PortForwarding.remark").to_string(),
                         Input::new(&self.remark_input),
                     )),
@@ -133,28 +131,6 @@ impl PortForwardingFormWindow {
             Select::new(&self.ssh_select)
                 .placeholder(t!("PortForwarding.ssh_connection_placeholder"))
                 .w_full(),
-        )
-    }
-
-    fn render_sync_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        self.render_row(
-            t!("ConnectionForm.cloud_sync").to_string(),
-            h_flex()
-                .gap_2()
-                .child(
-                    Checkbox::new("forwarding-sync-enabled")
-                        .checked(self.sync_enabled)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.sync_enabled = !this.sync_enabled;
-                            cx.notify();
-                        })),
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(t!("ConnectionForm.cloud_sync_desc").to_string()),
-                ),
         )
     }
 

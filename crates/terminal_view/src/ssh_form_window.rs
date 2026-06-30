@@ -15,7 +15,6 @@ use gpui_component::{
     tab::{Tab, TabBar},
     v_flex,
 };
-use one_core::cloud_sync::{GlobalCloudUser, TeamOption};
 use one_core::connection_notifier::{ConnectionDataEvent, get_notifier};
 use one_core::gpui_tokio::Tokio;
 use one_core::storage::traits::Repository;
@@ -39,7 +38,6 @@ use crate::ssh_form_mfa::{
 pub struct SshFormWindowConfig {
     pub editing_connection: Option<StoredConnection>,
     pub workspaces: Vec<Workspace>,
-    pub teams: Vec<TeamOption>,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -76,40 +74,6 @@ impl SelectItem for WorkspaceSelectItem {
     }
 }
 
-#[derive(Clone, Default, PartialEq)]
-struct TeamSelectItem {
-    id: Option<String>,
-    name: String,
-}
-
-impl TeamSelectItem {
-    fn personal() -> Self {
-        Self {
-            id: None,
-            name: t!("TeamSync.personal").to_string(),
-        }
-    }
-
-    fn from_team(team: &TeamOption) -> Self {
-        Self {
-            id: Some(team.id.clone()),
-            name: team.name.clone(),
-        }
-    }
-}
-
-impl SelectItem for TeamSelectItem {
-    type Value = Option<String>;
-
-    fn title(&self) -> SharedString {
-        self.name.clone().into()
-    }
-
-    fn value(&self) -> &Self::Value {
-        &self.id
-    }
-}
-
 pub struct SshFormWindow {
     focus_handle: FocusHandle,
     title: SharedString,
@@ -132,7 +96,6 @@ pub struct SshFormWindow {
 
     auth_method: AuthMethodSelection,
     workspace_select: Entity<SelectState<Vec<WorkspaceSelectItem>>>,
-    team_select: Entity<SelectState<Vec<TeamSelectItem>>>,
 
     // 跳板机设置
     enable_jump_server: bool,
@@ -168,9 +131,6 @@ pub struct SshFormWindow {
     remark_input: Entity<InputState>,
 
     last_tested_signature: Option<String>,
-
-    // 云同步开关
-    sync_enabled: bool,
 
     // 关闭 shell integration 注入(走裸 request_shell,失去 OSC 集成)
     disable_shell_integration: bool,
@@ -358,24 +318,15 @@ impl SshFormWindow {
         let workspace_select =
             cx.new(|cx| SelectState::new(workspace_items, Some(Default::default()), window, cx));
 
-        let mut team_items = vec![TeamSelectItem::personal()];
-        team_items.extend(config.teams.iter().map(TeamSelectItem::from_team));
-        let team_select =
-            cx.new(|cx| SelectState::new(team_items, Some(Default::default()), window, cx));
-
         let mut auth_method = AuthMethodSelection::Password;
         let mut jump_auth_method = AuthMethodSelection::Password;
         let mut workspace_id: Option<i64> = None;
         let mut enable_jump_server = false;
         let mut enable_proxy = false;
         let mut proxy_type = ProxyTypeSelection::default();
-        let mut sync_enabled = true; // 默认启用云同步
         let mut disable_shell_integration = false;
 
         if let Some(ref conn) = config.editing_connection {
-            // 加载同步状态
-            sync_enabled = conn.sync_enabled;
-
             if let Ok(params) = conn.to_ssh_params() {
                 name_input.update(cx, |s, cx| s.set_value(&conn.name, window, cx));
                 host_input.update(cx, |s, cx| s.set_value(&params.host, window, cx));
@@ -484,13 +435,6 @@ impl SshFormWindow {
             }
             workspace_id = conn.workspace_id;
 
-            // 加载团队归属
-            if let Some(ref team_id) = conn.team_id {
-                team_select.update(cx, |select, cx| {
-                    select.set_selected_value(&Some(team_id.clone()), window, cx);
-                });
-            }
-
             // 加载备注
             if let Some(ref remark) = conn.remark {
                 remark_input.update(cx, |s, cx| s.set_value(remark, window, cx));
@@ -520,7 +464,6 @@ impl SshFormWindow {
             passphrase_input,
             auth_method,
             workspace_select,
-            team_select,
             enable_jump_server,
             jump_auth_method,
             jump_host_input,
@@ -545,7 +488,6 @@ impl SshFormWindow {
             default_directory_input,
             remark_input,
             last_tested_signature: None,
-            sync_enabled,
             disable_shell_integration,
             is_testing: false,
             test_result: None,
@@ -554,14 +496,6 @@ impl SshFormWindow {
 
     fn get_workspace_id(&self, cx: &App) -> Option<i64> {
         self.workspace_select
-            .read(cx)
-            .selected_value()
-            .cloned()
-            .flatten()
-    }
-
-    fn get_team_id(&self, cx: &App) -> Option<String> {
-        self.team_select
             .read(cx)
             .selected_value()
             .cloned()
@@ -943,11 +877,6 @@ impl SshFormWindow {
 
         let workspace_id = self.get_workspace_id(cx);
         let mut conn = StoredConnection::new_ssh(name, params, workspace_id);
-        conn.sync_enabled = self.sync_enabled; // 设置同步状态
-        conn.team_id = self.get_team_id(cx);
-        if !self.is_editing {
-            conn.owner_id = GlobalCloudUser::get_user(cx).map(|u| u.id);
-        }
         if self.is_editing {
             conn.id = self.editing_id;
             conn.cloud_id = self.editing_cloud_id.clone();
@@ -1106,31 +1035,6 @@ impl SshFormWindow {
                 &t!("SSH.workspace"),
                 Select::new(&self.workspace_select).w_full(),
             ))
-            .child(self.render_form_row(
-                &t!("TeamSync.team_label"),
-                Select::new(&self.team_select).w_full(),
-            ))
-            .child(
-                self.render_form_row(
-                    &t!("ConnectionForm.cloud_sync"),
-                    h_flex()
-                        .gap_2()
-                        .child(
-                            Checkbox::new("sync-enabled")
-                                .checked(self.sync_enabled)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.sync_enabled = !this.sync_enabled;
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(t!("ConnectionForm.cloud_sync_desc").to_string()),
-                        ),
-                ),
-            )
     }
 
     /// 渲染初始化标签页

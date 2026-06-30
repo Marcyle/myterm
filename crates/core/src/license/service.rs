@@ -7,7 +7,6 @@ use super::models::{
     Feature, LicenseInfo, OfflineLicenseDocument, OfflineLicensePayload, PlanTier, SubscriptionInfo,
 };
 use super::storage::LicenseStorage;
-use crate::cloud_sync::CloudApiError;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use ed25519_dalek::{Signature, VerifyingKey};
 use std::fs;
@@ -340,19 +339,6 @@ impl LicenseService {
         }
 
         Ok(payload)
-    }
-}
-
-/// 从 CloudApiError 转换为 LicenseError
-impl From<CloudApiError> for LicenseError {
-    fn from(err: CloudApiError) -> Self {
-        match err {
-            CloudApiError::NotAuthenticated => LicenseError::NotAuthenticated,
-            CloudApiError::NetworkError(msg) => LicenseError::NetworkError(msg),
-            CloudApiError::ServerError(msg) => LicenseError::ServerError(msg),
-            CloudApiError::ParseError(msg) => LicenseError::ParseError(msg),
-            _ => LicenseError::ServerError(err.to_string()),
-        }
     }
 }
 

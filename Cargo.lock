@@ -2662,18 +2662,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
-name = "er_flow"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ferrum-flow",
- "gpui",
- "gpui-component",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "erased-serde"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2800,21 +2788,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
 dependencies = [
  "simd-adler32",
-]
-
-[[package]]
-name = "ferrum-flow"
-version = "0.3.1"
-source = "git+https://github.com/tu6ge/ferrum-flow.git?branch=master#1d7fea5dc9a38d1217c31951dd71c6b39b317b10"
-dependencies = [
- "anyhow",
- "futures",
- "gpui",
- "image",
- "serde",
- "serde_json",
- "smallvec",
- "uuid",
 ]
 
 [[package]]
@@ -6992,13 +6965,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "process-util"
-version = "0.1.0"
-dependencies = [
- "tokio",
-]
-
-[[package]]
 name = "profiling"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9663,7 +9629,6 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
- "signal-hook-registry",
  "slab",
  "socket2 0.6.0",
  "tokio-macros",

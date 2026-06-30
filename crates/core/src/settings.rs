@@ -1,4 +1,3 @@
-use crate::cloud_sync::{GlobalCloudUser, UserInfo};
 use crate::storage::get_config_dir;
 use crate::utils::auto_save_config::AutoSaveConfig;
 use gpui::http_client::Url;
@@ -7,46 +6,7 @@ use gpui_component::{Theme, ThemeMode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
 use tracing::{error, info};
-
-// ============================================================================
-// 全局用户状态
-// ============================================================================
-
-/// 全局当前用户状态
-///
-/// 用于在设置面板中显示用户信息和执行登出操作。
-#[derive(Clone, Default)]
-pub struct GlobalCurrentUser {
-    user: Arc<RwLock<Option<UserInfo>>>,
-}
-
-impl Global for GlobalCurrentUser {}
-
-impl GlobalCurrentUser {
-    /// 获取当前用户
-    pub fn get_user(cx: &App) -> Option<UserInfo> {
-        if let Some(state) = cx.try_global::<GlobalCurrentUser>() {
-            state.user.read().ok().and_then(|u| u.clone())
-        } else {
-            None
-        }
-    }
-
-    /// 设置当前用户
-    pub fn set_user(user: Option<UserInfo>, cx: &mut App) {
-        if !cx.has_global::<GlobalCurrentUser>() {
-            cx.set_global(GlobalCurrentUser::default());
-        }
-        if let Some(state) = cx.try_global::<GlobalCurrentUser>() {
-            if let Ok(mut guard) = state.user.write() {
-                *guard = user.clone();
-            }
-        }
-        GlobalCloudUser::set_user(user, cx);
-    }
-}
 
 // ============================================================================
 // 数据库配置

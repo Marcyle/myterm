@@ -6,6 +6,18 @@ use std::sync::Arc;
 
 use crate::models::*;
 
+/// 安全地截取字符串前若干字节用于日志预览。
+///
+/// 直接用 `&s[..n]` 按字节切片在 `n` 落入多字节 UTF-8 字符中间时会 panic
+/// (例如响应体含中文时)。本函数向前回退到最近的字符边界,保证不会 panic。
+fn truncate_for_log(s: &str, max_bytes: usize) -> &str {
+    let mut end = max_bytes.min(s.len());
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// JMS API 客户端
 ///
 /// 采用纯 Web Session 认证:通过 `/core/auth/login/` 表单登录获取**已认证**的
@@ -105,7 +117,7 @@ impl JmsClient {
                 if let Ok(cookie_str) = value.to_str() {
                     tracing::debug!("收到 Set-Cookie: {}", cookie_str);
                     if let Some(sid) = Self::parse_session_id(cookie_str) {
-                        tracing::info!("已提取 jms_sessionid: {}", &sid[..sid.len().min(16)]);
+                        tracing::info!("已提取 jms_sessionid: {}", truncate_for_log(&sid, 16));
                         self.session_cookie = Some(sid);
                     }
                     if let Some(csrf) = Self::parse_cookie_value(cookie_str, "jms_csrftoken") {
@@ -133,7 +145,7 @@ impl JmsClient {
                 JmsError::ParseError(e.to_string())
             })?;
 
-        tracing::debug!("HTTP 响应内容: {}", &text[..text.len().min(500)]);
+        tracing::debug!("HTTP 响应内容: {}", truncate_for_log(&text, 500));
 
         Ok((status, text))
     }
@@ -192,7 +204,7 @@ impl JmsClient {
 
         tracing::info!("获取资产树: url={}", url);
         let (status, text) = self.get_json(&url).await?;
-        tracing::info!("资产树响应: status={}, body={}", status, &text[..text.len().min(500)]);
+        tracing::info!("资产树响应: status={}, body={}", status, truncate_for_log(&text, 500));
 
         if status >= 200 && status < 300 {
             let nodes: Vec<JmsAssetNode> = serde_json::from_str(&text)
@@ -223,7 +235,7 @@ impl JmsClient {
 
         tracing::info!("懒加载子节点: key={}, url={}", node_key, url);
         let (status, text) = self.get_json(&url).await?;
-        tracing::info!("子节点响应: status={}, body={}", status, &text[..text.len().min(500)]);
+        tracing::info!("子节点响应: status={}, body={}", status, truncate_for_log(&text, 500));
 
         if status >= 200 && status < 300 {
             let nodes: Vec<JmsAssetNode> = serde_json::from_str(&text).map_err(|e| {
@@ -250,7 +262,7 @@ impl JmsClient {
 
         tracing::info!("搜索资产: keyword={}, url={}", keyword, url);
         let (status, text) = self.get_json(&url).await?;
-        tracing::info!("搜索响应: status={}, body={}", status, &text[..text.len().min(300)]);
+        tracing::info!("搜索响应: status={}, body={}", status, truncate_for_log(&text, 300));
 
         if status >= 200 && status < 300 {
             let nodes: Vec<JmsAssetNode> = serde_json::from_str(&text).map_err(|e| {
@@ -308,7 +320,7 @@ impl JmsClient {
 
         tracing::info!("获取资产详情: asset_id={}", asset_id);
         let (status, text) = self.get_json(&detail_url).await?;
-        tracing::info!("资产详情响应: status={}, body={}", status, &text[..text.len().min(500)]);
+        tracing::info!("资产详情响应: status={}, body={}", status, truncate_for_log(&text, 500));
 
         if status >= 200 && status < 300 {
             let json: Value = serde_json::from_str(&text)
@@ -364,7 +376,7 @@ impl JmsClient {
         for url in &candidates {
             tracing::info!("尝试获取账号列表: url={}", url);
             let (status, text) = self.get_json(url).await?;
-            tracing::info!("账号列表响应: status={}, body={}", status, &text[..text.len().min(500)]);
+            tracing::info!("账号列表响应: status={}, body={}", status, truncate_for_log(&text, 500));
 
             if status >= 200 && status < 300 {
                 if let Ok(accounts) = serde_json::from_str::<Vec<JmsAssetAccount>>(&text) {
@@ -411,7 +423,7 @@ impl JmsClient {
 
         tracing::info!("创建连接 token: asset_id={}, account={}", asset_id, account);
         let (status, text) = self.post_json(&url, &body).await?;
-        tracing::info!("连接 token 响应: status={}, body={}", status, &text[..text.len().min(500)]);
+        tracing::info!("连接 token 响应: status={}, body={}", status, truncate_for_log(&text, 500));
 
         if status >= 200 && status < 300 {
             let token: JmsConnectToken = serde_json::from_str(&text).map_err(|e| {
@@ -1020,7 +1032,7 @@ impl JmsClient {
         };
 
         let public_key = RsaPublicKey::from_public_key_pem(&pem)
-            .map_err(|e| anyhow::anyhow!("解析 RSA 公钥失败: {e} (pem 前缀={})", &pem[..pem.len().min(80)]))?;
+            .map_err(|e| anyhow::anyhow!("解析 RSA 公钥失败: {e} (pem 前缀={})", truncate_for_log(&pem, 80)))?;
 
         // 1. 生成随机 AES key(模拟 JS `(Math.random()+1).toString(36).substring(2)` 行为)
         let aes_key = Self::generate_random_aes_key();

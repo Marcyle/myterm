@@ -11,22 +11,6 @@ Common:
     en: OK
     zh-CN: 确定
 
-ConnectionForm:
-  cloud_sync:
-    en: Cloud Sync
-    zh-CN: 云同步
-  cloud_sync_desc:
-    en: Sync this connection after saving.
-    zh-CN: 保存后同步此连接。
-
-TeamSync:
-  personal:
-    en: Personal
-    zh-CN: 个人
-  team_label:
-    en: Team
-    zh-CN: 团队
-
 PortForwarding:
   new:
     en: New Port Forwarding

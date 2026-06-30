@@ -765,7 +765,6 @@ impl HomePage {
         let config = SshFormWindowConfig {
             editing_connection: editing_conn,
             workspaces: self.workspaces.clone(),
-            teams: Vec::new(),
         };
 
         self.editing_connection_id = None;
@@ -808,7 +807,6 @@ impl HomePage {
             editing_connection,
             ssh_connections,
             workspaces: self.workspaces.clone(),
-            teams: Vec::new(),
         };
 
         self.editing_connection_id = None;

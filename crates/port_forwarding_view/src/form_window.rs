@@ -1,6 +1,5 @@
 use gpui::{App, AppContext, Context, Entity, FocusHandle, SharedString, Window};
 use gpui_component::{IndexPath, input::InputState, select::SelectState};
-use one_core::cloud_sync::{GlobalCloudUser, TeamOption};
 use one_core::storage::{
     ConnectionType, PortForwardingKind, PortForwardingParams, StoredConnection, Workspace,
 };
@@ -9,14 +8,13 @@ use rust_i18n::t;
 use crate::input_values::{non_empty_text, parse_port, trimmed_text};
 use crate::persistence::save_connection;
 use crate::selects::{
-    ForwardingKindSelectItem, SshConnectionSelectItem, TeamSelectItem, WorkspaceSelectItem,
+    ForwardingKindSelectItem, SshConnectionSelectItem, WorkspaceSelectItem,
 };
 
 pub struct PortForwardingFormWindowConfig {
     pub editing_connection: Option<StoredConnection>,
     pub ssh_connections: Vec<StoredConnection>,
     pub workspaces: Vec<Workspace>,
-    pub teams: Vec<TeamOption>,
 }
 
 pub struct PortForwardingFormWindow {
@@ -35,8 +33,6 @@ pub struct PortForwardingFormWindow {
     pub(super) ssh_select: Entity<SelectState<Vec<SshConnectionSelectItem>>>,
     pub(super) kind_select: Entity<SelectState<Vec<ForwardingKindSelectItem>>>,
     pub(super) workspace_select: Entity<SelectState<Vec<WorkspaceSelectItem>>>,
-    pub(super) team_select: Entity<SelectState<Vec<TeamSelectItem>>>,
-    pub(super) sync_enabled: bool,
     pub(super) validation_error: Option<String>,
 }
 
@@ -91,11 +87,6 @@ impl PortForwardingFormWindow {
             );
             SelectState::new(items, Some(IndexPath::default()), window, cx)
         });
-        let team_select = cx.new(|cx| {
-            let mut items = vec![TeamSelectItem::personal()];
-            items.extend(config.teams.iter().map(TeamSelectItem::from_team));
-            SelectState::new(items, Some(IndexPath::default()), window, cx)
-        });
 
         let mut form = Self {
             focus_handle: cx.focus_handle(),
@@ -119,8 +110,6 @@ impl PortForwardingFormWindow {
             ssh_select,
             kind_select,
             workspace_select,
-            team_select,
-            sync_enabled: true,
             validation_error: None,
         };
         form.load_editing_connection(config.editing_connection.as_ref(), window, cx);
@@ -134,7 +123,6 @@ impl PortForwardingFormWindow {
         cx: &mut Context<Self>,
     ) {
         let Some(connection) = connection else { return };
-        self.sync_enabled = connection.sync_enabled;
         self.name_input.update(cx, |state, cx| {
             state.set_value(&connection.name, window, cx)
         });
@@ -148,11 +136,6 @@ impl PortForwardingFormWindow {
         if let Some(workspace_id) = connection.workspace_id {
             self.workspace_select.update(cx, |select, cx| {
                 select.set_selected_value(&Some(workspace_id), window, cx);
-            });
-        }
-        if let Some(team_id) = &connection.team_id {
-            self.team_select.update(cx, |select, cx| {
-                select.set_selected_value(&Some(team_id.clone()), window, cx);
             });
         }
     }
@@ -239,12 +222,7 @@ impl PortForwardingFormWindow {
         };
         let name = self.connection_name(&params, cx);
         let mut conn = StoredConnection::new_port_forwarding(name, params, self.workspace_id(cx));
-        conn.sync_enabled = self.sync_enabled;
-        conn.team_id = self.team_id(cx);
         conn.remark = non_empty_text(&self.remark_input, cx);
-        if !self.is_editing {
-            conn.owner_id = GlobalCloudUser::get_user(cx).map(|user| user.id);
-        }
         if self.is_editing {
             conn.id = self.editing_id;
             conn.cloud_id = self.editing_cloud_id.clone();
@@ -272,14 +250,6 @@ impl PortForwardingFormWindow {
 
     fn workspace_id(&self, cx: &App) -> Option<i64> {
         self.workspace_select
-            .read(cx)
-            .selected_value()
-            .cloned()
-            .flatten()
-    }
-
-    fn team_id(&self, cx: &App) -> Option<String> {
-        self.team_select
             .read(cx)
             .selected_value()
             .cloned()
