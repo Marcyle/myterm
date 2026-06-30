@@ -88,6 +88,10 @@ pub struct KokoConnectParams {
     pub proxy: Option<KokoProxy>,
     /// 终端显示名(用于 tab 标题)
     pub title: String,
+    /// 资产 ID（用于复制标签页时重新申请连接 token）
+    pub asset_id: Option<String>,
+    /// 账号名（用于复制标签页时重新申请连接 token）
+    pub account_name: Option<String>,
 }
 
 /// recv 返回的事件
@@ -276,22 +280,19 @@ impl KokoChannel {
             JmsError::NetworkError("WebSocket 握手超时".to_string())
         })?
         .map_err(|e| {
-            match &e {
-                tokio_tungstenite::tungstenite::Error::Http(resp) => {
-                    let status = resp.status();
-                    let headers = resp.headers();
+            if let tokio_tungstenite::tungstenite::Error::Http(resp) = &e {
+                let status = resp.status();
+                let headers = resp.headers();
+                tracing::error!(
+                    "Koko WebSocket 握手收到 HTTP 响应: status={}, headers={:?}",
+                    status, headers
+                );
+                if let Some(body) = resp.body() {
                     tracing::error!(
-                        "Koko WebSocket 握手收到 HTTP 响应: status={}, headers={:?}",
-                        status, headers
+                        "Koko WebSocket 握手响应体: {}",
+                        String::from_utf8_lossy(body)
                     );
-                    if let Some(body) = resp.body() {
-                        tracing::error!(
-                            "Koko WebSocket 握手响应体: {}",
-                            String::from_utf8_lossy(body)
-                        );
-                    }
                 }
-                _ => {}
             }
             tracing::error!("Koko WebSocket 握手失败: {e}");
             JmsError::NetworkError(format!("WebSocket 握手失败: {e}"))
@@ -358,8 +359,7 @@ impl KokoChannel {
             .map(|code| code == "200")
             .unwrap_or(false);
         if !ok {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(std::io::Error::other(
                 format!("HTTP 代理 CONNECT 失败: {}", status_line),
             ));
         }

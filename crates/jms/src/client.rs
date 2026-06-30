@@ -206,7 +206,7 @@ impl JmsClient {
         let (status, text) = self.get_json(&url).await?;
         tracing::info!("资产树响应: status={}, body={}", status, truncate_for_log(&text, 500));
 
-        if status >= 200 && status < 300 {
+        if (200..300).contains(&status) {
             let nodes: Vec<JmsAssetNode> = serde_json::from_str(&text)
                 .map_err(|e| {
                     tracing::error!("资产树 JSON 解析失败: {}", e);
@@ -237,7 +237,7 @@ impl JmsClient {
         let (status, text) = self.get_json(&url).await?;
         tracing::info!("子节点响应: status={}, body={}", status, truncate_for_log(&text, 500));
 
-        if status >= 200 && status < 300 {
+        if (200..300).contains(&status) {
             let nodes: Vec<JmsAssetNode> = serde_json::from_str(&text).map_err(|e| {
                 tracing::error!("子节点 JSON 解析失败: {}", e);
                 JmsError::ParseError(e.to_string())
@@ -264,7 +264,7 @@ impl JmsClient {
         let (status, text) = self.get_json(&url).await?;
         tracing::info!("搜索响应: status={}, body={}", status, truncate_for_log(&text, 300));
 
-        if status >= 200 && status < 300 {
+        if (200..300).contains(&status) {
             let nodes: Vec<JmsAssetNode> = serde_json::from_str(&text).map_err(|e| {
                 tracing::error!("搜索结果 JSON 解析失败: {}", e);
                 JmsError::ParseError(e.to_string())
@@ -292,7 +292,7 @@ impl JmsClient {
         tracing::info!("获取授权规则: url={}", url);
         let (status, text) = self.get_json(&url).await?;
 
-        if status >= 200 && status < 300 {
+        if (200..300).contains(&status) {
             let permissions: Vec<JmsAssetPermission> = serde_json::from_str(&text)
                 .map_err(|e| {
                     tracing::error!("授权规则 JSON 解析失败: {}", e);
@@ -322,7 +322,7 @@ impl JmsClient {
         let (status, text) = self.get_json(&detail_url).await?;
         tracing::info!("资产详情响应: status={}, body={}", status, truncate_for_log(&text, 500));
 
-        if status >= 200 && status < 300 {
+        if (200..300).contains(&status) {
             let json: Value = serde_json::from_str(&text)
                 .map_err(|e| JmsError::ParseError(e.to_string()))?;
 
@@ -378,7 +378,7 @@ impl JmsClient {
             let (status, text) = self.get_json(url).await?;
             tracing::info!("账号列表响应: status={}, body={}", status, truncate_for_log(&text, 500));
 
-            if status >= 200 && status < 300 {
+            if (200..300).contains(&status) {
                 if let Ok(accounts) = serde_json::from_str::<Vec<JmsAssetAccount>>(&text) {
                     if !accounts.is_empty() {
                         return Ok(accounts);
@@ -425,7 +425,7 @@ impl JmsClient {
         let (status, text) = self.post_json(&url, &body).await?;
         tracing::info!("连接 token 响应: status={}, body={}", status, truncate_for_log(&text, 500));
 
-        if status >= 200 && status < 300 {
+        if (200..300).contains(&status) {
             let token: JmsConnectToken = serde_json::from_str(&text).map_err(|e| {
                 tracing::error!("连接 token JSON 解析失败: {}", e);
                 JmsError::ParseError(e.to_string())

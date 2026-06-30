@@ -1,11 +1,14 @@
 use crate::home_tab::HomePage;
 use crate::setting_tab::SettingsPanel;
-use gpui::AppContext;
-use gpui::{App, Context, Window};
+use gpui::{App, Context, Entity, Window};
+use gpui::{AppContext, AsyncApp};
+use gpui_component::notification::Notification;
+use gpui_component::WindowExt;
 use one_core::storage::{StoredConnection, Workspace};
 use one_core::tab_container::TabItem;
 use sftp_view::{SftpView, SftpViewEvent};
 use terminal::LocalConfig;
+use terminal::terminal::ConnectionState;
 use terminal_view::{
     TerminalConnectionKind, TerminalView, TerminalViewEvent,
     current_settings as current_terminal_settings,
@@ -22,6 +25,7 @@ impl HomePage {
         _workspace: Option<Workspace>,
         window: &mut Window,
         cx: &mut Context<Self>,
+        working_dir: Option<String>,
     ) {
         let conn_id = conn.id.unwrap_or(0);
         // 使用时间戳生成唯一 tab_id，支持同一连接打开多个 SSH 终端
@@ -48,7 +52,14 @@ impl HomePage {
         let sync_path = Self::terminal_sync_path_enabled(cx);
 
         let terminal_view = cx.new(|cx| {
-            TerminalView::new_ssh_with_index(conn, tab_index, window, cx, None, sync_path)
+            TerminalView::new_ssh_with_index(
+                conn,
+                tab_index,
+                window,
+                cx,
+                working_dir.as_deref(),
+                sync_path,
+            )
         });
         self.tab_container.update(cx, |tc, cx| {
             let tab = TabItem::new(tab_id, "ssh", terminal_view);
@@ -296,6 +307,15 @@ impl HomePage {
     }
 
     pub(crate) fn add_terminal_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.add_terminal_tab_with_config(LocalConfig::default(), window, cx);
+    }
+
+    pub(crate) fn add_terminal_tab_with_config(
+        &mut self,
+        config: LocalConfig,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // 使用时间戳生成唯一 tab_id，支持打开多个本地终端
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -322,7 +342,7 @@ impl HomePage {
         window.defer(cx, move |window, cx| {
             home.update(cx, |_this, cx| {
                 let terminal_view = cx.new(|cx| {
-                    TerminalView::new_with_index(LocalConfig::default(), tab_index, window, cx)
+                    TerminalView::new_with_index(config, tab_index, window, cx)
                 });
                 tab_container.update(cx, |tc, cx| {
                     let tab = TabItem::new(tab_id, "home", terminal_view);
@@ -345,43 +365,166 @@ impl HomePage {
             return;
         };
 
-        let content_key = active_tab.content().content_key(cx);
+        if active_tab.content().content_key(cx) == "Terminal" {
+            let view = active_tab.content().view();
+            if let Ok(terminal_view) = view.downcast::<TerminalView>() {
+                self.duplicate_terminal_view(&terminal_view, window, cx);
+            }
+        }
+    }
 
-        match content_key {
-            "Terminal" => {
-                // 获取终端视图的连接信息
-                let view = active_tab.content().view();
-                let Ok(terminal_view) = view.downcast::<TerminalView>() else {
-                    return;
-                };
+    /// 按索引复制指定标签页并打开
+    pub(crate) fn duplicate_tab_by_index(
+        &mut self,
+        idx: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let tc = self.tab_container.read(cx);
 
-                let kind = terminal_view.read(cx).connection_kind(cx);
-                match kind {
-                    TerminalConnectionKind::Ssh => {
-                        // SSH 终端：通过 connection_id 找到 StoredConnection 并打开新连接
-                        let conn_id = terminal_view.read(cx).connection_id(cx);
-                        if let Some(conn_id) = conn_id {
-                            if let Some(conn) = self
-                                .connections
-                                .iter()
-                                .find(|c| c.id == Some(conn_id))
-                                .cloned()
-                            {
-                                self.open_ssh_terminal(conn, None, window, cx);
-                            }
-                        }
-                    }
-                    TerminalConnectionKind::Local => {
-                        // 本地终端：直接新建
-                        self.add_terminal_tab(window, cx);
-                    }
-                    TerminalConnectionKind::JmsKoko => {
-                        // JMS Koko 终端依赖一次性连接 token,无法直接复制;需重新走 JMS 连接流程
+        let Some(tab) = tc.tabs().get(idx) else {
+            return;
+        };
+
+        if tab.content().content_key(cx) == "Terminal" {
+            let view = tab.content().view();
+            if let Ok(terminal_view) = view.downcast::<TerminalView>() {
+                self.duplicate_terminal_view(&terminal_view, window, cx);
+            }
+        }
+    }
+
+    /// 复制指定 TerminalView 并打开新标签页
+    fn duplicate_terminal_view(
+        &mut self,
+        terminal_view: &Entity<TerminalView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let kind = terminal_view.read(cx).connection_kind(cx);
+        match kind {
+            TerminalConnectionKind::Ssh => {
+                // SSH 终端：通过 connection_id 找到 StoredConnection 并打开新连接，
+                // 同时保留当前工作目录
+                let conn_id = terminal_view.read(cx).connection_id(cx);
+                let working_dir = terminal_view.read(cx).current_working_dir(cx);
+                if let Some(conn_id) = conn_id {
+                    if let Some(conn) = self
+                        .connections
+                        .iter()
+                        .find(|c| c.id == Some(conn_id))
+                        .cloned()
+                    {
+                        self.open_ssh_terminal(conn, None, window, cx, working_dir);
                     }
                 }
             }
-            _ => {
-                // 其他类型暂不支持复制
+            TerminalConnectionKind::Local => {
+                // 本地终端：继承 shell、工作目录和环境变量
+                let config = terminal_view
+                    .read(cx)
+                    .local_config()
+                    .cloned()
+                    .unwrap_or_default();
+                self.add_terminal_tab_with_config(config, window, cx);
+            }
+            TerminalConnectionKind::JmsKoko => {
+                // JMS Koko 终端：token 一次性，需用原 asset/account 重新申请
+                let state = terminal_view.read(cx).connection_state(cx);
+                if !matches!(state, ConnectionState::Connected) {
+                    window.push_notification(
+                        Notification::info("仅已连接的 JMS 终端可复制").autohide(true),
+                        cx,
+                    );
+                    return;
+                }
+
+                let Some(jms_context) = terminal_view.read(cx).jms_context().cloned() else {
+                    window.push_notification(
+                        Notification::info("无法复制 JMS 终端：缺少资产树上下文")
+                            .autohide(true),
+                        cx,
+                    );
+                    return;
+                };
+
+                let Some(koko_params) = terminal_view.read(cx).koko_params().cloned() else {
+                    window.push_notification(
+                        Notification::info("无法复制 JMS 终端：缺少连接参数")
+                            .autohide(true),
+                        cx,
+                    );
+                    return;
+                };
+
+                let Some(asset_id) = koko_params.asset_id.clone() else {
+                    window.push_notification(
+                        Notification::info("无法复制 JMS 终端：缺少资产信息")
+                            .autohide(true),
+                        cx,
+                    );
+                    return;
+                };
+
+                let account_name = koko_params.account_name.clone().unwrap_or_default();
+                let asset_id_for_new_params = asset_id.clone();
+                let account_name_for_new_params = account_name.clone();
+                let client = jms_context.client.clone();
+                let jms_context_clone = jms_context.clone();
+
+                cx.spawn(async move |this, cx: &mut AsyncApp| {
+                    let result = cx
+                        .background_executor()
+                        .spawn(async move {
+                            let mut client = client;
+                            client.create_connect_token(&asset_id, &account_name).await
+                        })
+                        .await;
+
+                    match result {
+                        Ok(token) => {
+                            let new_params = jms::KokoConnectParams {
+                                token_id: token.id,
+                                asset_id: Some(asset_id_for_new_params),
+                                account_name: Some(account_name_for_new_params),
+                                ..koko_params
+                            };
+                            // 直接在当前活动窗口打开新 Tab，避免经过 render 队列的延迟
+                            let _ = cx.update(|cx| {
+                                if let Some(window_id) = cx.active_window() {
+                                    let _ = cx.update_window(window_id, |_, window, cx| {
+                                        let _ = this.update(cx, |this, cx| {
+                                            this.open_jms_koko_terminal(
+                                                new_params,
+                                                Some(jms_context_clone),
+                                                window,
+                                                cx,
+                                            );
+                                        });
+                                    });
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            tracing::warn!("复制 JMS Koko 终端失败: {}", e);
+                            let _ = cx.update(|cx| {
+                                if let Some(window_id) = cx.active_window() {
+                                    let _ = cx.update_window(window_id, |_, window, cx| {
+                                        window.push_notification(
+                                            Notification::error(format!(
+                                                "复制 JMS 终端失败：{}",
+                                                e
+                                            ))
+                                            .autohide(true),
+                                            cx,
+                                        );
+                                    });
+                                }
+                            });
+                        }
+                    }
+                })
+                .detach();
             }
         }
     }

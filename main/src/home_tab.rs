@@ -28,7 +28,7 @@ use one_core::storage::{
     ActiveConnections, ConnectionRepository, ConnectionType, GlobalStorageState, StoredConnection,
     Workspace, WorkspaceRepository,
 };
-use one_core::tab_container::{TabContainer, TabContent, TabContentEvent};
+use one_core::tab_container::{TabContainer, TabContainerEvent, TabContent, TabContentEvent};
 use port_forwarding::{
     DynamicForwardingRequest, LocalForwardingRequest, PortForwardingRuntime,
     build_dynamic_forwarding_request, build_local_forwarding_request,
@@ -174,7 +174,7 @@ impl HomePage {
             selected_filter: ConnectionType::All,
             workspaces: Vec::new(),
             connections: Vec::new(),
-            tab_container,
+            tab_container: tab_container.clone(),
             search_input,
             search_query,
             editing_connection_id: None,
@@ -245,6 +245,20 @@ impl HomePage {
             )
             .detach();
         }
+
+        // 订阅 TabContainer 事件（标签页激活、关闭、复制等）
+        let tab_container_for_events = tab_container.clone();
+        cx.subscribe_in(
+            &tab_container_for_events,
+            window,
+            move |this, _, event: &TabContainerEvent, window, cx| match event {
+                TabContainerEvent::TabDuplicated { index } => {
+                    this.duplicate_tab_by_index(*index, window, cx);
+                }
+                _ => {}
+            },
+        )
+        .detach();
 
         page
     }
@@ -2027,7 +2041,7 @@ impl Render for HomePage {
             let view = cx.entity();
             window.defer(cx, move |window, cx| {
                 view.update(cx, |this, cx| {
-                    this.open_ssh_terminal(conn, None, window, cx);
+                    this.open_ssh_terminal(conn, None, window, cx, None);
                 });
             });
         }

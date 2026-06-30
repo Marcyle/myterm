@@ -310,6 +310,8 @@ impl JmsAssetTreePanel {
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let account_for_title = account_name.clone();
+            let asset_id_for_params = asset_id.clone();
+            let account_name_for_params = account_name.clone();
             let result = cx
                 .background_executor()
                 .spawn(async move {
@@ -328,6 +330,8 @@ impl JmsAssetTreePanel {
                         org_id: client.org_id().to_string(),
                         proxy,
                         title: format!("[JMS] {} ({})", asset_name, account_for_title),
+                        asset_id: Some(asset_id_for_params),
+                        account_name: Some(account_name_for_params),
                     };
                     let _ = this.update(cx, |this, cx| {
                         this.is_busy = false;

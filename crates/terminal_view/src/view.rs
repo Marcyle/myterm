@@ -52,6 +52,7 @@ use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient};
 use std::ops::Deref;
 use terminal::LocalConfig;
+use jms;
 use terminal::terminal::{
     ConnectionState, Terminal, TerminalConnectionKind, TerminalModelEvent, TerminalScrollProxy,
     resolve_local_working_dir,
@@ -707,6 +708,8 @@ pub struct TerminalView {
     terminal: Entity<Terminal>,
     /// 本地终端工作目录
     local_working_dir: Option<PathBuf>,
+    /// 本地终端配置（用于复制标签页）
+    local_config: Option<LocalConfig>,
     /// 光标闪烁管理器
     blink_manager: Entity<BlinkCursor>,
     /// 侧边栏
@@ -796,6 +799,8 @@ pub struct TerminalView {
     scrollbar_handle: TerminalScrollbarHandle,
     /// JMS 资产树侧栏上下文(若为 JMS 终端),用于侧栏点资产开新 tab 时随事件传递
     jms_context: Option<crate::sidebar::JmsSidebarContext>,
+    /// JMS Koko 连接参数(用于复制标签页时重新申请 token)
+    koko_params: Option<jms::KokoConnectParams>,
 }
 
 /// Mouse interaction state
@@ -976,6 +981,7 @@ impl TerminalView {
     ) -> Self {
         // 创建 Terminal Entity
         let local_working_dir = resolve_local_working_dir(config.working_dir.clone());
+        let config_for_view = config.clone();
         let init_error = Rc::new(RefCell::new(None));
         let init_error_clone = init_error.clone();
         let terminal = cx.new(move |cx| {
@@ -991,6 +997,7 @@ impl TerminalView {
             local_working_dir,
             tab_index,
             None,
+            Some(config_for_view),
             window,
             cx,
         );
@@ -1027,8 +1034,9 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let params_for_view = params.clone();
         let terminal = cx.new(|cx| Terminal::new_jms_koko(params, cx));
-        Self::new_with_terminal(
+        let mut view = Self::new_with_terminal(
             terminal,
             None,
             None,
@@ -1036,9 +1044,12 @@ impl TerminalView {
             None,
             tab_index,
             jms_context,
+            None,
             window,
             cx,
-        )
+        );
+        view.koko_params = Some(params_for_view);
+        view
     }
 
     /// 创建 JMS Koko 占位终端(未连接,只有资产树侧栏,等用户从树里选资产)
@@ -1057,6 +1068,7 @@ impl TerminalView {
             None,
             tab_index,
             jms_context,
+            None,
             window,
             cx,
         )
@@ -1083,6 +1095,7 @@ impl TerminalView {
             None,
             tab_index,
             None,
+            None,
             window,
             cx,
         )
@@ -1096,6 +1109,7 @@ impl TerminalView {
         local_working_dir: Option<PathBuf>,
         tab_index: Option<usize>,
         jms_context: Option<crate::sidebar::JmsSidebarContext>,
+        local_config: Option<LocalConfig>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -1189,6 +1203,7 @@ impl TerminalView {
             } else {
                 None
             },
+            local_config: if is_local_terminal { local_config } else { None },
             blink_manager,
             sidebar,
             font_size: default_font_size,
@@ -1238,6 +1253,7 @@ impl TerminalView {
             scrollbar_metrics,
             scrollbar_handle,
             jms_context: jms_context_for_view,
+            koko_params: None,
         };
         let initial_settings = current_settings(cx);
         this.apply_settings_snapshot(&initial_settings, window, cx);
@@ -1369,6 +1385,8 @@ impl TerminalView {
             }
             TerminalSidebarEvent::ConnectJmsInCurrentTab(params) => {
                 // 在本 tab(占位终端)上直接连接,不新开 tab
+                // 保存连接参数,以便后续复制该标签页时能重新申请 token
+                self.koko_params = Some(params.clone());
                 self.terminal.update(cx, |t, cx| {
                     t.connect_jms_koko(params.clone(), cx);
                 });
@@ -2148,6 +2166,31 @@ impl TerminalView {
     /// 获取本地终端的工作目录
     pub fn local_working_dir(&self) -> Option<&std::path::Path> {
         self.local_working_dir.as_deref()
+    }
+
+    /// 获取本地终端配置（用于复制标签页）
+    pub fn local_config(&self) -> Option<&LocalConfig> {
+        self.local_config.as_ref()
+    }
+
+    /// 获取当前工作目录（主要由 SSH 终端通过 OSC 7 更新）
+    pub fn current_working_dir(&self, cx: &App) -> Option<String> {
+        self.terminal.read(cx).current_working_dir().map(String::from)
+    }
+
+    /// 获取终端连接状态
+    pub fn connection_state(&self, cx: &App) -> ConnectionState {
+        self.terminal.read(cx).connection_state().clone()
+    }
+
+    /// 获取 JMS 资产树侧栏上下文
+    pub fn jms_context(&self) -> Option<&crate::sidebar::JmsSidebarContext> {
+        self.jms_context.as_ref()
+    }
+
+    /// 获取 JMS Koko 连接参数（用于复制标签页时重新申请 token）
+    pub fn koko_params(&self) -> Option<&jms::KokoConnectParams> {
+        self.koko_params.as_ref()
     }
 
     /// Get all available themes

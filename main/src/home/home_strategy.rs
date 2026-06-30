@@ -28,7 +28,7 @@ struct SshOpenStrategy {
 
 impl ConnectionOpenStrategy for SshOpenStrategy {
     fn open(self: Box<Self>, home: &mut HomePage, window: &mut Window, cx: &mut Context<HomePage>) {
-        home.open_ssh_terminal(self.connection, self.workspace, window, cx);
+        home.open_ssh_terminal(self.connection, self.workspace, window, cx, None);
     }
 }
 

@@ -38,6 +38,8 @@ pub enum TabContainerEvent {
     TabActivated { index: usize, id: String },
     /// A tab was closed
     TabClosed { id: String },
+    /// A tab was duplicated via context menu
+    TabDuplicated { index: usize },
 }
 
 // ============================================================================
@@ -1823,8 +1825,6 @@ impl TabContainer {
                             .context_menu(move |menu, window, cx| {
                                 let view_for_menu = view_clone.clone();
                                 let tab_count = view_for_menu.read(cx).tabs.len();
-                                let has_tabs_left = idx > 0;
-                                let has_tabs_right = idx < tab_count - 1;
                                 let closeable = view_for_menu
                                     .read(cx)
                                     .tabs
@@ -1833,6 +1833,17 @@ impl TabContainer {
                                     .unwrap_or(false);
 
                                 menu.item(
+                                    PopupMenuItem::new("Duplicate Tab").on_click(
+                                        window.listener_for(
+                                            &view_for_menu,
+                                            move |_this, _, _window, cx| {
+                                                cx.emit(TabContainerEvent::TabDuplicated { index: idx });
+                                            },
+                                        ),
+                                    ),
+                                )
+                                .separator()
+                                .item(
                                     PopupMenuItem::new("Close").disabled(!closeable).on_click(
                                         window.listener_for(
                                             &view_for_menu,
@@ -1857,26 +1868,6 @@ impl TabContainer {
                                             &view_for_menu,
                                             move |this, _, window, cx| {
                                                 this.close_other_tabs(idx, window, cx).detach();
-                                            },
-                                        )),
-                                )
-                                .item(
-                                    PopupMenuItem::new("Close Tabs To The Left")
-                                        .disabled(!has_tabs_left)
-                                        .on_click(window.listener_for(
-                                            &view_for_menu,
-                                            move |this, _, window, cx| {
-                                                this.close_tabs_to_left(idx, window, cx).detach();
-                                            },
-                                        )),
-                                )
-                                .item(
-                                    PopupMenuItem::new("Close Tabs To The Right")
-                                        .disabled(!has_tabs_right)
-                                        .on_click(window.listener_for(
-                                            &view_for_menu,
-                                            move |this, _, window, cx| {
-                                                this.close_tabs_to_right(idx, window, cx).detach();
                                             },
                                         )),
                                 )
