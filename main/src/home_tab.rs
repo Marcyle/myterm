@@ -1196,8 +1196,8 @@ impl HomePage {
                     .child(
                         Button::new("local-terminal-button")
                             .icon(IconName::SquareTerminal)
-                            .label(t!("Terminal.local"))
-                            .tooltip(t!("Terminal.local"))
+                            .label(t!("Settings.General.Terminal.local"))
+                            .tooltip(t!("Settings.General.Terminal.local"))
                             .on_click(window.listener_for(&view, move |this, _, window, cx| {
                                 this.add_terminal_tab(window, cx);
                             })),
@@ -1714,9 +1714,7 @@ impl HomePage {
                 for conn in connections {
                     container = container.child(
                         div()
-                            .flex_1()
-                            .min_w(px(260.0))
-                            .max_w(px(360.0))
+                            .w(px(320.0))
                             .child(self.render_connection_card(conn, selected_id, cx)),
                     );
                 }
@@ -1736,9 +1734,7 @@ impl HomePage {
         for conn in connections {
             container = container.child(
                 div()
-                    .flex_1()
-                    .min_w(px(260.0))
-                    .max_w(px(360.0))
+                    .w(px(320.0))
                     .child(self.render_connection_card(conn, selected_id, cx)),
             );
         }
@@ -1786,9 +1782,7 @@ impl HomePage {
                 for conn in connections {
                     container = container.child(
                         div()
-                            .flex_1()
-                            .min_w(px(260.0))
-                            .max_w(px(360.0))
+                            .w(px(320.0))
                             .child(self.render_connection_card(conn, selected_id, cx)),
                     );
                 }

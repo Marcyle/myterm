@@ -1342,6 +1342,10 @@ Settings.General.Terminal:
     en: Sync terminal working directory to file manager
     zh-CN: 将终端工作目录同步到文件管理器
     zh-HK: 將終端工作目錄同步到檔案管理器
+  local:
+    en: Local Terminal
+    zh-CN: 本地终端
+    zh-HK: 本地終端
 
 
 Serial:

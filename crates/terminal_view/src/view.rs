@@ -294,16 +294,38 @@ fn shell_escape(s: &str) -> String {
 }
 
 /// 把多行文本拆分为批量命令队列。
-/// 仅当包含多条非空行时返回 Some，否则返回 None。
+///
+/// 以换行符分隔命令，但会把行尾带反斜杠（`\`）的续行与其下一行合并为
+/// 一条完整命令，避免 shell 把续行命令当成多条独立输入。
+/// 仅当包含多条有效命令时返回 Some，否则返回 None。
 fn split_batch_commands(text: &str) -> Option<Vec<String>> {
     if multiline_non_empty_line_count(text) <= 1 {
         return None;
     }
-    let commands: Vec<String> = text
-        .lines()
-        .map(|l| l.to_string())
-        .filter(|l| !l.trim().is_empty())
-        .collect();
+
+    let mut commands = Vec::new();
+    let mut current = String::new();
+
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        if !current.is_empty() {
+            current.push('\n');
+        }
+        current.push_str(line);
+
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() || !trimmed.ends_with('\\') {
+            commands.push(std::mem::take(&mut current));
+        }
+    }
+
+    if !current.is_empty() {
+        commands.push(current);
+    }
+
     if commands.len() > 1 {
         Some(commands)
     } else {
@@ -1130,6 +1152,14 @@ impl TerminalView {
         let ssh_session_manager = terminal.read(cx).ssh_session_manager().cloned();
 
         // 创建侧边栏（传递 StoredConnection 用于文件管理器）
+        // 已连接的 JMS 终端不应再被视为占位终端：从资产树选择新资产时要新开 tab，
+        // 而不是覆盖当前已连接的 tab。
+        let mut jms_context = jms_context;
+        if let Some(ref mut ctx) = jms_context {
+            if terminal.read(cx).connection_state() == &ConnectionState::Connected {
+                ctx.is_placeholder = false;
+            }
+        }
         let jms_context_for_view = jms_context.clone();
         let sidebar = cx.new(|cx| {
             TerminalSidebar::new(
@@ -5045,6 +5075,30 @@ mod tests {
             split_batch_commands("\n\necho 1\necho 2\n\n"),
             Some(vec!["echo 1".to_string(), "echo 2".to_string()])
         );
+    }
+
+    #[test]
+    fn split_batch_commands_joins_line_continuations() {
+        // 行尾反斜杠表示续行，合并后只剩一条命令，返回 None 走普通粘贴路径
+        assert_eq!(split_batch_commands("ps \\\n-ef"), None);
+
+        // 续行与后续普通命令混合
+        assert_eq!(
+            split_batch_commands("ps \\\n-ef\necho done"),
+            Some(vec!["ps \\\n-ef".to_string(), "echo done".to_string()])
+        );
+
+        // 多条续行命令
+        assert_eq!(
+            split_batch_commands("echo a \\\n&& echo b\necho c"),
+            Some(vec![
+                "echo a \\\n&& echo b".to_string(),
+                "echo c".to_string()
+            ])
+        );
+
+        // 反斜杠后带空格仍视为续行
+        assert_eq!(split_batch_commands("ps \\  \n-ef"), None);
     }
 
     #[test]

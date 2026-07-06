@@ -404,6 +404,11 @@ impl KokoChannel {
         self.send_message(MSG_TERMINAL_RESIZE, data).await
     }
 
+    /// 发送应用层 PING 心跳，用于保持长连接不被中间件/防火墙因空闲而断开。
+    pub async fn send_ping(&mut self) -> Result<(), JmsError> {
+        self.send_message(MSG_PING, String::new()).await
+    }
+
     /// 关闭连接
     pub async fn close(&mut self) -> Result<(), JmsError> {
         let _ = self.stream.send(Message::Close(None)).await;

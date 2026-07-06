@@ -4,11 +4,13 @@
 //! 把用户输入/resize 通过 WS 上行。
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::Term;
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::time::interval;
 
 use jms::{KokoChannel, KokoConnectParams, KokoEvent};
 
@@ -56,6 +58,9 @@ impl KokoBackend {
 
         tokio::spawn(async move {
             let mut processor: Processor<StdSyncHandler> = Processor::new();
+            // 每隔 30 秒发送一次应用层 PING 心跳，防止 NAT/防火墙/负载均衡因长时间
+            // 空闲而静默断开 WebSocket，导致终端“有焦点但无响应”。
+            let mut heartbeat_interval = interval(Duration::from_secs(30));
 
             loop {
                 tokio::select! {
@@ -124,6 +129,11 @@ impl KokoBackend {
                             Some(KokoEvent::Closed) | None => {
                                 break;
                             }
+                        }
+                    }
+                    _ = heartbeat_interval.tick() => {
+                        if channel.send_ping().await.is_err() {
+                            break;
                         }
                     }
                 }

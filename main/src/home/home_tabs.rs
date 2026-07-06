@@ -489,6 +489,10 @@ impl HomePage {
                                 account_name: Some(account_name_for_new_params),
                                 ..koko_params
                             };
+                            // 复制出的标签页已经是连接状态，不能再是占位终端，
+                            // 否则资产树点击资产时会错误地替换当前 tab。
+                            let mut jms_context_clone = jms_context_clone;
+                            jms_context_clone.is_placeholder = false;
                             // 直接在当前活动窗口打开新 Tab，避免经过 render 队列的延迟
                             let _ = cx.update(|cx| {
                                 if let Some(window_id) = cx.active_window() {
