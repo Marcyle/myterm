@@ -30,7 +30,7 @@ pub const DEFAULT_SYSTEM_HOTKEY_MACOS: &str = "cmd-alt-m";
 pub const DEFAULT_SYSTEM_HOTKEY_OTHER: &str = "ctrl-space";
 
 pub use one_core::settings::{
-    AppSettings, GlobalProxySettings, LargeTextCellEditorOpenMode, ProxyType,
+    AppSettings, GlobalProxySettings, ProxyType,
 };
 use one_core::tab_container::{TabContent, TabContentEvent};
 use one_core::utils::auto_save_config::AutoSaveConfig;

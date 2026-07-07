@@ -15,10 +15,10 @@ use gpui_component::{
     color_picker::{ColorPicker, ColorPickerState},
     dialog::DialogButtonProps,
     h_flex,
-    input::{Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction},
+    input::{Input, InputEvent, InputState, NumberInputEvent, StepAction},
     notification::Notification,
     scroll::ScrollableElement,
-    select::{Select, SelectEvent, SelectState},
+    select::{SelectEvent, SelectState},
     switch::Switch,
     try_parse_color, v_flex,
 };
@@ -74,6 +74,7 @@ pub struct SettingsPanel {
     /// 字体大小输入框状态
     font_size_input_state: Entity<InputState>,
     /// 字体选择状态
+    #[allow(dead_code)]
     font_select_state: Entity<SelectState<Vec<SharedString>>>,
     /// 当前主题
     current_theme: TerminalTheme,
@@ -102,6 +103,7 @@ pub struct SettingsPanel {
     /// 全局自定义高亮规则
     custom_highlights: Vec<TerminalHighlightRule>,
     /// 是否有文件管理器面板（仅 SSH 终端有）
+    #[allow(dead_code)]
     has_file_manager: bool,
     /// 焦点句柄
     focus_handle: FocusHandle,

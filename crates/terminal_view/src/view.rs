@@ -203,7 +203,6 @@ fn should_defer_inline_history_prompt_input_to_text_system(keystroke: &Keystroke
 enum UnbracketedPasteHazard {
     HereDoc,
     UnterminatedQuote,
-    LineContinuation,
 }
 
 fn multiline_non_empty_line_count(text: &str) -> usize {
@@ -215,22 +214,6 @@ fn contains_heredoc_operator(text: &str) -> bool {
         let line = line.trim_start();
         !line.is_empty() && !line.starts_with('#') && line.contains("<<")
     })
-}
-
-fn has_trailing_line_continuation(text: &str) -> bool {
-    let mut lines = text.lines().peekable();
-    while let Some(line) = lines.next() {
-        if lines.peek().is_none() {
-            break;
-        }
-
-        let trimmed = line.trim_end();
-        if !trimmed.is_empty() && trimmed.ends_with('\\') {
-            return true;
-        }
-    }
-
-    false
 }
 
 fn has_unterminated_shell_quote(text: &str) -> bool {
@@ -265,10 +248,6 @@ fn has_unterminated_shell_quote(text: &str) -> bool {
 fn detect_unbracketed_paste_hazard(text: &str) -> Option<UnbracketedPasteHazard> {
     if contains_heredoc_operator(text) {
         return Some(UnbracketedPasteHazard::HereDoc);
-    }
-
-    if has_trailing_line_continuation(text) {
-        return Some(UnbracketedPasteHazard::LineContinuation);
     }
 
     if has_unterminated_shell_quote(text) {
@@ -2977,13 +2956,6 @@ impl TerminalView {
         self.focus_terminal(window, cx);
     }
 
-    /// 粘贴代码块到终端（用于AI生成的代码）
-    ///
-    /// 内部调用 paste_text，保持统一的粘贴行为
-    fn paste_code_block(&mut self, code: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.paste_text(code, window, cx);
-    }
-
     /// 执行队列中的下一条命令
     fn execute_next_queued_command(&mut self, cx: &mut Context<Self>) {
         if let Some(command) = self.command_queue.pop_front() {
@@ -3133,9 +3105,6 @@ impl TerminalView {
             }
             UnbracketedPasteHazard::UnterminatedQuote => {
                 t!("TerminalView.unbracketed_paste_quote_message").to_string()
-            }
-            UnbracketedPasteHazard::LineContinuation => {
-                t!("TerminalView.unbracketed_paste_continuation_message").to_string()
             }
         };
         let preview_text = Self::paste_preview_text(text);
@@ -4760,10 +4729,10 @@ impl Element for ResizeEventHandler {
 mod tests {
     use super::{
         UnbracketedPasteHazard, detect_unbracketed_paste_hazard, encode_mouse_modifiers,
-        has_trailing_line_continuation, has_unterminated_shell_quote, history_prompt_available,
-        history_prompt_dropdown_origin, history_prompt_overlay_bounds, mouse_button_code,
-        multiline_non_empty_line_count, sgr_mouse_button_report, sgr_mouse_mode_enabled,
-        sgr_mouse_wheel_report, should_confirm_local_terminal_close,
+        has_unterminated_shell_quote, history_prompt_available, history_prompt_dropdown_origin,
+        history_prompt_overlay_bounds, mouse_button_code, multiline_non_empty_line_count,
+        sgr_mouse_button_report, sgr_mouse_mode_enabled, sgr_mouse_wheel_report,
+        should_confirm_local_terminal_close,
         should_defer_inline_history_prompt_input_to_text_system, should_defer_sgr_left_press,
         should_dismiss_history_prompt_for_keystroke, should_dismiss_history_prompt_for_mouse,
         should_dismiss_history_prompt_for_scroll, should_reset_history_prompt_for_terminal_event,
@@ -5111,11 +5080,10 @@ mod tests {
     }
 
     #[test]
-    fn detect_unbracketed_paste_hazard_matches_line_continuation() {
-        assert!(has_trailing_line_continuation("echo hello \\\nworld"));
+    fn detect_unbracketed_paste_hazard_ignores_line_continuation() {
         assert_eq!(
             detect_unbracketed_paste_hazard("echo hello \\\nworld"),
-            Some(UnbracketedPasteHazard::LineContinuation)
+            None
         );
     }
 
@@ -5135,7 +5103,6 @@ mod tests {
             None
         );
         assert!(!has_unterminated_shell_quote("printf '%s\\n' hello"));
-        assert!(!has_trailing_line_continuation("echo hello\necho world"));
     }
 
     #[test]
