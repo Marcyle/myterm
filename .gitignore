@@ -26,6 +26,12 @@ crates/**/target/
 *.swo
 *~
 .zed/
+.claude/
+.codegraph/
+.playwright-mcp/
+.tokensave/
+AGENTS.md
+CLAUDE.md
 
 # Cargo lock for libraries (keep for binaries)
 # Cargo.lock is already tracked, so commenting this out
