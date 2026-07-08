@@ -703,6 +703,10 @@ pub struct TabContainer {
     tab_list: Option<Entity<ListState<TabListDelegate>>>,
     closing_tabs: HashSet<SharedString>,
     show_window_controls: bool,
+    /// 点击标题栏"左右分屏"按钮时的回调
+    on_split_horizontal: Option<Arc<dyn Fn(&mut Window, &mut App) + 'static>>,
+    /// 点击标题栏"上下分屏"按钮时的回调
+    on_split_vertical: Option<Arc<dyn Fn(&mut Window, &mut App) + 'static>>,
     /// Pinned tab that stays fixed before the scrollable tab list
     pinned_tab: Option<TabItem>,
     /// Whether the pinned tab is currently active (showing its content)
@@ -734,6 +738,8 @@ impl TabContainer {
             tab_list: None,
             closing_tabs: HashSet::new(),
             show_window_controls: false,
+            on_split_horizontal: None,
+            on_split_vertical: None,
             pinned_tab: None,
             pinned_tab_active: false,
         }
@@ -786,6 +792,24 @@ impl TabContainer {
 
     pub fn with_window_controls(mut self, show: bool) -> Self {
         self.show_window_controls = show;
+        self
+    }
+
+    /// 设置标题栏"左右分屏"按钮的回调。
+    pub fn on_split_horizontal(
+        mut self,
+        f: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_split_horizontal = Some(Arc::new(f));
+        self
+    }
+
+    /// 设置标题栏"上下分屏"按钮的回调。
+    pub fn on_split_vertical(
+        mut self,
+        f: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_split_vertical = Some(Arc::new(f));
         self
     }
 
@@ -1943,20 +1967,41 @@ impl TabContainer {
             )
             .when(
                 cfg!(not(target_os = "macos")) && self.show_window_controls,
-                |el| el.child(self.render_window_controls(window)),
+                |el| el.child(self.render_window_controls(window, cx)),
             )
     }
 
-    fn render_window_controls(&self, window: &mut Window) -> impl IntoElement {
+    fn render_window_controls(&self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let is_linux = cfg!(target_os = "linux");
         let is_windows = cfg!(target_os = "windows");
         let is_maximized = window.is_maximized();
+        let on_split_horizontal = self.on_split_horizontal.clone();
+        let on_split_vertical = self.on_split_vertical.clone();
 
         h_flex()
             .id("window-controls")
             .items_center()
             .flex_shrink_0()
             .h_full()
+            .when_some(on_split_horizontal, |this, on_click| {
+                this.child(self.render_toolbar_button(
+                    "split-horizontal",
+                    IconName::PanelRight,
+                    move |window, cx| on_click(window, cx),
+                    cx,
+                ))
+            })
+            .when_some(on_split_vertical, |this, on_click| {
+                this.child(self.render_toolbar_button(
+                    "split-vertical",
+                    IconName::PanelBottom,
+                    move |window, cx| on_click(window, cx),
+                    cx,
+                ))
+            })
             .child(self.render_control_button(
                 "minimize",
                 IconName::WindowMinimize,
@@ -1985,6 +2030,32 @@ impl TabContainer {
                 is_windows,
                 true,
             ))
+    }
+
+    fn render_toolbar_button(
+        &self,
+        id: &'static str,
+        icon: IconName,
+        on_click: impl Fn(&mut Window, &mut App) + 'static,
+        _cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        div()
+            .id(id)
+            .flex()
+            .w(px(34.0))
+            .h_full()
+            .flex_shrink_0()
+            .justify_center()
+            .content_center()
+            .items_center()
+            .text_color(gpui::white())
+            .hover(|style| style.bg(gpui::rgb(0x3a3a3a)).text_color(gpui::white()))
+            .active(|style| style.bg(gpui::rgb(0x2a2a2a)).text_color(gpui::white()))
+            .on_click(move |_, window, cx| {
+                cx.stop_propagation();
+                on_click(window, cx);
+            })
+            .child(Icon::new(icon).with_size(Size::Small))
     }
 
     fn render_control_button(

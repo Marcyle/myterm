@@ -5,6 +5,7 @@ pub mod cd_completion;
 pub mod highlight_presets;
 pub mod history_prompt;
 pub mod keys;
+pub mod pane_area;
 pub mod settings;
 pub mod sidebar;
 mod ssh_form_mfa;
@@ -23,6 +24,7 @@ pub use settings::{
 pub use sidebar::{
     JmsSidebarContext, SettingsPanel, SidebarPanel, TerminalSidebar, TerminalSidebarEvent,
 };
+pub use pane_area::TerminalPaneArea;
 pub use ssh_form_window::{SshFormWindow, SshFormWindowConfig};
 pub use terminal::terminal::{
     ConnectionState, SshTerminalConfig, Terminal, TerminalConnectionKind, TerminalModelEvent,
@@ -30,4 +32,4 @@ pub use terminal::terminal::{
 pub use theme::{
     DEFAULT_LINE_HEIGHT_SCALE, MAX_FONT_SIZE, MIN_FONT_SIZE, TerminalTheme, default_font_fallbacks,
 };
-pub use view::{TerminalView, TerminalViewEvent, init, refresh_keybindings};
+pub use view::{SplitPaneRequest, TerminalView, TerminalViewEvent, init, refresh_keybindings};

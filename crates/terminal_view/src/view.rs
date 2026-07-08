@@ -13,6 +13,7 @@ use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
 use gpui_component::{
     BlinkCursor, Icon, IconName, Sizable, Size, WindowExt, h_flex, kbd::Kbd, v_flex,
 };
+use gpui_component::dock::{Panel, PanelEvent};
 use one_core::gpui_tokio::Tokio;
 use one_core::keybindings::{
     action_id, keystroke_matches_shortcuts, rebind_keybindings, shortcuts_for,
@@ -259,6 +260,18 @@ fn detect_unbracketed_paste_hazard(text: &str) -> Option<UnbracketedPasteHazard>
 
 fn terminal_shortcut_label(shortcut: &str) -> SharedString {
     Kbd::format(&Keystroke::parse(shortcut).expect("终端快捷键定义非法")).into()
+}
+
+/// 判断按键是否为分屏快捷键（macOS: Cmd+Shift+X，其他: Ctrl+Shift+X）。
+fn is_split_shortcut(event: &KeyDownEvent, key: &str) -> bool {
+    let modifiers = event.keystroke.modifiers;
+    let k = event.keystroke.key.as_str();
+    let key_matches = k.eq_ignore_ascii_case(key);
+    if cfg!(target_os = "macos") {
+        modifiers.platform && modifiers.shift && !modifiers.control && !modifiers.alt && key_matches
+    } else {
+        modifiers.control && modifiers.shift && !modifiers.platform && !modifiers.alt && key_matches
+    }
 }
 
 /// 对路径进行简单 shell 转义（用单引号包裹，处理内部单引号）
@@ -2192,6 +2205,17 @@ impl TerminalView {
         self.terminal.read(cx).connection_state().clone()
     }
 
+    /// 判断关闭当前终端是否需要用户确认（本地终端有运行中命令/TUI 时）。
+    pub fn should_confirm_close(&self, cx: &App) -> bool {
+        let terminal = self.terminal.read(cx);
+        should_confirm_local_terminal_close(
+            terminal.connection_kind(),
+            self.local_command_running,
+            terminal.mode(),
+            terminal.child_exited(),
+        )
+    }
+
     /// 获取 JMS 资产树侧栏上下文
     pub fn jms_context(&self) -> Option<&crate::sidebar::JmsSidebarContext> {
         self.jms_context.as_ref()
@@ -2562,6 +2586,15 @@ impl TerminalView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        tracing::info!(
+            "TerminalView handle_key_event: key={}, ctrl={}, shift={}, alt={}, platform={}",
+            event.keystroke.key,
+            event.keystroke.modifiers.control,
+            event.keystroke.modifiers.shift,
+            event.keystroke.modifiers.alt,
+            event.keystroke.modifiers.platform,
+        );
+
         // 输入时暂停闪烁
         if self.cursor_blink_enabled {
             self.blink_manager.update(cx, BlinkCursor::pause);
@@ -2580,6 +2613,28 @@ impl TerminalView {
             &shortcuts_for(cx, action_id::TERMINAL_COPY, &[TERMINAL_COPY_SHORTCUT]),
         ) {
             self.copy(&Copy, _window, cx);
+            return;
+        }
+
+        // 分屏快捷键：优先于终端输入处理，冒泡给 TerminalPaneArea
+        if is_split_shortcut(event, "o") {
+            tracing::info!("TerminalView: split shortcut Ctrl+Shift+O detected");
+            cx.emit(TerminalViewEvent::SplitPaneRight);
+            return;
+        }
+        if is_split_shortcut(event, "e") {
+            tracing::info!("TerminalView: split shortcut Ctrl+Shift+E detected");
+            cx.emit(TerminalViewEvent::SplitPaneDown);
+            return;
+        }
+        if is_split_shortcut(event, "w") {
+            tracing::info!("TerminalView: split shortcut Ctrl+Shift+W detected");
+            cx.emit(TerminalViewEvent::ClosePane);
+            return;
+        }
+        if is_split_shortcut(event, "z") {
+            tracing::info!("TerminalView: split shortcut Ctrl+Shift+Z detected");
+            cx.emit(TerminalViewEvent::TogglePaneZoom);
             return;
         }
 
@@ -4158,6 +4213,19 @@ impl Focusable for TerminalView {
 
 impl EventEmitter<TabContentEvent> for TerminalView {}
 
+/// 请求 HomePage 代为创建并插入新 pane 的上下文。
+#[derive(Clone, Debug)]
+pub struct SplitPaneRequest {
+    pub placement: gpui_component::Placement,
+    pub source: Entity<TerminalView>,
+    pub connection_kind: TerminalConnectionKind,
+    pub connection_id: Option<i64>,
+    pub working_dir: Option<String>,
+    pub local_config: Option<LocalConfig>,
+    pub jms_context: Option<crate::sidebar::JmsSidebarContext>,
+    pub koko_params: Option<jms::KokoConnectParams>,
+}
+
 /// TerminalView 对外事件(供 HomePage 订阅)
 #[derive(Clone, Debug)]
 pub enum TerminalViewEvent {
@@ -4166,9 +4234,39 @@ pub enum TerminalViewEvent {
         jms::KokoConnectParams,
         Option<crate::sidebar::JmsSidebarContext>,
     ),
+    /// 请求将当前 pane 向右分屏(本地终端使用)
+    SplitPaneRight,
+    /// 请求将当前 pane 向下分屏(本地终端使用)
+    SplitPaneDown,
+    /// 请求关闭当前 pane
+    ClosePane,
+    /// 请求放大/还原当前 pane
+    TogglePaneZoom,
+    /// 请求 HomePage 代为创建并插入 SSH/JMS 终端 pane
+    RequestSplitPane(SplitPaneRequest),
 }
 
 impl EventEmitter<TerminalViewEvent> for TerminalView {}
+
+impl EventEmitter<PanelEvent> for TerminalView {}
+
+impl Panel for TerminalView {
+    fn panel_name(&self) -> &'static str {
+        "Terminal"
+    }
+
+    fn title(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        <TerminalView as TabContent>::title(self, cx).into_any_element()
+    }
+
+    fn tab_name(&self, cx: &App) -> Option<SharedString> {
+        Some(<TerminalView as TabContent>::title(self, cx))
+    }
+
+    fn closable(&self, _cx: &App) -> bool {
+        true
+    }
+}
 
 impl TabContent for TerminalView {
     fn content_key(&self) -> &'static str {

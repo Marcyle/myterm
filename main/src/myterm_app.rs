@@ -46,6 +46,9 @@ use gpui_component::dock::{ClosePanel, ToggleZoom};
 use gpui_component::{ActiveTheme, Root};
 use one_core::storage::manager::get_config_dir;
 use one_core::tab_container::{TabContainer, TabContentRegistry, TabItem};
+use std::sync::Arc;
+use terminal::LocalConfig;
+use terminal_view::TerminalPaneArea;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
@@ -163,7 +166,19 @@ pub fn init(cx: &mut App) {
     cx.bind_keys(init_keybindings(cx));
     init_action_handlers(cx);
 
-    let registry = TabContentRegistry::new();
+    let mut registry = TabContentRegistry::new();
+    registry.register_fn("Terminal".into(), |_state, window, cx| {
+        // 兼容旧状态：用默认本地终端包裹为 TerminalPaneArea
+        let pane_area =
+            cx.new(|cx| TerminalPaneArea::new_local(LocalConfig::default(), None, window, cx));
+        Some(Arc::new(pane_area) as Arc<dyn one_core::tab_container::TabContentView>)
+    });
+    registry.register_fn("TerminalPaneArea".into(), |_state, window, cx| {
+        // TODO: 从 state.data 反序列化布局与连接信息
+        let pane_area =
+            cx.new(|cx| TerminalPaneArea::new_local(LocalConfig::default(), None, window, cx));
+        Some(Arc::new(pane_area) as Arc<dyn one_core::tab_container::TabContentView>)
+    });
     cx.set_global(registry);
 
     let storage_state = cx.global::<GlobalStorageState>();
@@ -382,7 +397,22 @@ impl MyApp {
 
             #[cfg(not(target_os = "macos"))]
             {
-                container = container.with_window_controls(true)
+                container = container
+                    .with_window_controls(true)
+                    .on_split_horizontal(move |window, cx| {
+                        split_active_terminal_pane(
+                            gpui_component::Placement::Right,
+                            window,
+                            cx,
+                        );
+                    })
+                    .on_split_vertical(move |window, cx| {
+                        split_active_terminal_pane(
+                            gpui_component::Placement::Bottom,
+                            window,
+                            cx,
+                        );
+                    })
             }
 
             container
@@ -469,6 +499,32 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
+}
+
+fn split_active_terminal_pane(
+    placement: gpui_component::Placement,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let Some(tab_container) = cx.try_global::<GlobalTabContainer>().map(|g| g.tab_container.clone()) else {
+        return;
+    };
+
+    let Some(pane_area) = tab_container.read(cx).active_tab().and_then(|tab| {
+        if tab.content().content_key(cx) == "TerminalPaneArea" {
+            tab.content().view().downcast::<TerminalPaneArea>().ok()
+        } else {
+            None
+        }
+    }) else {
+        return;
+    };
+
+    pane_area.update(cx, |pane_area, cx| match placement {
+        gpui_component::Placement::Right => pane_area.split_active_pane_right(window, cx),
+        gpui_component::Placement::Bottom => pane_area.split_active_pane_down(window, cx),
+        _ => {}
+    });
 }
 
 impl Render for MyApp {

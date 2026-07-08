@@ -27,6 +27,10 @@ pub mod action_id {
     pub const TERMINAL_SEARCH_FORWARD: &str = "terminal.search_forward";
     pub const TERMINAL_SEARCH_BACKWARD: &str = "terminal.search_backward";
     pub const TERMINAL_TOGGLE_VI_MODE: &str = "terminal.toggle_vi_mode";
+    pub const TERMINAL_SPLIT_PANE_RIGHT: &str = "terminal.split_pane_right";
+    pub const TERMINAL_SPLIT_PANE_DOWN: &str = "terminal.split_pane_down";
+    pub const TERMINAL_CLOSE_PANE: &str = "terminal.close_pane";
+    pub const TERMINAL_TOGGLE_PANE_ZOOM: &str = "terminal.toggle_pane_zoom";
     pub const TERMINAL_INCREASE_FONT: &str = "terminal.increase_font";
     pub const TERMINAL_DECREASE_FONT: &str = "terminal.decrease_font";
     pub const TERMINAL_RESET_FONT: &str = "terminal.reset_font";
