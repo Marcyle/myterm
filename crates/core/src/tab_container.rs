@@ -1574,12 +1574,21 @@ impl TabContainer {
 
         h_flex()
             .id("tab-bar")
+            .relative()
             .w_full()
             .h(px(40.0))
             .bg(bg_color)
             .items_center()
-            .border_b_1()
-            .border_color(border_color)
+            .child(
+                div()
+                    .id("tab-bar-divider")
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .h(px(1.0))
+                    .bg(border_color),
+            )
             // 标题栏交互支持：macOS 始终启用双击/拖动，其他平台跟随窗口控件开关
             .when(enable_titlebar_interactions, |this| {
                 this.when(is_linux, |this| {
@@ -1967,7 +1976,9 @@ impl TabContainer {
             )
             .when(
                 cfg!(not(target_os = "macos")) && self.show_window_controls,
-                |el| el.child(self.render_window_controls(window, cx)),
+                |el| el
+                    .child(div().w(px(1.0)).h(px(16.0)).bg(border_color).flex_shrink_0())
+                    .child(self.render_window_controls(window, cx)),
             )
     }
 

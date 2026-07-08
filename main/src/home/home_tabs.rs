@@ -86,11 +86,12 @@ impl HomePage {
         &mut self,
         conn: StoredConnection,
         working_dir: Option<String>,
+        pane_index: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<TerminalView> {
         let sync_path = Self::terminal_sync_path_enabled(cx);
-        cx.new(|cx| {
+        let terminal = cx.new(|cx| {
             TerminalView::new_ssh_with_index(
                 conn,
                 None,
@@ -99,7 +100,11 @@ impl HomePage {
                 working_dir.as_deref(),
                 sync_path,
             )
-        })
+        });
+        if let Some(index) = pane_index {
+            terminal.update(cx, |t, _cx| t.set_pane_index(index));
+        }
+        terminal
     }
 
     /// 打开 JumpServer Koko WebSocket 终端
@@ -254,8 +259,9 @@ impl HomePage {
                 };
                 let source = request.source.clone();
                 let placement = request.placement;
+                let pane_index = request.pane_index;
                 let terminal =
-                    self.create_ssh_terminal_view(conn, request.working_dir.clone(), window, cx);
+                    self.create_ssh_terminal_view(conn, request.working_dir.clone(), pane_index, window, cx);
                 window.defer(cx, move |window, cx| {
                     pane_area.update(cx, |pane_area, cx| {
                         pane_area.split_with_terminal(
@@ -301,6 +307,7 @@ impl HomePage {
                 let account_name_for_new_params = account_name.clone();
                 let source = request.source.clone();
                 let placement = request.placement;
+                let pane_index = request.pane_index;
                 let pane_area_for_async = pane_area.clone();
 
                 cx.spawn(async move |this, cx: &mut AsyncApp| {
@@ -334,6 +341,9 @@ impl HomePage {
                                                 cx,
                                             )
                                         });
+                                        if let Some(index) = pane_index {
+                                            terminal.update(cx, |t, _cx| t.set_pane_index(index));
+                                        }
                                         pane_area_for_async.update(cx, |pane_area, cx| {
                                             pane_area.split_with_terminal(
                                                 &source,

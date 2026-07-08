@@ -11,6 +11,7 @@ use gpui_component::{
 use rust_i18n::t;
 use one_core::tab_container::{TabContent, TabContentEvent};
 use std::sync::{Arc, Mutex as StdMutex};
+
 use terminal::LocalConfig;
 use terminal::terminal::TerminalConnectionKind;
 
@@ -39,6 +40,7 @@ pub struct TerminalPaneArea {
     zoomed: bool,
     on_request_split: Option<Arc<dyn Fn(SplitPaneRequest, &mut Window, &mut App, &Entity<TerminalPaneArea>) + 'static>>,
     _subscriptions: Vec<Subscription>,
+    next_pane_index: usize,
 }
 
 impl TerminalPaneArea {
@@ -170,6 +172,7 @@ impl TerminalPaneArea {
             zoomed: false,
             on_request_split: None,
             _subscriptions: vec![jms_subscription, title_subscription],
+            next_pane_index: 1,
         }
     }
 
@@ -278,7 +281,7 @@ impl TerminalPaneArea {
     ///
     /// 当前仅支持本地终端；SSH/JMS 需要外部连接信息，将在后续迭代中支持。
     fn duplicate_terminal(
-        &self,
+        &mut self,
         source: &Entity<TerminalView>,
         window: &mut Window,
         cx: &mut App,
@@ -290,7 +293,11 @@ impl TerminalPaneArea {
         match kind {
             TerminalConnectionKind::Local => {
                 let config = local_config.unwrap_or_default();
-                Some(cx.new(|cx| TerminalView::new_with_index(config, None, window, cx)))
+                let index = self.next_pane_index;
+                self.next_pane_index += 1;
+                let terminal = cx.new(|cx| TerminalView::new_with_index(config, None, window, cx));
+                terminal.update(cx, |t, _cx| t.set_pane_index(index));
+                Some(terminal)
             }
             _ => None,
         }
@@ -337,15 +344,18 @@ impl TerminalPaneArea {
         let Some(new_terminal) = self.duplicate_terminal(&source, window, cx) else {
             // SSH/JMS 需要 HomePage 代为创建，发出请求事件
             let source_ref = source.read(cx);
+            let pane_index = self.next_pane_index;
+            self.next_pane_index += 1;
             let request = SplitPaneRequest {
                 placement,
                 source: source.clone(),
                 connection_kind: source_ref.connection_kind(cx),
                 connection_id: source_ref.connection_id(cx),
-                working_dir: source_ref.current_working_dir(cx),
+                working_dir: None,
                 local_config: source_ref.local_config().cloned(),
                 jms_context: source_ref.jms_context().cloned(),
                 koko_params: source_ref.koko_params().cloned(),
+                pane_index: Some(pane_index),
             };
             tracing::info!("TerminalPaneArea: emit RequestSplitPane for {:?}", request.connection_kind);
             if let Some(on_request_split) = self.on_request_split.clone() {

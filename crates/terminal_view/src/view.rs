@@ -786,6 +786,8 @@ pub struct TerminalView {
 
     /// 标签页序号（用于多实例显示）
     tab_index: Option<usize>,
+    /// 分屏序号（用于分屏终端显示 Tab1/Tab2...）
+    pane_index: Option<usize>,
 
     /// 是否启用光标闪烁
     cursor_blink_enabled: bool,
@@ -1262,6 +1264,7 @@ impl TerminalView {
             focus_terminal_after_connect: false,
             current_theme: default_theme,
             tab_index,
+            pane_index: None,
             cursor_blink_enabled: false,
             confirm_multiline_paste: true,
             confirm_high_risk_command: true,
@@ -2193,6 +2196,11 @@ impl TerminalView {
     /// 获取本地终端配置（用于复制标签页）
     pub fn local_config(&self) -> Option<&LocalConfig> {
         self.local_config.as_ref()
+    }
+
+    /// 设置分屏序号（用于分屏子终端显示 Tab1/Tab2...）
+    pub fn set_pane_index(&mut self, index: usize) {
+        self.pane_index = Some(index);
     }
 
     /// 获取当前工作目录（主要由 SSH 终端通过 OSC 7 更新）
@@ -4224,6 +4232,7 @@ pub struct SplitPaneRequest {
     pub local_config: Option<LocalConfig>,
     pub jms_context: Option<crate::sidebar::JmsSidebarContext>,
     pub koko_params: Option<jms::KokoConnectParams>,
+    pub pane_index: Option<usize>,
 }
 
 /// TerminalView 对外事件(供 HomePage 订阅)
@@ -4274,6 +4283,11 @@ impl TabContent for TerminalView {
     }
 
     fn title(&self, cx: &App) -> SharedString {
+        // 分屏子终端显示 Tab1/Tab2...
+        if let Some(index) = self.pane_index {
+            return SharedString::from(format!("Tab{}", index));
+        }
+
         let terminal = self.terminal.read(cx);
         let base_title = if let Some(name) = terminal.connection_name() {
             name.to_string()
@@ -4573,9 +4587,9 @@ impl Render for TerminalView {
                             div()
                                 .absolute()
                                 .top(px(12.0))
-                                .right(px(4.0))
+                                .right(px(2.0))
                                 .bottom(px(12.0))
-                                .w(px(12.0))
+                                .w(px(6.0))
                                 .child(
                                     Scrollbar::vertical(&self.scrollbar_handle)
                                         .scrollbar_show(ScrollbarShow::Always),
@@ -4634,7 +4648,7 @@ impl Render for TerminalView {
                             });
                         })
                         .child(
-                            Icon::new(IconName::PanelLeftOpen)
+                            Icon::new(IconName::ChevronRight)
                                 .with_size(Size::Medium)
                                 .text_color(gpui::white()),
                         ),

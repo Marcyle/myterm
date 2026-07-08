@@ -635,15 +635,19 @@ impl TabPanel {
 
             let title_style = panel.title_style(cx);
 
+            let border_color = cx.theme().border;
+
             return h_flex()
                 .justify_between()
                 .line_height(rems(1.0))
-                .h(px(30.))
-                .py_2()
-                .pl_3()
-                .pr_2()
-                .when(left_dock_button.is_some(), |this| this.pl_2())
-                .when(right_dock_button.is_some(), |this| this.pr_2())
+                .h(px(24.))
+                .py_1()
+                .pl_2()
+                .pr_1()
+                .border_b_1()
+                .border_color(border_color)
+                .when(left_dock_button.is_some(), |this| this.pl_1())
+                .when(right_dock_button.is_some(), |this| this.pr_1())
                 .when_some(title_style, |this, theme| {
                     this.bg(theme.background).text_color(theme.foreground)
                 })
@@ -665,6 +669,7 @@ impl TabPanel {
                         .overflow_hidden()
                         .text_ellipsis()
                         .whitespace_nowrap()
+                        .text_xs()
                         .child(panel.title(window, cx))
                         .when(state.draggable, |this| {
                             this.on_drag(

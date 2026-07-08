@@ -604,7 +604,7 @@ impl TerminalSidebar {
                         this.toggle_collapsed(cx);
                     }))
                     .child(
-                        Icon::new(IconName::PanelLeftClose)
+                        Icon::new(IconName::ChevronLeft)
                             .with_size(Size::Medium)
                             .text_color(gpui::white()),
                     ),

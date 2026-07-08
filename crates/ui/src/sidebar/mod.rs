@@ -160,15 +160,15 @@ impl RenderOnce for SidebarToggleButton {
 
         let icon = if collapsed {
             if self.side.is_left() {
-                IconName::PanelLeftOpen
+                IconName::ChevronRight
             } else {
-                IconName::PanelRightOpen
+                IconName::ChevronLeft
             }
         } else {
             if self.side.is_left() {
-                IconName::PanelLeftClose
+                IconName::ChevronLeft
             } else {
-                IconName::PanelRightClose
+                IconName::ChevronRight
             }
         };
 
