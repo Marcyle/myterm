@@ -4009,9 +4009,20 @@ impl TerminalView {
     fn handle_mouse_move(
         &mut self,
         event: &MouseMoveEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // 焦点跟随鼠标：光标移入未聚焦的已连接终端区域时自动聚焦，
+        // 避免分屏/多标签场景下必须点击才能输入。
+        if !self.focus_handle.is_focused(window) {
+            let term = self.terminal.read(cx);
+            if matches!(term.connection_state(), ConnectionState::Connected)
+                && term.ssh_mfa_request().is_none()
+            {
+                self.focus_terminal(window, cx);
+            }
+        }
+
         let bounds = self.terminal_bounds;
         self.mouse_position = Some(event.position);
         let point = self.pixel_to_point(event.position, bounds, cx);

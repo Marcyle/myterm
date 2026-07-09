@@ -2089,7 +2089,11 @@ impl TabContent for HomePage {
     }
 
     fn icon(&self, _cx: &App) -> Option<Icon> {
-        Some(IconName::Home.mono())
+        None
+    }
+
+    fn font_weight(&self, _cx: &App) -> FontWeight {
+        FontWeight::BOLD
     }
 
     fn closeable(&self, _cx: &App) -> bool {

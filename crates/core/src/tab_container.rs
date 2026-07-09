@@ -1,8 +1,8 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyView, App, AppContext as _, Context, Corner, Decorations, Entity, EntityId, EventEmitter,
-    FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton, ParentElement, Render,
-    RenderOnce, SharedString, Styled, Task, Window, WindowControlArea, div, px,
+    FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    Render, RenderOnce, SharedString, Styled, Task, Window, WindowControlArea, div, px,
 };
 use gpui::{ScrollHandle, StatefulInteractiveElement as _};
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -123,6 +123,11 @@ pub trait TabContent: EventEmitter<TabContentEvent> + Render + Focusable {
         None
     }
 
+    /// Get font weight for the tab title
+    fn font_weight(&self, _cx: &App) -> FontWeight {
+        FontWeight::NORMAL
+    }
+
     /// Check if tab can be closed
     fn closeable(&self, cx: &App) -> bool {
         true
@@ -167,6 +172,7 @@ pub trait TabContentView: 'static + Send + Sync {
     fn content_id(&self, cx: &App) -> EntityId;
     fn title(&self, cx: &App) -> SharedString;
     fn icon(&self, cx: &App) -> Option<Icon>;
+    fn font_weight(&self, cx: &App) -> FontWeight;
     fn closeable(&self, cx: &App) -> bool;
     fn on_activate(&self, window: &mut Window, cx: &mut App);
     fn on_deactivate(&self, window: &mut Window, cx: &mut App);
@@ -193,6 +199,10 @@ impl<T: TabContent> TabContentView for Entity<T> {
 
     fn icon(&self, cx: &App) -> Option<Icon> {
         self.read(cx).icon(cx)
+    }
+
+    fn font_weight(&self, cx: &App) -> FontWeight {
+        self.read(cx).font_weight(cx)
     }
 
     fn closeable(&self, cx: &App) -> bool {
@@ -446,6 +456,7 @@ pub struct TabListItem {
     tab_index: usize,
     title: SharedString,
     icon: Option<Icon>,
+    font_weight: FontWeight,
     closeable: bool,
     selected: bool,
     container: Entity<TabContainer>,
@@ -456,6 +467,7 @@ impl TabListItem {
         tab_index: usize,
         title: SharedString,
         icon: Option<Icon>,
+        font_weight: FontWeight,
         closeable: bool,
         selected: bool,
         container: Entity<TabContainer>,
@@ -464,6 +476,7 @@ impl TabListItem {
             tab_index,
             title,
             icon,
+            font_weight,
             closeable,
             selected,
             container,
@@ -524,7 +537,7 @@ impl RenderOnce for TabListItem {
                     this.move_tab(from_index, to_index, cx);
                     this.set_active_index(to_index, window, cx);
                     if let Some(tab_list) = &this.tab_list {
-                        let tabs_data: Vec<(usize, SharedString, Option<Icon>, bool)> = this
+                        let tabs_data: Vec<(usize, SharedString, Option<Icon>, FontWeight, bool)> = this
                             .tabs
                             .iter()
                             .enumerate()
@@ -533,6 +546,7 @@ impl RenderOnce for TabListItem {
                                     idx,
                                     tab.content().title(cx),
                                     tab.content().icon(cx),
+                                    tab.content().font_weight(cx),
                                     tab.content().closeable(cx),
                                 )
                             })
@@ -559,6 +573,7 @@ impl RenderOnce for TabListItem {
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
+                    .font_weight(self.font_weight)
                     .child(self.title),
             )
             .when(self.closeable, |el| {
@@ -592,8 +607,8 @@ impl RenderOnce for TabListItem {
 
 pub struct TabListDelegate {
     container: Entity<TabContainer>,
-    tabs: Vec<(usize, SharedString, Option<Icon>, bool)>,
-    filtered_tabs: Vec<(usize, SharedString, Option<Icon>, bool)>,
+    tabs: Vec<(usize, SharedString, Option<Icon>, FontWeight, bool)>,
+    filtered_tabs: Vec<(usize, SharedString, Option<Icon>, FontWeight, bool)>,
     selected_index: Option<IndexPath>,
 }
 
@@ -613,7 +628,7 @@ impl ListDelegate for TabListDelegate {
             self.filtered_tabs = self
                 .tabs
                 .iter()
-                .filter(|(_, title, _, _)| title.to_lowercase().contains(&query_lower))
+                .filter(|(_, title, _, _, _)| title.to_lowercase().contains(&query_lower))
                 .cloned()
                 .collect();
         }
@@ -631,7 +646,7 @@ impl ListDelegate for TabListDelegate {
         _window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
-        let (tab_index, title, icon, closeable) = self.filtered_tabs.get(ix.row)?.clone();
+        let (tab_index, title, icon, font_weight, closeable) = self.filtered_tabs.get(ix.row)?.clone();
         let active_index = self.container.read(cx).active_index();
         let is_active = tab_index == active_index;
 
@@ -639,6 +654,7 @@ impl ListDelegate for TabListDelegate {
             tab_index,
             title,
             icon,
+            font_weight,
             closeable,
             is_active,
             self.container.clone(),
@@ -661,7 +677,7 @@ impl ListDelegate for TabListDelegate {
         cx: &mut Context<ListState<Self>>,
     ) {
         if let Some(ix) = self.selected_index {
-            if let Some((tab_index, _, _, _)) = self.filtered_tabs.get(ix.row) {
+            if let Some((tab_index, _, _, _, _)) = self.filtered_tabs.get(ix.row) {
                 let tab_index = *tab_index;
                 self.container.update(cx, |this, cx| {
                     this.list_popover_open = false;
@@ -1752,6 +1768,7 @@ impl TabContainer {
                     .children(self.tabs.iter().enumerate().map(|(idx, tab)| {
                         let title = tab.content().title(cx);
                         let icon = tab.content().icon(cx);
+                        let font_weight = tab.content().font_weight(cx);
                         let closeable = tab.content().closeable(cx);
                         let is_active = idx == active_index;
                         let view_clone = view.clone();
@@ -1825,6 +1842,7 @@ impl TabContainer {
                                     .text_sm()
                                     .text_color(text_color)
                                     .text_ellipsis()
+                                    .font_weight(font_weight)
                                     .child(title_clone.to_string()),
                             )
                             .when(closeable, |el| {
@@ -1915,7 +1933,7 @@ impl TabContainer {
                     .on_open_change(cx.listener(move |this, open, window, cx| {
                         this.list_popover_open = *open;
                         if *open {
-                            let tabs_data: Vec<(usize, SharedString, Option<Icon>, bool)> = this
+                            let tabs_data: Vec<(usize, SharedString, Option<Icon>, FontWeight, bool)> = this
                                 .tabs
                                 .iter()
                                 .enumerate()
@@ -1924,6 +1942,7 @@ impl TabContainer {
                                         idx,
                                         tab.content().title(cx),
                                         tab.content().icon(cx),
+                                        tab.content().font_weight(cx),
                                         tab.content().closeable(cx),
                                     )
                                 })
