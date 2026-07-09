@@ -86,6 +86,25 @@ impl PortForwardingRuntime {
         self.dynamic_tunnels.insert(connection_id, tunnel);
         Ok(local_addr)
     }
+
+    pub async fn stop(&mut self, connection_id: i64) -> Result<()> {
+        if let Some(mut tunnel) = self.local_tunnels.remove(&connection_id) {
+            tunnel.close().await
+        } else if let Some(mut tunnel) = self.dynamic_tunnels.remove(&connection_id) {
+            tunnel.close().await
+        } else {
+            bail!("Port Forwarding connection is not running")
+        }
+    }
+
+    pub async fn stop_all(&mut self) {
+        for (_, mut tunnel) in self.local_tunnels.drain() {
+            let _ = tunnel.close().await;
+        }
+        for (_, mut tunnel) in self.dynamic_tunnels.drain() {
+            let _ = tunnel.close().await;
+        }
+    }
 }
 
 pub fn build_local_forwarding_request(

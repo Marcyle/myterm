@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder;
@@ -124,7 +124,7 @@ pub struct HomePage {
     pub(crate) filtered_workspace_ids: HashSet<i64>,
     pub(crate) workspace_filter_open: bool,
     workspace_filter_list: Option<Entity<ListState<WorkspaceFilterDelegate>>>,
-    pub(crate) _subscriptions: Vec<Subscription>,
+    pub(crate) _subscriptions: HashMap<String, Vec<Subscription>>,
     port_forwarding_runtime: Arc<tokio::sync::Mutex<PortForwardingRuntime>>,
     master_key_dialog_open: bool,
     master_key_unlock_prompt_pending: bool,
@@ -182,7 +182,7 @@ impl HomePage {
             filtered_workspace_ids: HashSet::new(),
             workspace_filter_open: false,
             workspace_filter_list: None,
-            _subscriptions: Vec::new(),
+            _subscriptions: HashMap::new(),
             port_forwarding_runtime: Arc::new(
                 tokio::sync::Mutex::new(PortForwardingRuntime::new()),
             ),
@@ -255,12 +255,31 @@ impl HomePage {
                 TabContainerEvent::TabDuplicated { index } => {
                     this.duplicate_tab_by_index(*index, window, cx);
                 }
+                TabContainerEvent::TabClosed { id } => {
+                    this.cleanup_tab_subscriptions(id);
+                }
                 _ => {}
             },
         )
         .detach();
 
         page
+    }
+
+    pub(crate) fn store_tab_subscription(
+        &mut self,
+        tab_id: &str,
+        subscription: Subscription,
+    ) {
+        self._subscriptions
+            .entry(tab_id.to_string())
+            .or_default()
+            .push(subscription);
+    }
+
+    pub(crate) fn cleanup_tab_subscriptions(&mut self,
+        tab_id: &str) {
+        self._subscriptions.remove(tab_id);
     }
 
     fn load_workspaces(&mut self, cx: &mut Context<Self>) {
@@ -949,6 +968,61 @@ impl HomePage {
         .detach();
     }
 
+    pub(crate) fn stop_port_forwarding(
+        &mut self,
+        connection: StoredConnection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let connection_name = connection.name.clone();
+        let Some(connection_id) = connection.id else {
+            window.push_notification(
+                t!(
+                    "Home.port_forwarding_stop_failed",
+                    error = "missing connection id"
+                )
+                .to_string(),
+                cx,
+            );
+            return;
+        };
+
+        let runtime = Arc::clone(&self.port_forwarding_runtime);
+        cx.spawn(async move |_this, cx: &mut AsyncApp| {
+            let result = {
+                let mut runtime = runtime.lock().await;
+                runtime.stop(connection_id).await
+            };
+
+            match result {
+                Ok(()) => {
+                    let _ = cx.update(|cx| {
+                        cx.global_mut::<ActiveConnections>().remove(connection_id);
+                    });
+                    push_notification_on_active_window(
+                        t!(
+                            "Home.port_forwarding_stopped",
+                            name = connection_name
+                        )
+                        .to_string(),
+                        cx,
+                    );
+                }
+                Err(error) => {
+                    push_notification_on_active_window(
+                        t!(
+                            "Home.port_forwarding_stop_failed",
+                            error = error.to_string()
+                        )
+                        .to_string(),
+                        cx,
+                    );
+                }
+            }
+        })
+        .detach();
+    }
+
     pub(crate) fn ensure_master_key_ready_for_new_connection(
         &mut self,
         window: &mut Window,
@@ -1453,13 +1527,7 @@ impl HomePage {
             .header(
                 h_flex()
                     .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .when(!collapsed, |this| this.child(t!("Home.title"))),
-                    )
+                    .justify_center()
                     .child(
                         SidebarToggleButton::new()
                             .collapsed(collapsed)
@@ -1876,6 +1944,21 @@ impl HomePage {
                     .on_click(cx.listener(move |this, _, window, cx| {
                         cx.stop_propagation();
                         this.open_sftp_view(sftp_conn.clone(), window, cx);
+                    })),
+            );
+        }
+
+        if conn.connection_type == ConnectionType::PortForwarding && is_active {
+            let stop_conn = conn.clone();
+            card = card.action(
+                Button::new(SharedString::from(format!("stop-conn-{}", card_id)))
+                    .icon(IconName::Stop.mono())
+                    .with_size(Size::Small)
+                    .danger()
+                    .tooltip(t!("PortForwarding.stop"))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.stop_port_forwarding(stop_conn.clone(), window, cx);
                     })),
             );
         }

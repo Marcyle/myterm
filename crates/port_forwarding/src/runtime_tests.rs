@@ -3,7 +3,7 @@ use one_core::storage::{
     StoredConnection,
 };
 
-use crate::{build_dynamic_forwarding_request, build_local_forwarding_request};
+use crate::{build_dynamic_forwarding_request, build_local_forwarding_request, PortForwardingRuntime};
 
 fn ssh_connection(id: i64) -> StoredConnection {
     let mut connection = StoredConnection::new_ssh(
@@ -99,7 +99,7 @@ fn local_request_rejects_non_port_forwarding_connection() {
 #[test]
 fn local_request_rejects_non_ssh_reference() {
     let mut reference = ssh_connection(7);
-    reference.connection_type = ConnectionType::Database;
+    reference.connection_type = ConnectionType::Jms;
 
     let error = match build_local_forwarding_request(&local_forwarding_connection(7), &reference) {
         Ok(_) => panic!("expected non SSH/SFTP reference to fail"),
@@ -119,4 +119,20 @@ fn dynamic_request_uses_referenced_ssh_connection_and_bind_params() {
     assert_eq!(request.bind_port, 1080);
     assert_eq!(request.ssh_config.host, "bastion.example.com");
     assert_eq!(request.ssh_config.username, "deploy");
+}
+
+#[tokio::test]
+async fn stop_returns_error_when_not_running() {
+    let mut runtime = PortForwardingRuntime::new();
+    let result = runtime.stop(123).await;
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("not running"));
+}
+
+#[tokio::test]
+async fn stop_all_is_no_op_when_no_tunnels() {
+    let mut runtime = PortForwardingRuntime::new();
+    runtime.stop_all().await;
+    assert!(!runtime.is_running(1));
+    assert!(!runtime.is_running(2));
 }

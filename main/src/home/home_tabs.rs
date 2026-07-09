@@ -145,7 +145,7 @@ impl HomePage {
                     })
         });
 
-        self.subscribe_pane_area_events(&pane_area, window, cx);
+        self.subscribe_pane_area_events(&tab_id, &pane_area, window, cx);
 
         self.tab_container.update(cx, |tc, cx| {
             let tab = TabItem::new(tab_id, "ssh", pane_area);
@@ -153,8 +153,7 @@ impl HomePage {
         });
     }
 
-    /// 用于在异步/静态上下文中订阅 TerminalPaneArea 事件。
-
+    #[allow(dead_code)]
     pub(crate) fn open_jms_koko_placeholder_terminal(
         &mut self,
         jms_context: terminal_view::JmsSidebarContext,
@@ -184,7 +183,7 @@ impl HomePage {
             TerminalPaneArea::new_jms_koko_placeholder(Some(jms_context), tab_index, window, cx)
         });
 
-        self.subscribe_pane_area_events(&pane_area, window, cx);
+        self.subscribe_pane_area_events(&tab_id, &pane_area, window, cx);
 
         self.tab_container.update(cx, |tc, cx| {
             let tab = TabItem::new(tab_id, "ssh", pane_area);
@@ -192,8 +191,10 @@ impl HomePage {
         });
     }
 
+    /// 用于在异步/静态上下文中订阅 TerminalPaneArea 事件。
     fn subscribe_pane_area_events(
         &mut self,
+        tab_id: &str,
         pane_area: &Entity<TerminalPaneArea>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -212,7 +213,7 @@ impl HomePage {
                 _ => {}
             },
         );
-        self._subscriptions.push(sub);
+        self.store_tab_subscription(tab_id, sub);
     }
 
     fn handle_split_pane_request(
@@ -310,7 +311,7 @@ impl HomePage {
                 let pane_index = request.pane_index;
                 let pane_area_for_async = pane_area.clone();
 
-                cx.spawn(async move |this, cx: &mut AsyncApp| {
+                cx.spawn(async move |_this, cx: &mut AsyncApp| {
                     let result = cx
                         .background_executor()
                         .spawn(async move {
@@ -434,7 +435,7 @@ impl HomePage {
                     })
         });
 
-        self.subscribe_pane_area_events(&pane_area, window, cx);
+        self.subscribe_pane_area_events(&tab_id, &pane_area, window, cx);
 
         self.tab_container.update(cx, |tc, cx| {
             let tab = TabItem::new(tab_id, "ssh", pane_area);
@@ -575,7 +576,7 @@ impl HomePage {
                 }
             },
         );
-        self._subscriptions.push(subscription);
+        self.store_tab_subscription(&tab_id, subscription);
 
         // 添加标签页
         let tab = TabItem::new(tab_id, "sftp", sftp_view);

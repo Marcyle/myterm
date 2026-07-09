@@ -4253,6 +4253,8 @@ pub enum TerminalViewEvent {
     TogglePaneZoom,
     /// 请求 HomePage 代为创建并插入 SSH/JMS 终端 pane
     RequestSplitPane(SplitPaneRequest),
+    /// 终端 pane 已从 Dock 布局中移除
+    Closed,
 }
 
 impl EventEmitter<TerminalViewEvent> for TerminalView {}
@@ -4262,6 +4264,10 @@ impl EventEmitter<PanelEvent> for TerminalView {}
 impl Panel for TerminalView {
     fn panel_name(&self) -> &'static str {
         "Terminal"
+    }
+
+    fn on_removed(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(TerminalViewEvent::Closed);
     }
 
     fn title(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

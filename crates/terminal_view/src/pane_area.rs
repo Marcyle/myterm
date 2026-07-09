@@ -1,5 +1,5 @@
 use gpui::{
-    App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
+    App, AppContext, Context, Entity, EntityId, EventEmitter, FocusHandle, Focusable, IntoElement,
     ParentElement, Render, SharedString, Styled, Subscription, Task, Window, actions, div,
 };
 use gpui_component::{
@@ -11,6 +11,7 @@ use gpui_component::{
 use rust_i18n::t;
 use one_core::tab_container::{TabContent, TabContentEvent};
 use std::sync::{Arc, Mutex as StdMutex};
+use std::collections::HashMap;
 
 use terminal::LocalConfig;
 use terminal::terminal::TerminalConnectionKind;
@@ -39,7 +40,7 @@ pub struct TerminalPaneArea {
     focus_handle: FocusHandle,
     zoomed: bool,
     on_request_split: Option<Arc<dyn Fn(SplitPaneRequest, &mut Window, &mut App, &Entity<TerminalPaneArea>) + 'static>>,
-    _subscriptions: Vec<Subscription>,
+    _subscriptions: HashMap<EntityId, Vec<Subscription>>,
     next_pane_index: usize,
 }
 
@@ -127,11 +128,15 @@ impl TerminalPaneArea {
         });
 
         // 把子终端的分屏/打开新 JMS 终端等事件进行处理或向上冒泡
+        let terminal_id = terminal.entity_id();
         let jms_subscription = cx.subscribe_in(
             &terminal,
             window,
-            |this, _, event: &TerminalViewEvent, window, cx| {
+            |this, source, event: &TerminalViewEvent, window, cx| {
                 match event {
+                    TerminalViewEvent::Closed => {
+                        this.remove_terminal_subscriptions(source.entity_id());
+                    }
                     TerminalViewEvent::OpenJmsTerminal(params, ctx) => {
                         cx.emit(TerminalViewEvent::OpenJmsTerminal(params.clone(), ctx.clone()));
                     }
@@ -166,14 +171,29 @@ impl TerminalPaneArea {
             }
         });
 
+        let mut _subscriptions = HashMap::new();
+        _subscriptions.insert(terminal_id, vec![jms_subscription, title_subscription]);
+
         Self {
             dock_area,
             focus_handle,
             zoomed: false,
             on_request_split: None,
-            _subscriptions: vec![jms_subscription, title_subscription],
+            _subscriptions,
             next_pane_index: 1,
         }
+    }
+
+    fn store_terminal_subscriptions(
+        &mut self,
+        terminal_id: EntityId,
+        subscriptions: Vec<Subscription>,
+    ) {
+        self._subscriptions.insert(terminal_id, subscriptions);
+    }
+
+    fn remove_terminal_subscriptions(&mut self, terminal_id: EntityId) {
+        self._subscriptions.remove(&terminal_id);
     }
 
     /// 设置 SSH/JMS 分屏请求的外部处理回调。
@@ -420,11 +440,15 @@ impl TerminalPaneArea {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let terminal_id = terminal.entity_id();
         let jms_subscription = cx.subscribe_in(
             terminal,
             window,
-            |this, _, event: &TerminalViewEvent, window, cx| {
+            |this, source, event: &TerminalViewEvent, window, cx| {
                 match event {
+                    TerminalViewEvent::Closed => {
+                        this.remove_terminal_subscriptions(source.entity_id());
+                    }
                     TerminalViewEvent::OpenJmsTerminal(params, ctx) => {
                         cx.emit(TerminalViewEvent::OpenJmsTerminal(params.clone(), ctx.clone()));
                     }
@@ -456,8 +480,7 @@ impl TerminalPaneArea {
                 cx.emit(TabContentEvent::StateChanged);
             }
         });
-        self._subscriptions.push(jms_subscription);
-        self._subscriptions.push(title_subscription);
+        self.store_terminal_subscriptions(terminal_id, vec![jms_subscription, title_subscription]);
     }
 
     /// 公开：将当前焦点 pane 水平分屏（pane 在右）。

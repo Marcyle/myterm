@@ -58,9 +58,9 @@ Common:
 # 首页
 Home:
   title:
-    en: Home
-    zh-CN: 首页
-    zh-HK: 首頁
+    en: MyTerm
+    zh-CN: MyTerm
+    zh-HK: MyTerm
   search_placeholder:
     en: "Search connections..."
     zh-CN: 搜索连接...
@@ -81,6 +81,14 @@ Home:
     en: Referenced SSH server was not found.
     zh-CN: 找不到引用的 SSH 服务器。
     zh-HK: 找不到引用的 SSH 伺服器。
+  port_forwarding_stopped:
+    en: "Port Forwarding %{name} stopped"
+    zh-CN: "端口转发 %{name} 已停止"
+    zh-HK: "端口轉發 %{name} 已停止"
+  port_forwarding_stop_failed:
+    en: "Port Forwarding %{name} stop failed: %{error}"
+    zh-CN: "端口转发 %{name} 停止失败：%{error}"
+    zh-HK: "端口轉發 %{name} 停止失敗：%{error}"
   connection_count:
     en: "%{count} connections"
     zh-CN: "%{count} 个连接"
@@ -590,6 +598,10 @@ PortForwarding:
     en: Edit Port Forwarding
     zh-CN: 编辑端口转发
     zh-HK: 編輯端口轉發
+  stop:
+    en: Stop forwarding
+    zh-CN: 停止转发
+    zh-HK: 停止轉發
 
 # 远程桌面连接表单
 RemoteDesktopForm:
