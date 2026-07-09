@@ -633,24 +633,18 @@ impl HomePage {
             None
         };
 
-        let tab_container = self.tab_container.clone();
-        let home = cx.entity();
-        window.defer(cx, move |window, cx| {
-            home.update(cx, |_this, cx| {
-                let home_for_cb = cx.entity().clone();
-                let pane_area = cx.new(|cx| {
-                    TerminalPaneArea::new_local(config, tab_index, window, cx)
-                        .on_request_split(move |request, window, cx, pane_area| {
-                            let _ = home_for_cb.update(cx, |this, cx| {
-                                this.handle_split_pane_request_with_pane(pane_area, &request, window, cx);
-                            });
-                        })
-                });
-                tab_container.update(cx, |tc, cx| {
-                    let tab = TabItem::new(tab_id, "home", pane_area);
-                    tc.add_and_activate_tab_with_focus(tab, window, cx);
-                });
-            });
+        let home_for_cb = cx.entity().clone();
+        let pane_area = cx.new(|cx| {
+            TerminalPaneArea::new_local(config, tab_index, window, cx)
+                .on_request_split(move |request, window, cx, pane_area| {
+                    let _ = home_for_cb.update(cx, |this, cx| {
+                        this.handle_split_pane_request_with_pane(pane_area, &request, window, cx);
+                    });
+                })
+        });
+        self.tab_container.update(cx, |tc, cx| {
+            let tab = TabItem::new(tab_id, "home", pane_area);
+            tc.add_and_activate_tab_with_focus(tab, window, cx);
         });
     }
 

@@ -6,7 +6,7 @@ use alacritty_terminal::tty::{self, Options as PtyOptions};
 use alacritty_terminal::vte::ansi::{NamedColor, Rgb};
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc as std_mpsc};
 use std::thread;
 use std::thread::JoinHandle;
 use tokio::sync::mpsc::UnboundedSender;
@@ -109,8 +109,24 @@ impl LocalPtyBackend {
             window_size.cell_height
         );
 
-        let pty = tty::new(&pty_options, window_size, 0)?;
-        let event_loop = EventLoop::new(term, event_proxy.clone(), pty, true, false)?;
+        // Windows 上 CreateProcessW 启动 WindowsApps 应用（如 PowerShell 7）时，
+        // 可能同步派发 Windows 消息并触发 GPUI 窗口过程重入。若在 UI 事件处理中
+        // 直接调用 tty::new，重入的 frame callback 会尝试再次借用 AppCell，导致
+        // `RefCell already borrowed` panic。因此把 PTY/EventLoop 创建移到独立线程。
+        let (tx, rx) = std_mpsc::channel::<anyhow::Result<EventLoop<_, _>>>();
+        let event_proxy_for_thread = event_proxy.clone();
+        thread::spawn(move || {
+            let result = (|| -> anyhow::Result<_> {
+                let pty = tty::new(&pty_options, window_size, 0)?;
+                let event_loop = EventLoop::new(term, event_proxy_for_thread, pty, true, false)?;
+                Ok(event_loop)
+            })();
+            let _ = tx.send(result);
+        });
+
+        let event_loop = rx
+            .recv()
+            .map_err(|_| anyhow::anyhow!("PTY 创建线程异常退出"))??;
         let event_loop_sender = event_loop.channel();
 
         // 设置 PtyWrite 回写通道，使 DA 等终端响应能写回 PTY
