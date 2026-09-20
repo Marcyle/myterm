@@ -1,0 +1,35 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+
+const configPath = new URL("../.vitepress/config.mts", import.meta.url);
+
+async function readConfig() {
+  return readFile(configPath, "utf8");
+}
+
+test("站点配置切换为 MyTerm 品牌和 GitHub Pages 路径", async () => {
+  const config = await readConfig();
+
+  assert.match(config, /title:\s*"MyTerm"/);
+  assert.match(config, /base:\s*"\/myterm\/"/);
+  assert.match(config, /description:[\s\S]*数据库/);
+});
+
+test("导航包含官网最小页面集合", async () => {
+  const config = await readConfig();
+
+  for (const text of ["首页", "功能", "下载", "更新日志", "文档"]) {
+    assert.match(config, new RegExp(`text:\\s*"${text}"`));
+  }
+});
+
+test("导航文档链接、仓库链接和搜索配置符合官网用途", async () => {
+  const config = await readConfig();
+
+  assert.match(config, /link:\s*"\/guide"/);
+  assert.match(config, /feigeCode\/myterm/);
+  assert.match(config, /edit\/dev\/docs\/:path/);
+  assert.doesNotMatch(config, /hufei\/myterm/);
+  assert.doesNotMatch(config, /provider:\s*"local"/);
+});

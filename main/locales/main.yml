@@ -1,0 +1,1352 @@
+_version: 2
+
+# 通用文本
+Common:
+  ok:
+    en: OK
+    zh-CN: 好
+    zh-HK: 好
+  new:
+    en: New
+    zh-CN: 新建
+    zh-HK: 新建
+  edit:
+    en: Edit
+    zh-CN: 编辑
+    zh-HK: 編輯
+  delete:
+    en: Delete
+    zh-CN: 删除
+    zh-HK: 刪除
+  save:
+    en: Save
+    zh-CN: 保存
+    zh-HK: 保存
+  cancel:
+    en: Cancel
+    zh-CN: 取消
+    zh-HK: 取消
+  confirm:
+    en: Confirm
+    zh-CN: 确认
+    zh-HK: 確認
+  close:
+    en: Close
+    zh-CN: 关闭
+    zh-HK: 關閉
+  settings:
+    en: Settings
+    zh-CN: 设置
+    zh-HK: 設定
+  more:
+    en: More
+    zh-CN: 更多
+    zh-HK: 更多
+  next:
+    en: Next
+    zh-CN: 下一步
+    zh-HK: 下一步
+  previous:
+    en: Previous
+    zh-CN: 上一步
+    zh-HK: 上一步
+  none:
+    en: None
+    zh-CN: 无
+    zh-HK: 無
+
+# 首页
+Home:
+  title:
+    en: MyTerm
+    zh-CN: MyTerm
+    zh-HK: MyTerm
+  search_placeholder:
+    en: "Search connections..."
+    zh-CN: 搜索连接...
+    zh-HK: 搜尋連線...
+  new_connection:
+    en: New Connection
+    zh-CN: 新建连接
+    zh-HK: 新建連線
+  more_actions:
+    en: More actions
+    zh-CN: 更多操作
+    zh-HK: 更多操作
+  jms_connection:
+    en: JMS Connection
+    zh-CN: JMS 连接
+    zh-HK: JMS 連線
+  port_forwarding_started:
+    en: "Port Forwarding %{name} started on %{addr}"
+    zh-CN: "端口转发 %{name} 已启动：%{addr}"
+    zh-HK: "端口轉發 %{name} 已啟動：%{addr}"
+  port_forwarding_failed:
+    en: "Port Forwarding %{name} failed: %{error}"
+    zh-CN: "端口转发 %{name} 启动失败：%{error}"
+    zh-HK: "端口轉發 %{name} 啟動失敗：%{error}"
+  port_forwarding_missing_ssh:
+    en: Referenced SSH server was not found.
+    zh-CN: 找不到引用的 SSH 服务器。
+    zh-HK: 找不到引用的 SSH 伺服器。
+  port_forwarding_stopped:
+    en: "Port Forwarding %{name} stopped"
+    zh-CN: "端口转发 %{name} 已停止"
+    zh-HK: "端口轉發 %{name} 已停止"
+  port_forwarding_stop_failed:
+    en: "Port Forwarding %{name} stop failed: %{error}"
+    zh-CN: "端口转发 %{name} 停止失败：%{error}"
+    zh-HK: "端口轉發 %{name} 停止失敗：%{error}"
+  connection_count:
+    en: "%{count} connections"
+    zh-CN: "%{count} 个连接"
+    zh-HK: "%{count} 個連線"
+  unassigned_workspace:
+    en: Unassigned Workspace
+    zh-CN: 未分配工作区
+    zh-HK: 未分配工作區
+  switch_theme:
+    en: Switch Theme
+    zh-CN: 切换主题
+    zh-HK: 切換主題
+  import:
+    en: Import
+    zh-CN: 导入
+    zh-HK: 導入
+  refresh:
+    en: Refresh
+    zh-CN: 刷新
+    zh-HK: 刷新
+  cloud_loading:
+    en: Loading cloud connections...
+    zh-CN: 加载云端连接中...
+    zh-HK: 載入雲端連線中...
+  cloud_login:
+    en: Login
+    zh-CN: 登录
+    zh-HK: 登入
+  import_success:
+    en: "Successfully imported %{count} connections"
+    zh-CN: "成功导入 %{count} 个连接"
+    zh-HK: "成功導入 %{count} 個連線"
+  cloud_need_login:
+    en: Please login first to access cloud repository
+    zh-CN: 请先登录以访问云端仓库
+    zh-HK: 請先登入以訪問雲端倉庫
+  cloud_empty:
+    en: No connections in cloud repository
+    zh-CN: 云端仓库中没有连接
+    zh-HK: 雲端倉庫中沒有連線
+  sync:
+    en: Sync
+    zh-CN: 同步
+    zh-HK: 同步
+  syncing:
+    en: Syncing...
+    zh-CN: 同步中...
+    zh-HK: 同步中...
+  sync_tooltip:
+    en: Sync data with cloud
+    zh-CN: 与云端同步数据
+    zh-HK: 與雲端同步數據
+  conflict_tooltip:
+    en: "%{count} sync conflicts need to be resolved"
+    zh-CN: "%{count} 个同步冲突需要解决"
+    zh-HK: "%{count} 個同步衝突需要解決"
+  sync_conflict_type:
+    en: "Conflict type: %{conflict_type}"
+    zh-CN: "冲突类型: %{conflict_type}"
+    zh-HK: "衝突類型: %{conflict_type}"
+  sync_conflict_dialog_title:
+    en: "Sync conflicts (%{count})"
+    zh-CN: "同步冲突（%{count} 个）"
+    zh-HK: "同步衝突（%{count} 個）"
+  sync_conflict_apply_all:
+    en: "After selecting a resolution strategy, it will be applied to all conflicts automatically."
+    zh-CN: "选择解决策略后，将自动应用到所有冲突"
+    zh-HK: "選擇解決策略後，將自動套用到所有衝突"
+  sync_conflict_use_cloud:
+    en: Use cloud version
+    zh-CN: 使用云端版本
+    zh-HK: 使用雲端版本
+  sync_conflict_use_local:
+    en: Use local version
+    zh-CN: 使用本地版本
+    zh-HK: 使用本地版本
+  sync_conflict_keep_both:
+    en: Keep both versions
+    zh-CN: 保留两个版本
+    zh-HK: 保留兩個版本
+  sync_conflict_apply:
+    en: Apply
+    zh-CN: 应用
+    zh-HK: 套用
+  ai_assistant:
+    en: AI Assistant
+    zh-CN: AI 助手
+    zh-HK: AI 助手
+  open_sftp:
+    en: Open SFTP
+    zh-CN: 打开 SFTP
+    zh-HK: 打開 SFTP
+  open_connection:
+    en: Open Connection
+    zh-CN: 打开连接
+    zh-HK: 開啟連線
+  extensions:
+    en: Extensions
+    zh-CN: 扩展
+    zh-HK: 擴展
+  edit_connection:
+    en: Edit Connection
+    zh-CN: 编辑连接
+    zh-HK: 編輯連線
+  duplicate_connection:
+    en: Duplicate Connection
+    zh-CN: 复制连接
+    zh-HK: 複製連線
+  delete_connection:
+    en: Delete Connection
+    zh-CN: 删除连接
+    zh-HK: 刪除連線
+  team_badge:
+    en: Team
+    zh-CN: 团队
+    zh-HK: 團隊
+  no_connections:
+    en: No connections found
+    zh-CN: 没有找到连接
+    zh-HK: 沒有找到連線
+  no_connections_hint:
+    en: Try adjusting your search or create a new connection.
+    zh-CN: 尝试调整搜索条件，或新建一个连接。
+    zh-HK: 嘗試調整搜尋條件，或新增一個連線。
+  no_connections_empty:
+    en: No connections yet
+    zh-CN: 还没有连接
+    zh-HK: 尚未有連線
+  no_connections_empty_hint:
+    en: Create your first connection to get started.
+    zh-CN: 新建一个连接即可开始使用。
+    zh-HK: 新增一個連線即可開始使用。
+  no_connections_search:
+    en: No matching connections
+    zh-CN: 没有匹配的连接
+    zh-HK: 沒有符合的連線
+  no_connections_search_hint:
+    en: Try a different search or clear the active filters.
+    zh-CN: 尝试其他搜索条件，或清除当前筛选。
+    zh-HK: 嘗試其他搜尋條件，或清除目前篩選。
+  clear_filters:
+    en: Clear filters
+    zh-CN: 清除筛选
+    zh-HK: 清除篩選
+  duplicate_name:
+    en: "%{name} (Copy)"
+    zh-CN: "%{name} (副本)"
+    zh-HK: "%{name} (副本)"
+  duplicate_name_numbered:
+    en: "%{name} (Copy %{index})"
+    zh-CN: "%{name} (副本 %{index})"
+    zh-HK: "%{name} (副本 %{index})"
+
+# 用户认证
+Auth:
+  login:
+    en: Login
+    zh-CN: 登录
+    zh-HK: 登入
+  logout:
+    en: Logout
+    zh-CN: 退出登录
+    zh-HK: 登出
+  email:
+    en: Email
+    zh-CN: 邮箱
+    zh-HK: 電郵
+  email_placeholder:
+    en: Enter your email
+    zh-CN: 输入您的邮箱
+    zh-HK: 輸入您的電郵
+  email_required:
+    en: Please enter your email
+    zh-CN: 请输入邮箱
+    zh-HK: 請輸入電郵
+  password:
+    en: Password
+    zh-CN: 密码
+    zh-HK: 密碼
+  password_placeholder:
+    en: Enter your password
+    zh-CN: 输入您的密码
+    zh-HK: 輸入您的密碼
+  login_failed:
+    en: "Login failed: %{error}"
+    zh-CN: "登录失败: %{error}"
+    zh-HK: "登入失敗: %{error}"
+  logging_in:
+    en: Logging in...
+    zh-CN: 登录中...
+    zh-HK: 登入中...
+  not_logged_in:
+    en: Not logged in
+    zh-CN: 未登录
+    zh-HK: 未登入
+  profile:
+    en: Profile
+    zh-CN: 个人资料
+    zh-HK: 個人資料
+  sign_up:
+    en: Sign Up
+    zh-CN: 注册
+    zh-HK: 註冊
+  switch_to_sign_up:
+    en: No account? Sign up
+    zh-CN: 没有账号？注册
+    zh-HK: 沒有帳號？註冊
+  switch_to_login:
+    en: Already have an account? Login
+    zh-CN: 已有账号？登录
+    zh-HK: 已有帳號？登入
+  sign_up_failed:
+    en: "Sign up failed: %{error}"
+    zh-CN: "注册失败: %{error}"
+    zh-HK: "註冊失敗: %{error}"
+  signing_up:
+    en: Signing up...
+    zh-CN: 注册中...
+    zh-HK: 註冊中...
+  confirm_password:
+    en: Confirm Password
+    zh-CN: 确认密码
+    zh-HK: 確認密碼
+  confirm_password_placeholder:
+    en: Enter your password again
+    zh-CN: 再次输入您的密码
+    zh-HK: 再次輸入您的密碼
+  password_mismatch:
+    en: Passwords do not match
+    zh-CN: 两次输入的密码不一致
+    zh-HK: 兩次輸入的密碼不一致
+  email_confirmation_required:
+    en: "Please check your email (%{email}) to confirm your account"
+    zh-CN: "请检查您的邮箱（%{email}）以确认您的账号"
+    zh-HK: "請檢查您的電郵（%{email}）以確認您的帳號"
+  auth_error_title:
+    en: Authentication Failed
+    zh-CN: 认证失败
+    zh-HK: 認證失敗
+  # OTP 相关
+  otp_placeholder:
+    en: Enter verification code
+    zh-CN: 输入验证码
+    zh-HK: 輸入驗證碼
+  otp_code:
+    en: Verification Code
+    zh-CN: 验证码
+    zh-HK: 驗證碼
+  otp_required:
+    en: Please enter the verification code
+    zh-CN: 请输入验证码
+    zh-HK: 請輸入驗證碼
+  send_otp:
+    en: Send Code
+    zh-CN: 发送验证码
+    zh-HK: 發送驗證碼
+  sending_otp:
+    en: Sending...
+    zh-CN: 发送中...
+    zh-HK: 發送中...
+  resend_otp:
+    en: Resend Code
+    zh-CN: 重新发送
+    zh-HK: 重新發送
+  verify_otp:
+    en: Verify Code
+    zh-CN: 验证
+    zh-HK: 驗證
+  otp_sent_hint:
+    en: A verification code has been sent to your email
+    zh-CN: 验证码已发送到您的邮箱
+    zh-HK: 驗證碼已發送到您的電郵
+  change_email:
+    en: Change email
+    zh-CN: 更换邮箱
+    zh-HK: 更換電郵
+
+# 主密钥
+Encryption:
+  edit_repo_password:
+    en: Edit Master Key
+    zh-CN: 编辑主密钥
+    zh-HK: 編輯主密鑰
+  set_repo_password:
+    en: Set Master Key
+    zh-CN: 设置主密钥
+    zh-HK: 設置主密鑰
+  unlock_repo_password:
+    en: Unlock
+    zh-CN: 解锁
+    zh-HK: 解鎖
+  change_repo_password:
+    en: Change Master Key
+    zh-CN: 修改主密钥
+    zh-HK: 修改主密鑰
+  repo_password_label:
+    en: "Master Key:"
+    zh-CN: "主密钥："
+    zh-HK: "主密鑰："
+  repo_password_placeholder:
+    en: Enter your master key
+    zh-CN: 输入您的主密钥
+    zh-HK: 輸入您的主密鑰
+  old_password_label:
+    en: "Old Master Key:"
+    zh-CN: "旧主密钥："
+    zh-HK: "舊主密鑰："
+  old_password_placeholder:
+    en: Enter your old master key
+    zh-CN: 输入旧主密钥
+    zh-HK: 輸入舊主密鑰
+  new_password_label:
+    en: "New Master Key:"
+    zh-CN: "新主密钥："
+    zh-HK: "新主密鑰："
+  new_password_placeholder:
+    en: Enter your new master key
+    zh-CN: 输入新主密钥
+    zh-HK: 輸入新主密鑰
+  remember_password_title:
+    en: "Please remember your master key"
+    zh-CN: "请牢记你的主密钥"
+    zh-HK: "請牢記你的主密鑰"
+  remember_password_detail_local:
+    en: "The master key encrypts all locally stored sensitive data such as database passwords, SSH keys, etc., preventing data leakage even if local files are compromised."
+    zh-CN: "主密钥会对本地存储的所有敏感数据（如数据库密码、SSH 密钥等）进行加密，即使本地文件被窃取也无法获取明文信息。"
+    zh-HK: "主密鑰會對本地存儲的所有敏感數據（如數據庫密碼、SSH 密鑰等）進行加密，即使本地文件被竊取也無法獲取明文信息。"
+  remember_password_detail_cloud:
+    en: "All data is encrypted locally before being pushed to the cloud. The cloud server only stores encrypted strings and cannot decrypt the content. If the master key is forgotten, the cloud data cannot be recovered."
+    zh-CN: "所有数据在本地加密后才会推送到云端，云端服务器仅存储密文，无法解密内容。主密钥一旦遗忘，云端数据将无法恢复。"
+    zh-HK: "所有數據在本地加密後才會推送到雲端，雲端服務器僅存儲密文，無法解密內容。主密鑰一旦遺忘，雲端數據將無法恢復。"
+  key_empty:
+    en: "Master key cannot be empty"
+    zh-CN: "主密钥不能为空"
+    zh-HK: "主密鑰不能為空"
+  key_mismatch:
+    en: "The two keys do not match"
+    zh-CN: "两次输入的密钥不一致"
+    zh-HK: "兩次輸入的密鑰不一致"
+  password_incorrect:
+    en: "Incorrect master key"
+    zh-CN: "主密钥错误"
+    zh-HK: "主密鑰錯誤"
+  confirm_password_placeholder:
+    en: Confirm your master key
+    zh-CN: 确认您的主密钥
+    zh-HK: 確認您的主密鑰
+  confirm_password_label:
+    en: "Confirm Master Key:"
+    zh-CN: "确认主密钥："
+    zh-HK: "確認主密鑰："
+  key_unlocked:
+    en: Unlocked
+    zh-CN: 已解锁
+    zh-HK: 已解鎖
+  key_unlocked_tooltip:
+    en: Master key is unlocked, click to change
+    zh-CN: 主密钥已解锁，点击修改
+    zh-HK: 主密鑰已解鎖，點擊修改
+  key_locked_tooltip:
+    en: Master key is locked, click to unlock
+    zh-CN: 主密钥已锁定，点击解锁
+    zh-HK: 主密鑰已鎖定，點擊解鎖
+
+# 视图模式
+ViewMode:
+  workspace:
+    en: Workspace View
+    zh-CN: 工作区视图
+    zh-HK: 工作區視圖
+  single_database:
+    en: Single Database View
+    zh-CN: 单库视图
+    zh-HK: 單庫視圖
+
+# 工作区
+Workspace:
+  label:
+    en: Workspace
+    zh-CN: 工作区
+    zh-HK: 工作區
+  name_placeholder:
+    en: Workspace name
+    zh-CN: 工作区名称
+    zh-HK: 工作區名稱
+  new:
+    en: New Workspace
+    zh-CN: 新建工作区
+    zh-HK: 新建工作區
+  edit:
+    en: Edit Workspace
+    zh-CN: 编辑工作区
+    zh-HK: 編輯工作區
+  delete:
+    en: Delete Workspace
+    zh-CN: 删除工作区
+    zh-HK: 刪除工作區
+  delete_confirm:
+    en: "Are you sure you want to delete workspace \"%{workspace_name}\"?"
+    zh-CN: "确定要删除工作区 \"%{workspace_name}\" 吗？"
+    zh-HK: "確定要刪除工作區 \"%{workspace_name}\" 嗎？"
+  filter:
+    en: Workspace Filter
+    zh-CN: 工作区过滤
+    zh-HK: 工作區過濾
+  select_all:
+    en: Select All
+    zh-CN: 全选
+    zh-HK: 全選
+  clear_filter:
+    en: Clear Filter
+    zh-CN: 清除筛选
+    zh-HK: 清除篩選
+
+# 连接
+Connection:
+  new:
+    en: "New %{db_type} Connection"
+    zh-CN: "新建 %{db_type} 连接"
+    zh-HK: "新建 %{db_type} 連線"
+  edit:
+    en: "Edit %{db_type} Connection"
+    zh-CN: "编辑 %{db_type} 连接"
+    zh-HK: "編輯 %{db_type} 連線"
+  test:
+    en: Test
+    zh-CN: 测试
+    zh-HK: 測試
+  testing:
+    en: Testing...
+    zh-CN: 测试中...
+    zh-HK: 測試中...
+  edit_connection:
+    en: Edit Connection
+    zh-CN: 编辑连接
+    zh-HK: 編輯連線
+  delete_connection:
+    en: Delete Connection
+    zh-CN: 删除连接
+    zh-HK: 刪除連線
+  delete_confirm:
+    en: "Are you sure you want to delete connection \"%{conn_name}\"?"
+    zh-CN: "确定要删除连接 \"%{conn_name}\" 吗？"
+    zh-HK: "確定要刪除連線 \"%{conn_name}\" 嗎？"
+  in_use_title:
+    en: Connection in Use
+    zh-CN: 连接正在使用中
+    zh-HK: 連線正在使用中
+  in_use_cannot_edit:
+    en: "Connection \"%{conn_name}\" is in use and cannot be edited.\n\nPlease close the connection first before editing."
+    zh-CN: "连接 \"%{conn_name}\" 正在使用中，无法编辑。\n\n请先关闭该连接后再进行编辑。"
+    zh-HK: "連線 \"%{conn_name}\" 正在使用中，無法編輯。\n\n請先關閉該連線後再進行編輯。"
+  in_use_cannot_delete:
+    en: "Connection \"%{conn_name}\" is in use and must be closed before deletion.\n\nPlease close the connection first before deleting."
+    zh-CN: "连接 \"%{conn_name}\" 正在使用中，删除前需要先关闭该连接。\n\n请先关闭该连接后再进行删除。"
+    zh-HK: "連線 \"%{conn_name}\" 正在使用中，刪除前需要先關閉該連線。\n\n請先關閉該連線後再進行刪除。"
+
+# 新建连接
+NewConnection:
+  category_all:
+    en: All
+    zh-CN: 全部
+    zh-HK: 全部
+  category_database:
+    en: Database
+    zh-CN: 数据库
+    zh-HK: 資料庫
+  category_domestic_database:
+    en: Domestic Database
+    zh-CN: 国产数据库
+    zh-HK: 國產資料庫
+  category_terminal:
+    en: Terminal
+    zh-CN: 终端
+    zh-HK: 終端
+  select_type_title:
+    en: Select connection type
+    zh-CN: 选择连接类型
+    zh-HK: 選擇連線類型
+  select_type_hint:
+    en: Select a type, then click Next, or double-click to open the connection form.
+    zh-CN: 单击选择后点击下一步，或双击直接进入连接表单。
+    zh-HK: 單擊選擇後點擊下一步，或雙擊直接進入連線表單。
+  description_ssh:
+    en: Remote server terminal and file connection
+    zh-CN: 远程服务器终端与文件连接
+    zh-HK: 遠端伺服器終端與檔案連線
+  description_jms:
+    en: JumpServer asset and terminal connection
+    zh-CN: JumpServer 资产与终端连接
+    zh-HK: JumpServer 資產與終端連線
+  description_terminal:
+    en: Open a local terminal tab
+    zh-CN: 打开一个本地终端标签页
+    zh-HK: 開啟一個本機終端標籤頁
+  description_rdp:
+    en: Remote Desktop Protocol connection
+    zh-CN: 远程桌面协议连接
+    zh-HK: 遠端桌面協議連線
+  description_vnc:
+    en: Virtual Network Computing connection
+    zh-CN: VNC 远程桌面连接
+    zh-HK: VNC 遠端桌面連線
+  description_redis:
+    en: Redis standalone, sentinel, or cluster connection
+    zh-CN: Redis 单机、哨兵或集群连接
+    zh-HK: Redis 單機、哨兵或叢集連線
+  description_mongodb:
+    en: MongoDB database connection
+    zh-CN: MongoDB 数据库连接
+    zh-HK: MongoDB 資料庫連線
+  description_serial:
+    en: Serial device connection
+    zh-CN: 串口设备连接
+    zh-HK: 串口裝置連線
+  description_port_forwarding:
+    en: SSH local port forwarding or SOCKS tunnel
+    zh-CN: SSH 本地端口转发或 SOCKS 隧道
+    zh-HK: SSH 本地端口轉發或 SOCKS 隧道
+  description_database:
+    en: Relational database connection
+    zh-CN: 关系型数据库连接
+    zh-HK: 關聯式資料庫連線
+
+PortForwarding:
+  new:
+    en: Port Forwarding
+    zh-CN: 端口转发
+    zh-HK: 端口轉發
+  edit:
+    en: Edit Port Forwarding
+    zh-CN: 编辑端口转发
+    zh-HK: 編輯端口轉發
+  stop:
+    en: Stop forwarding
+    zh-CN: 停止转发
+    zh-HK: 停止轉發
+
+# 远程桌面连接表单
+RemoteDesktopForm:
+  title_new:
+    en: "New %{protocol} Connection"
+    zh-CN: "新建 %{protocol} 连接"
+    zh-HK: "新建 %{protocol} 連線"
+  title_edit:
+    en: "Edit %{protocol} Connection"
+    zh-CN: "编辑 %{protocol} 连接"
+    zh-HK: "編輯 %{protocol} 連線"
+  label_name:
+    en: Name
+    zh-CN: 名称
+    zh-HK: 名稱
+  label_host:
+    en: Host
+    zh-CN: 主机
+    zh-HK: 主機
+  label_port:
+    en: Port
+    zh-CN: 端口
+    zh-HK: 連接埠
+  label_username:
+    en: Username
+    zh-CN: 用户名
+    zh-HK: 用戶名
+  label_password:
+    en: Password
+    zh-CN: 密码
+    zh-HK: 密碼
+  label_domain:
+    en: Domain
+    zh-CN: 域
+    zh-HK: 網域
+  label_workspace:
+    en: Workspace
+    zh-CN: 工作区
+    zh-HK: 工作區
+  label_team:
+    en: Team
+    zh-CN: 团队
+    zh-HK: 團隊
+  label_read_only:
+    en: Read only
+    zh-CN: 只读
+    zh-HK: 唯讀
+  placeholder_name:
+    en: Windows Server
+    zh-CN: Windows 服务器
+    zh-HK: Windows 伺服器
+  placeholder_password:
+    en: Password
+    zh-CN: 密码
+    zh-HK: 密碼
+  placeholder_domain:
+    en: Optional domain
+    zh-CN: 可选域
+    zh-HK: 可選網域
+  host_required:
+    en: Host is required
+    zh-CN: 请输入主机地址
+    zh-HK: 請輸入主機地址
+  invalid_number:
+    en: "%{field} is invalid"
+    zh-CN: "%{field} 无效"
+    zh-HK: "%{field} 無效"
+
+# 连接表单通用字段
+# 设置页面
+Settings:
+  title:
+    en: Settings
+    zh-CN: 设置
+    zh-HK: 設定
+
+  # 通用设置组
+  General:
+    title:
+      en: General
+      zh-CN: 通用
+      zh-HK: 通用
+
+    # 语言设置
+    Language:
+      group_title:
+        en: Language
+        zh-CN: 语言
+        zh-HK: 語言
+      ui_language:
+        en: Interface Language
+        zh-CN: 界面语言
+        zh-HK: 介面語言
+      ui_language_desc:
+        en: Switch the interface display language, some content requires restarting the application to take effect
+        zh-CN: 切换界面显示语言，部分内容需要重启应用后生效
+        zh-HK: 切換介面顯示語言，部分內容需要重啟應用後生效
+      zh_cn:
+        en: Simplified Chinese
+        zh-CN: 简体中文
+        zh-HK: 簡體中文
+      zh_hk:
+        en: Traditional Chinese
+        zh-CN: 繁體中文
+        zh-HK: 繁體中文
+      en:
+        en: English
+        zh-CN: English
+        zh-HK: English
+
+    # 外观设置
+    Appearance:
+      group_title:
+        en: Appearance
+        zh-CN: 外观
+        zh-HK: 外觀
+      dark_mode:
+        en: Dark Mode
+        zh-CN: 深色模式
+        zh-HK: 深色模式
+      dark_mode_desc:
+        en: Switch between light and dark themes
+        zh-CN: 在浅色和深色主题之间切换
+        zh-HK: 在淺色和深色主題之間切換
+
+    # 字体设置
+    Font:
+      group_title:
+        en: Font
+        zh-CN: 字体
+        zh-HK: 字型
+      font_family:
+        en: Font Family
+        zh-CN: 字体系列
+        zh-HK: 字型系列
+      font_family_desc:
+        en: Select the application font family
+        zh-CN: 选择应用的字体系列
+        zh-HK: 選擇應用的字型系列
+      font_size:
+        en: Font Size
+        zh-CN: 字体大小
+        zh-HK: 字型大小
+      font_size_desc:
+        en: Adjust font size for better readability (8-72)
+        zh-CN: 调整字体大小以获得更好的可读性（8-72）
+        zh-HK: 調整字型大小以獲得更好的可讀性（8-72）
+
+    # 终端设置
+    Terminal:
+      group_title:
+        en: Terminal
+        zh-CN: 终端
+        zh-HK: 終端
+      font_size:
+        en: Terminal Font Size
+        zh-CN: 终端字体大小
+        zh-HK: 終端字型大小
+      font_size_desc:
+        en: Adjust terminal font size (8-72)
+        zh-CN: 调整终端字体大小（8-72）
+        zh-HK: 調整終端字型大小（8-72）
+      font_family:
+        en: Terminal Font Family
+        zh-CN: 终端字体
+        zh-HK: 終端字型
+      font_family_desc:
+        en: Select the terminal monospace font family
+        zh-CN: 选择终端使用的等宽字体
+        zh-HK: 選擇終端使用的等寬字型
+      font_weight:
+        en: Terminal Font Weight
+        zh-CN: 终端字体字重
+        zh-HK: 終端字型字重
+      font_weight_desc:
+        en: Adjust font weight / thickness for the terminal
+        zh-CN: 调整终端文字粗细（细/正常/中等/粗）
+        zh-HK: 調整終端文字粗細（細/正常/中等/粗）
+      auto_copy:
+        en: Auto copy on select
+        zh-CN: 选中自动复制
+        zh-HK: 選中自動複製
+      auto_copy_desc:
+        en: Automatically copy selected terminal text
+        zh-CN: 选中文本后自动复制到剪贴板
+        zh-HK: 選中文本後自動複製到剪貼簿
+      autocomplete:
+        en: Terminal autocomplete
+        zh-CN: 终端自动补全
+        zh-HK: 終端自動補全
+      autocomplete_desc:
+        en: Show history suggestions and search completion in supported terminals
+        zh-CN: 在支持的终端中显示历史建议和搜索补全
+        zh-HK: 在支援的終端中顯示歷史建議和搜尋補全
+      middle_click_paste:
+        en: Middle click paste
+        zh-CN: 中键粘贴
+        zh-HK: 中鍵貼上
+      middle_click_paste_desc:
+        en: Paste clipboard content with middle mouse button
+        zh-CN: 使用鼠标中键粘贴剪贴板内容
+        zh-HK: 使用滑鼠中鍵貼上剪貼簿內容
+
+    Log:
+      group_title:
+        en: Log
+        zh-CN: 日志
+        zh-HK: 日誌
+      file_path:
+        en: Log File Path
+        zh-CN: 日志保存路径
+        zh-HK: 日誌保存路徑
+      file_path_desc:
+        en: Leave empty to write logs to the default config directory logs folder. Restart the app after changing this path.
+        zh-CN: 留空时写入默认配置目录下的 logs 文件夹，修改后重启应用生效。
+        zh-HK: 留空時寫入默認配置目錄下的 logs 文件夾，修改後重啟應用生效。
+
+    Proxy:
+      group_title:
+        en: Proxy
+        zh-CN: 代理
+        zh-HK: 代理
+      title:
+        en: Global Proxy
+        zh-CN: 全局代理
+        zh-HK: 全局代理
+      description:
+        en: Configure a shared network proxy for HTTP requests across the app
+        zh-CN: 为应用内 HTTP 请求配置统一代理
+        zh-HK: 為應用內 HTTP 請求配置統一代理
+      open:
+        en: Configure
+        zh-CN: 配置
+        zh-HK: 配置
+      dialog_title:
+        en: Global Proxy Settings
+        zh-CN: 全局代理设置
+        zh-HK: 全局代理設置
+      dialog_desc:
+        en: Set one shared proxy endpoint for update checks, authentication, cloud sync, and other HTTP requests.
+        zh-CN: 为更新检查、认证、云同步及其他 HTTP 请求统一配置代理出口。
+        zh-HK: 為更新檢查、認證、雲同步及其他 HTTP 請求統一配置代理出口。
+      enable:
+        en: Enable Global Proxy
+        zh-CN: 启用全局代理
+        zh-HK: 啟用全局代理
+      type:
+        en: Proxy Type
+        zh-CN: 代理类型
+        zh-HK: 代理類型
+      host:
+        en: Host
+        zh-CN: 代理地址
+        zh-HK: 代理地址
+      port:
+        en: Port
+        zh-CN: 端口
+        zh-HK: 端口
+      username:
+        en: Username
+        zh-CN: 用户名（可选）
+        zh-HK: 用戶名（可選）
+      password:
+        en: Password
+        zh-CN: 密码（可选）
+        zh-HK: 密碼（可選）
+      username_placeholder:
+        en: proxy-user
+        zh-CN: proxy-user
+        zh-HK: proxy-user
+      password_placeholder:
+        en: proxy-password
+        zh-CN: proxy-password
+        zh-HK: proxy-password
+      test:
+        en: Test Connection
+        zh-CN: 测试连接
+        zh-HK: 測試連接
+      testing:
+        en: Testing...
+        zh-CN: 测试中...
+        zh-HK: 測試中...
+      test_success:
+        en: Proxy connection test passed
+        zh-CN: 代理连接测试成功
+        zh-HK: 代理連接測試成功
+      save_success:
+        en: Global proxy settings applied
+        zh-CN: 全局代理设置已生效
+        zh-HK: 全局代理設置已生效
+
+  # 快捷键
+  Shortcuts:
+    title:
+      en: Shortcuts
+      zh-CN: 快捷键
+      zh-HK: 快捷鍵
+    system_hotkey:
+      en: System Hotkey
+      zh-CN: 系统热键
+      zh-HK: 系統熱鍵
+    system_hotkey_desc:
+      en: Customize shortcuts with keystroke syntax like cmd-alt-m or ctrl-space. Invalid input is ignored.
+      zh-CN: 使用类似 cmd-alt-m 或 ctrl-space 的快捷键格式自定义快捷键。非法输入不会保存。
+      zh-HK: 使用類似 cmd-alt-m 或 ctrl-space 的快捷鍵格式自定義快捷鍵。非法輸入不會保存。
+    press_shortcut:
+      en: Press shortcut
+      zh-CN: 按下快捷键
+      zh-HK: 按下快捷鍵
+    invalid_hotkey:
+      en: Invalid shortcut
+      zh-CN: 快捷键不可用
+      zh-HK: 快捷鍵不可用
+    reset:
+      en: Reset
+      zh-CN: 重置
+      zh-HK: 重置
+    window:
+      en: Window Management
+      zh-CN: 窗口管理
+      zh-HK: 視窗管理
+    quit_app:
+      en: Quit Application
+      zh-CN: 退出应用
+      zh-HK: 結束應用程式
+    tabs:
+      en: Tabs
+      zh-CN: 标签页
+      zh-HK: 標籤頁
+    connection_dialog:
+      en: New Connection Dialog
+      zh-CN: 新建连接弹窗
+      zh-HK: 新建連線彈窗
+    terminal:
+      en: Terminal
+      zh-CN: 终端
+      zh-HK: 終端
+    minimize_window:
+      en: Minimize / Activate Window
+      zh-CN: 最小化 / 激活窗口
+      zh-HK: 最小化 / 啟用視窗
+    toggle_fullscreen:
+      en: Toggle Fullscreen
+      zh-CN: 切换全屏
+      zh-HK: 切換全螢幕
+    toggle_zoom:
+      en: Toggle Panel Zoom
+      zh-CN: 切换面板缩放
+      zh-HK: 切換面板縮放
+    close_panel:
+      en: Close Panel
+      zh-CN: 关闭面板
+      zh-HK: 關閉面板
+    switch_tab_n:
+      en: "Switch to Tab N"
+      zh-CN: "切换到第 N 个标签页"
+      zh-HK: "切換到第 N 個標籤頁"
+    duplicate_tab:
+      en: Duplicate Tab
+      zh-CN: 复制标签页
+      zh-HK: 複製標籤頁
+    quick_open:
+      en: Quick Open Connection
+      zh-CN: 快速打开连接
+      zh-HK: 快速打開連線
+    new_connection:
+      en: New Connection
+      zh-CN: 新建连接
+      zh-HK: 新建連線
+    connection_previous_type:
+      en: Previous Connection Type
+      zh-CN: 上一个连接类型
+      zh-HK: 上一個連線類型
+    connection_next_type:
+      en: Next Connection Type
+      zh-CN: 下一个连接类型
+      zh-HK: 下一個連線類型
+    connection_open_type:
+      en: Open Selected Type
+      zh-CN: 打开选中类型
+      zh-HK: 打開選中類型
+    terminal_send_tab:
+      en: Send Tab
+      zh-CN: 发送 Tab
+      zh-HK: 發送 Tab
+    terminal_send_shift_tab:
+      en: Send Shift+Tab
+      zh-CN: 发送 Shift+Tab
+      zh-HK: 發送 Shift+Tab
+    terminal_copy:
+      en: Copy
+      zh-CN: 复制
+      zh-HK: 複製
+    terminal_paste:
+      en: Paste
+      zh-CN: 粘贴
+      zh-HK: 貼上
+    terminal_search:
+      en: Search
+      zh-CN: 搜索
+      zh-HK: 搜尋
+    terminal_search_previous:
+      en: Previous Search Match
+      zh-CN: 上一个搜索结果
+      zh-HK: 上一個搜尋結果
+    terminal_select_all:
+      en: Select All
+      zh-CN: 全选
+      zh-HK: 全選
+    terminal_clear_screen:
+      en: Clear Screen
+      zh-CN: 清屏
+      zh-HK: 清屏
+    terminal_clear_selection:
+      en: Clear Selection
+      zh-CN: 清除选区
+      zh-HK: 清除選區
+    terminal_zoom_in:
+      en: Zoom In
+      zh-CN: 放大字体
+      zh-HK: 放大字型
+    terminal_zoom_out:
+      en: Zoom Out
+      zh-CN: 缩小字体
+      zh-HK: 縮小字型
+    terminal_zoom_reset:
+      en: Reset Font Size
+      zh-CN: 重置字体
+      zh-HK: 重設字型
+    terminal_toggle_vi:
+      en: Toggle Vi Mode
+      zh-CN: 切换 Vi 模式
+      zh-HK: 切換 Vi 模式
+
+  # 关于页面
+  About:
+    title:
+      en: About
+      zh-CN: 关于
+      zh-HK: 關於
+    version:
+      en: "Version"
+      zh-CN: "版本"
+      zh-HK: "版本"
+    disclaimer_title:
+      en: "Disclaimer (Beta)"
+      zh-CN: "免责声明（测试版）"
+      zh-HK: "免責聲明（測試版）"
+    disclaimer_status:
+      en: "This software is currently an open-source beta version, not a stable commercial release. It may contain unknown bugs, compatibility issues, connection anomalies, or potential security risks."
+      zh-CN: "本软件目前为开源测试版本，非稳定商业版，可能存在未知 Bug、兼容性问题、连接异常或潜在安全风险。"
+      zh-HK: "本軟件目前為開源測試版本，非穩定商業版，可能存在未知 Bug、兼容性問題、連線異常或潛在安全風險。"
+    disclaimer_item_1:
+      en: "This software is provided \"as is\" without any express or implied warranties, including but not limited to stability, security, or fitness for a particular purpose."
+      zh-CN: "本软件按\"现状\"提供，无任何明示或默示担保，包括但不限于稳定性、安全性、适用性。"
+      zh-HK: "本軟件按\"現狀\"提供，無任何明示或默示擔保，包括但不限於穩定性、安全性、適用性。"
+    disclaimer_item_2:
+      en: "You assume all risks arising from the use of this software, including but not limited to: data loss, service interruption, connection anomalies, information leakage, or business losses."
+      zh-CN: "你自行承担使用本软件导致的一切风险，包括但不限于：数据丢失、服务中断、连接异常、信息泄露、业务损失。"
+      zh-HK: "你自行承擔使用本軟件導致的一切風險，包括但不限於：數據丟失、服務中斷、連線異常、信息洩露、業務損失。"
+    disclaimer_item_3:
+      en: "This software may only be used for servers/databases that you have legal management rights to. Unauthorized access is strictly prohibited."
+      zh-CN: "本软件仅用于你有权管理的合法服务器/数据库，禁止用于未授权访问。"
+      zh-HK: "本軟件僅用於你有權管理的合法伺服器/資料庫，禁止用於未授權訪問。"
+    disclaimer_item_4:
+      en: "The author and contributors shall not be liable for any direct or indirect losses."
+      zh-CN: "作者与贡献者不对任何直接或间接损失承担法律责任。"
+      zh-HK: "作者與貢獻者不對任何直接或間接損失承擔法律責任。"
+    disclaimer_item_5:
+      en: "By using this software, you acknowledge that you have read, understood, and fully agree to this disclaimer."
+      zh-CN: "使用即表示你已阅读、理解并完全同意本声明。"
+      zh-HK: "使用即表示你已閱讀、理解並完全同意本聲明。"
+    data_safety_title:
+      en: "Data & Security Notice"
+      zh-CN: "数据与安全提示"
+      zh-HK: "數據與安全提示"
+    data_safety_item_1:
+      en: "Please back up important data and connection credentials on your own."
+      zh-CN: "请自行备份重要数据与连接凭证。"
+      zh-HK: "請自行備份重要數據與連線憑證。"
+    data_safety_item_2:
+      en: "Use with caution in production environments; test in a staging environment first."
+      zh-CN: "生产环境谨慎使用，建议先在测试环境验证。"
+      zh-HK: "生產環境謹慎使用，建議先在測試環境驗證。"
+    data_safety_item_3:
+      en: "Please evaluate storage risks for sensitive information (passwords, keys) on your own."
+      zh-CN: "敏感信息（密码、密钥）请自行评估存储风险。"
+      zh-HK: "敏感信息（密碼、密鑰）請自行評估存儲風險。"
+    opensource_label:
+      en: "Open Source"
+      zh-CN: "开源地址"
+      zh-HK: "開源地址"
+
+  # 账户设置
+  Account:
+    title:
+      en: Account
+      zh-CN: 账户
+      zh-HK: 帳戶
+    username:
+      en: "Username:"
+      zh-CN: "用户名："
+      zh-HK: "用戶名："
+    email:
+      en: "Email:"
+      zh-CN: "邮箱："
+      zh-HK: "電郵："
+    not_logged_in:
+      en: Not logged in. Please log in from the sidebar to manage your account.
+      zh-CN: 未登录。请在侧边栏登录以管理您的账户。
+      zh-HK: 未登入。請在側邊欄登入以管理您的帳戶。
+
+# 应用更新
+Update:
+  title:
+    en: New version available
+    zh-CN: 发现新版本
+    zh-HK: 发现新版本
+  message:
+    en: "Version %{latest} is available (current %{current}). Update now?"
+    zh-CN: "已发布新版本 %{latest}（当前 %{current}），是否立即更新？"
+    zh-HK: "已發布新版本 %{latest}（當前 %{current}），是否立即更新？"
+  action_download:
+    en: Download Update
+    zh-CN: 下载更新
+    zh-HK: 下載更新
+  action_install:
+    en: Update Now
+    zh-CN: 立即更新
+    zh-HK: 立即更新
+  action_downloading:
+    en: Downloading...
+    zh-CN: 下载中...
+    zh-HK: 下載中...
+  action_applying:
+    en: Updating...
+    zh-CN: 更新中...
+    zh-HK: 更新中...
+  later:
+    en: Later
+    zh-CN: 稍后再说
+    zh-HK: 稍后再说
+  release_notes:
+    en: Release Notes
+    zh-CN: 更新内容
+    zh-HK: 更新内容
+  ready:
+    en: Ready to download the update.
+    zh-CN: 准备开始下载更新。
+    zh-HK: 準備開始下載更新。
+  downloading:
+    en: Downloading the update. Please wait...
+    zh-CN: 正在下载更新，请稍候...
+    zh-HK: 正在下載更新，請稍候...
+  download_complete:
+    en: Download complete. Click "Update Now" to start installing.
+    zh-CN: 下载完成，请点击“立即更新”开始安装。
+    zh-HK: 下載完成，請點擊「立即更新」開始安裝。
+  applying:
+    en: Installing the update. Please wait...
+    zh-CN: 正在安装更新，请稍候...
+    zh-HK: 正在安裝更新，請稍候...
+  download_failed:
+    en: Download failed. Please try again.
+    zh-CN: 下载失败，请重试。
+    zh-HK: 下載失敗，請重試。
+  apply_failed:
+    en: Update failed. Please try again later.
+    zh-CN: 更新失败，请稍后重试。
+    zh-HK: 更新失敗，請稍後重試。
+  error_prefix:
+    en: Error
+    zh-CN: 错误
+    zh-HK: 錯誤
+  missing_download_url:
+    en: Download URL is missing. The update cannot continue.
+    zh-CN: 缺少下载地址，无法更新。
+    zh-HK: 缺少下載地址，無法更新。
+  missing_download_file:
+    en: Downloaded file was not found. Please download the update again.
+    zh-CN: 未找到下载文件，请重新下载后再更新。
+    zh-HK: 未找到下載文件，請重新下載後再更新。
+  downloading_blocked:
+    en: Update download is in progress. Please close this later.
+    zh-CN: 正在下载更新，请稍后关闭。
+    zh-HK: 正在下載更新，請稍後關閉。
+  network_check_failed:
+    en: Network check failed
+    zh-CN: 网络检查失败
+    zh-HK: 網絡檢查失敗
+  network_unreachable:
+    en: Unable to connect to the update server. Please check your network connection.
+    zh-CN: 无法连接到更新服务器，请检查网络连接。
+    zh-HK: 無法連接到更新伺服器，請檢查網絡連接。
+  github_service_unavailable:
+    en: GitHub service is temporarily unavailable, please try again later.
+    zh-CN: GitHub 服务暂时不可用，请稍后重试。
+    zh-HK: GitHub 服務暫時不可用，請稍後重試。
+  already_up_to_date:
+    en: You are already on the latest version.
+    zh-CN: 当前已经是最新版本。
+    zh-HK: 當前已經是最新版本。
+  check_failed:
+    en: Update check failed
+    zh-CN: 检查更新失败
+    zh-HK: 檢查更新失敗
+  open_release_page:
+    en: Open release page to download manually
+    zh-CN: 打开发布页面手动下载
+    zh-HK: 打開發布頁面手動下載
+
+# 终端设置
+Settings.General.Terminal:
+  group_title:
+    en: Terminal
+    zh-CN: 终端
+    zh-HK: 終端
+  font_size:
+    en: Terminal Font Size
+    zh-CN: 终端字体大小
+    zh-HK: 終端字型大小
+  font_size_desc:
+    en: Font size for the terminal emulator
+    zh-CN: 终端模拟器的字体大小
+    zh-HK: 終端模擬器的字型大小
+  font_family:
+    en: Terminal Font Family
+    zh-CN: 终端字体
+    zh-HK: 終端字型
+  font_family_desc:
+    en: Monospace font for the terminal
+    zh-CN: 终端使用的等宽字体
+    zh-HK: 終端使用的等寬字型
+  cursor_blink:
+    en: Cursor Blink
+    zh-CN: 光标闪烁
+    zh-HK: 游標閃爍
+  cursor_blink_desc:
+    en: Blinking cursor in terminal
+    zh-CN: 终端光标闪烁效果
+    zh-HK: 終端游標閃爍效果
+  auto_copy:
+    en: Auto Copy on Select
+    zh-CN: 选中自动复制
+    zh-HK: 選中自動複製
+  auto_copy_desc:
+    en: Automatically copy selected text to clipboard
+    zh-CN: 选中文本自动复制到剪贴板
+    zh-HK: 選中文本自動複製到剪貼板
+  autocomplete:
+    en: Autocomplete
+    zh-CN: 自动补全
+    zh-HK: 自動補全
+  autocomplete_desc:
+    en: Enable terminal command autocompletion
+    zh-CN: 启用终端命令自动补全
+    zh-HK: 啟用終端命令自動補全
+  middle_click_paste:
+    en: Middle Click Paste
+    zh-CN: 中键粘贴
+    zh-HK: 中鍵貼上
+  middle_click_paste_desc:
+    en: Paste on middle mouse click
+    zh-CN: 鼠标中键点击粘贴
+    zh-HK: 滑鼠中鍵點擊貼上
+  confirm_high_risk:
+    en: Confirm High-Risk Command
+    zh-CN: 高危命令确认
+    zh-HK: 高危命令確認
+  confirm_high_risk_desc:
+    en: Require confirmation for high-risk commands
+    zh-CN: 高危命令执行前需要确认
+    zh-HK: 高危命令執行前需要確認
+  high_risk_patterns:
+    en: Custom High-Risk Commands
+    zh-CN: 自定义高危命令
+    zh-HK: 自訂高危命令
+  high_risk_patterns_desc:
+    en: Configure regular expressions checked before pasted commands are sent
+    zh-CN: 配置粘贴命令发送前检查的正则表达式
+    zh-HK: 設定貼上命令傳送前檢查的正則表達式
+  high_risk_patterns_open:
+    en: Configure
+    zh-CN: 配置
+    zh-HK: 設定
+  high_risk_patterns_title:
+    en: Custom High-Risk Commands
+    zh-CN: 自定义高危命令
+    zh-HK: 自訂高危命令
+  high_risk_patterns_placeholder:
+    en: One regular expression per line
+    zh-CN: 每行一个正则表达式
+    zh-HK: 每行一個正則表達式
+  high_risk_patterns_invalid:
+    en: One or more regular expressions are invalid
+    zh-CN: 一个或多个正则表达式无效
+    zh-HK: 一個或多個正則表達式無效
+  sync_path:
+    en: Sync Path with File Manager
+    zh-CN: 与文件管理器同步路径
+    zh-HK: 與檔案管理器同步路徑
+  sync_path_desc:
+    en: Sync terminal working directory to file manager
+    zh-CN: 将终端工作目录同步到文件管理器
+    zh-HK: 將終端工作目錄同步到檔案管理器
+  local:
+    en: Local Terminal
+    zh-CN: 本地终端
+    zh-HK: 本地終端
+
+
+Serial:
+  new:
+    en: Serial
+    zh-CN: 串口
+    zh-HK: 串口

@@ -1,0 +1,15 @@
+_version: 2
+
+Common:
+  save:
+    en: "Save"
+    zh-CN: "保存"
+    zh-HK: "保存"
+  cancel:
+    en: "Cancel"
+    zh-CN: "取消"
+    zh-HK: "取消"
+  search:
+    en: "Search..."
+    zh-CN: "搜索..."
+    zh-HK: "搜尋..."

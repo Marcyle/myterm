@@ -1,0 +1,6486 @@
+use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::index::{Column, Line, Point as AlacPoint, Side};
+use alacritty_terminal::selection::SelectionType;
+use alacritty_terminal::term::TermMode;
+use gpui::prelude::FluentBuilder;
+use gpui::*;
+use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::dialog::DialogButtonProps;
+use gpui_component::dock::{Panel, PanelEvent, PanelInfo, PanelState, TabPanel, register_panel};
+use gpui_component::input::{Input, InputState};
+use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
+use gpui_component::notification::Notification;
+use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
+use gpui_component::{
+    BlinkCursor, Icon, IconName, Sizable, Size, WindowExt, h_flex, kbd::Kbd, v_flex,
+};
+use lru::LruCache;
+use one_core::gpui_tokio::Tokio;
+use one_core::keybindings::{
+    action_id, keystroke_matches_shortcuts, rebind_keybindings, shortcuts_for,
+};
+use one_core::settings::AppSettings;
+use std::borrow::Cow;
+use std::cell::{Cell as StdCell, RefCell};
+use std::collections::VecDeque;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::Duration;
+
+use crate::addon::{
+    AddonManager, CustomHighlightAddon, SearchAddon, TerminalAddonFrameContext,
+    TerminalAddonMouseContext, register_default_addons,
+};
+use crate::cd_completion::{
+    CdCompletionQuery, build_cd_completion_suggestions, parse_cd_completion_query,
+};
+use crate::history_prompt::{HistoryPromptAccept, HistoryPromptMode, HistoryPromptState};
+use crate::settings::{
+    GlobalTerminalLocalSettings, TerminalHighlightRule, TerminalSettings, TerminalSettingsEvent,
+    current_settings, update_settings,
+};
+use crate::sidebar::{SidebarPanel, TerminalSidebar, TerminalSidebarEvent};
+use crate::terminal_element::{
+    RenderCache, TERMINAL_SURFACE_MAX_COLS, TERMINAL_SURFACE_MAX_LINES, TerminalElement,
+};
+use crate::theme::{
+    DEFAULT_LINE_HEIGHT_SCALE, MAX_FONT_SIZE, MIN_FONT_SIZE, TerminalTheme, default_font_fallbacks,
+};
+use jms;
+use one_core::layout::{SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
+use one_core::storage::models::{ActiveConnections, StoredConnection};
+use one_core::storage::traits::Repository;
+use one_core::storage::{ConnectionRepository, GlobalStorageState};
+use one_core::tab_container::{TabContent, TabContentEvent};
+use one_ui::resize_handle::{HandlePlacement, ResizePanel, resize_handle};
+use rust_i18n::t;
+use sftp::{RusshSftpClient, SftpClient};
+use std::ops::Deref;
+use terminal::LocalConfig;
+use terminal::terminal::{
+    ConnectionState, Terminal, TerminalConnectionKind, TerminalModelEvent, TerminalScrollProxy,
+    resolve_local_working_dir,
+};
+use tokio::sync::Mutex;
+
+actions!(
+    terminal_view,
+    [
+        SendTab,
+        SendShiftTab,
+        Copy,
+        Paste,
+        SelectAll,
+        ClearSelection,
+        ClearScreen,
+        SearchForward,
+        SearchBackward,
+        ToggleViMode,
+        ViModeStartSelection,
+        IncreaseFont,
+        DecreaseFont,
+        ResetFont,
+    ]
+);
+
+const TERMINAL_CONTEXT: &str = "TerminalView";
+
+/// Hard bounds for a terminal surface.  These prevent a transient GPUI layout
+/// value from turning into an unbounded alacritty/render-cache allocation.
+const TERMINAL_MIN_COLS: usize = 2;
+const TERMINAL_MIN_ROWS: usize = 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TerminalSurfaceSize {
+    cols: usize,
+    rows: usize,
+    pixel_width: u16,
+    pixel_height: u16,
+}
+
+impl TerminalSurfaceSize {
+    fn from_bounds(
+        bounds: Bounds<Pixels>,
+        cell_width: Pixels,
+        line_height: Pixels,
+    ) -> Option<Self> {
+        let bounds_w = f32::from(bounds.size.width);
+        let bounds_h = f32::from(bounds.size.height);
+        let cell_w = f32::from(cell_width);
+        let cell_h = f32::from(line_height);
+
+        if !bounds_w.is_finite()
+            || !bounds_h.is_finite()
+            || !cell_w.is_finite()
+            || !cell_h.is_finite()
+            || bounds_w <= 0.0
+            || bounds_h <= 0.0
+            || cell_w <= 0.0
+            || cell_h <= 0.0
+        {
+            return None;
+        }
+
+        let raw_cols = (bounds_w / cell_w).floor() as usize;
+        let raw_rows = (bounds_h / cell_h).floor() as usize;
+        let cols = raw_cols.clamp(TERMINAL_MIN_COLS, TERMINAL_SURFACE_MAX_COLS);
+        let rows = raw_rows.clamp(TERMINAL_MIN_ROWS, TERMINAL_SURFACE_MAX_LINES);
+
+        // Once a grid dimension is capped, report only the matching pixel
+        // extent. This keeps the PTY's cell geometry aligned with what the
+        // renderer can actually display.
+        let pixel_width = if raw_cols != cols {
+            (cols as f32 * cell_w).round()
+        } else {
+            bounds_w.round()
+        };
+        let pixel_height = if raw_rows != rows {
+            (rows as f32 * cell_h).round()
+        } else {
+            bounds_h.round()
+        };
+
+        Some(Self {
+            cols,
+            rows,
+            pixel_width: pixel_width.clamp(0.0, u16::MAX as f32) as u16,
+            pixel_height: pixel_height.clamp(0.0, u16::MAX as f32) as u16,
+        })
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn current_rss_bytes() -> Option<u64> {
+    use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+    use windows::Win32::System::Threading::GetCurrentProcess;
+
+    let mut counters = PROCESS_MEMORY_COUNTERS::default();
+    counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    let counters_size = counters.cb;
+    let ok = unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters_size) };
+    ok.is_ok().then_some(counters.WorkingSetSize as u64)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn current_rss_bytes() -> Option<u64> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+const TERMINAL_COPY_SHORTCUT: &str = "cmd-c";
+#[cfg(not(target_os = "macos"))]
+const TERMINAL_COPY_SHORTCUT: &str = "ctrl-shift-c";
+#[cfg(target_os = "macos")]
+const TERMINAL_PASTE_SHORTCUT: &str = "cmd-v";
+#[cfg(not(target_os = "macos"))]
+const TERMINAL_PASTE_SHORTCUT: &str = "ctrl-shift-v";
+#[cfg(target_os = "macos")]
+const TERMINAL_SELECT_ALL_SHORTCUT: &str = "cmd-a";
+#[cfg(not(target_os = "macos"))]
+const TERMINAL_SELECT_ALL_SHORTCUT: &str = "ctrl-shift-a";
+#[cfg(target_os = "macos")]
+const TERMINAL_CLEAR_SCREEN_SHORTCUT: &str = "cmd-k";
+#[cfg(not(target_os = "macos"))]
+const TERMINAL_CLEAR_SCREEN_SHORTCUT: &str = "ctrl-l";
+#[cfg(target_os = "macos")]
+const TERMINAL_SEARCH_FORWARD_SHORTCUT: &str = "cmd-f";
+#[cfg(not(target_os = "macos"))]
+const TERMINAL_SEARCH_FORWARD_SHORTCUT: &str = "ctrl-shift-f";
+#[cfg(target_os = "macos")]
+const TERMINAL_SEARCH_BACKWARD_SHORTCUT: &str = "cmd-g";
+#[cfg(not(target_os = "macos"))]
+const TERMINAL_SEARCH_BACKWARD_SHORTCUT: &str = "ctrl-shift-g";
+const TERMINAL_TOGGLE_VI_MODE_SHORTCUT: &str = "f7";
+
+const DEFAULT_CELL_WIDTH: Pixels = px(8.0);
+const TERMINAL_RESET_FONT_SIZE: f32 = 15.0;
+const HISTORY_SUGGESTION_LIMIT: usize = 6;
+
+fn take_whole_scroll_lines(scroll_lines_accumulated: &mut f32) -> i32 {
+    let lines = scroll_lines_accumulated.trunc() as i32;
+    *scroll_lines_accumulated -= lines as f32;
+    lines
+}
+
+fn sgr_mouse_wheel_report(lines: i32, col: usize, row: usize) -> Option<String> {
+    if lines == 0 {
+        return None;
+    }
+
+    let button = if lines > 0 { 64 } else { 65 };
+    Some(format!("\x1b[<{};{};{}M", button, col + 1, row + 1))
+}
+
+/// 生成 SGR 鼠标按钮报告。
+///
+/// - `button`：xterm 按钮编码（0=左键、1=中键、2=右键，加上 shift/alt/ctrl/拖动等位）
+/// - `pressed`：true 用 `M` 表示按下，false 用 `m` 表示释放（SGR 协议规定）
+/// - `col` / `row`：0-based，输出转为 1-based
+///
+/// 抽出为独立纯函数，便于单元测试和后续扩展（拖动 32 位、wheel-with-modifiers 等）。
+fn sgr_mouse_button_report(button: u8, col: usize, row: usize, pressed: bool) -> String {
+    let suffix = if pressed { 'M' } else { 'm' };
+    format!("\x1b[<{};{};{}{}", button, col + 1, row + 1, suffix)
+}
+
+/// 将 GPUI 鼠标按钮映射为 xterm 按钮基础编码：左=0、中=1、右=2。
+/// 其它按钮（X1/X2 等）当前未在 SGR 报告中使用，返回 None。
+fn mouse_button_code(button: MouseButton) -> Option<u8> {
+    match button {
+        MouseButton::Left => Some(0),
+        MouseButton::Middle => Some(1),
+        MouseButton::Right => Some(2),
+        _ => None,
+    }
+}
+
+/// 将修饰键编码到 xterm 鼠标按钮的高位：shift=4、alt=8、control=16。
+fn encode_mouse_modifiers(modifiers: Modifiers) -> u8 {
+    let mut bits = 0u8;
+    if modifiers.shift {
+        bits |= 4;
+    }
+    if modifiers.alt {
+        bits |= 8;
+    }
+    if modifiers.control {
+        bits |= 16;
+    }
+    bits
+}
+
+fn sgr_mouse_mode_enabled(mode: TermMode) -> bool {
+    mode.contains(TermMode::SGR_MOUSE) && mode.intersects(TermMode::MOUSE_MODE)
+}
+
+fn should_defer_sgr_left_press(button: MouseButton, modifiers: Modifiers, mode: TermMode) -> bool {
+    button == MouseButton::Left
+        && !modifiers.shift
+        && !modifiers.alt
+        && !modifiers.control
+        && !modifiers.platform
+        && sgr_mouse_mode_enabled(mode)
+}
+
+fn should_start_selection_from_pending_sgr_press(start: AlacPoint, current: AlacPoint) -> bool {
+    start != current
+}
+
+/// 选区拖拽自动滚动：根据鼠标相对终端可视区边缘的位置，计算每个节拍应滚动的行数。
+/// 返回正值表示向历史（上）滚动、负值表示向底部（下）滚动、0 表示无需滚动。
+/// 触发区为上下边缘内侧半行及边缘外侧；越靠外速度越快（1..=MAX_LINES_PER_TICK 行/拍）。
+fn selection_drag_autoscroll_delta(
+    position: Point<Pixels>,
+    bounds: Bounds<Pixels>,
+    line_height: Pixels,
+) -> i32 {
+    const MAX_LINES_PER_TICK: i32 = 5;
+    if line_height <= px(0.0) {
+        return 0;
+    }
+    let trigger = line_height * 0.5;
+    let top = bounds.origin.y;
+    let bottom = bounds.origin.y + bounds.size.height;
+    if position.y < top + trigger {
+        let overshoot = (top - position.y).max(px(0.0));
+        (((overshoot / line_height).ceil() as i32) + 1).min(MAX_LINES_PER_TICK)
+    } else if position.y > bottom - trigger {
+        let overshoot = (position.y - bottom).max(px(0.0));
+        -(((overshoot / line_height).ceil() as i32) + 1).min(MAX_LINES_PER_TICK)
+    } else {
+        0
+    }
+}
+
+fn should_scroll_to_bottom_on_user_input(
+    display_offset: usize,
+    pending_display_offset: &StdCell<Option<usize>>,
+) -> bool {
+    pending_display_offset.take();
+    display_offset > 0
+}
+
+fn should_defer_inline_history_prompt_input_to_text_system(keystroke: &Keystroke) -> bool {
+    let modifiers = keystroke.modifiers;
+    !modifiers.control
+        && !modifiers.alt
+        && !modifiers.platform
+        && (keystroke.key == "space" || keystroke.key.chars().count() == 1)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnbracketedPasteHazard {
+    HereDoc,
+    UnterminatedQuote,
+}
+
+fn multiline_non_empty_line_count(text: &str) -> usize {
+    text.lines().filter(|line| !line.trim().is_empty()).count()
+}
+fn high_risk_command_matches(patterns: &[String], text: &str) -> bool {
+    text.lines().any(|line| {
+        patterns.iter().any(|pattern| {
+            regex::RegexBuilder::new(pattern)
+                .case_insensitive(true)
+                .build()
+                .map(|regex| regex.is_match(line))
+                .unwrap_or(false)
+        })
+    })
+}
+
+fn contains_heredoc_operator(text: &str) -> bool {
+    let mut chars = text.chars().peekable();
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut escaped = false;
+    let mut comment_allowed = true;
+
+    while let Some(ch) = chars.next() {
+        if in_single_quote {
+            if ch == '\'' {
+                in_single_quote = false;
+            }
+            continue;
+        }
+
+        if in_double_quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_double_quote = false;
+            }
+            continue;
+        }
+
+        if escaped {
+            escaped = false;
+            comment_allowed = false;
+            continue;
+        }
+
+        match ch {
+            '\\' => {
+                escaped = true;
+                comment_allowed = false;
+            }
+            '\'' => {
+                in_single_quote = true;
+                comment_allowed = false;
+            }
+            '"' => {
+                in_double_quote = true;
+                comment_allowed = false;
+            }
+            '#' if comment_allowed => {
+                for comment_ch in chars.by_ref() {
+                    if comment_ch == '\n' {
+                        break;
+                    }
+                }
+                comment_allowed = true;
+            }
+            '<' if chars.peek() == Some(&'<') => return true,
+            ch if ch.is_whitespace() || matches!(ch, ';' | '|' | '&' | '(' | ')' | '<' | '>') => {
+                comment_allowed = true;
+            }
+            _ => comment_allowed = false,
+        }
+    }
+
+    false
+}
+
+fn has_unterminated_shell_quote(text: &str) -> bool {
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut escaped = false;
+
+    for ch in text.chars() {
+        if in_single_quote {
+            if ch == '\'' {
+                in_single_quote = false;
+            }
+            continue;
+        }
+
+        if in_double_quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_double_quote = false;
+            }
+            continue;
+        }
+
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' => escaped = true,
+            '\'' => in_single_quote = true,
+            '"' => in_double_quote = true,
+            _ => {}
+        }
+    }
+
+    in_single_quote || in_double_quote
+}
+
+fn has_multiline_shell_structure(text: &str) -> bool {
+    if text.lines().any(|line| line.trim().is_empty()) {
+        return true;
+    }
+    if text.lines().any(|line| {
+        let keyword = line
+            .trim_start()
+            .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | '(' | ')' | '{' | '}'))
+            .next()
+            .unwrap_or_default();
+        matches!(
+            keyword,
+            "if" | "then"
+                | "elif"
+                | "else"
+                | "fi"
+                | "for"
+                | "while"
+                | "until"
+                | "select"
+                | "do"
+                | "done"
+                | "case"
+                | "esac"
+                | "function"
+        )
+    }) {
+        return true;
+    }
+
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut escaped = false;
+
+    for ch in text.chars() {
+        if in_single_quote {
+            if ch == '\'' {
+                in_single_quote = false;
+            } else if ch == '\n' {
+                return true;
+            }
+            continue;
+        }
+
+        if in_double_quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_double_quote = false;
+            } else if ch == '\n' {
+                return true;
+            }
+            continue;
+        }
+
+        if escaped {
+            if ch == '\n' {
+                return true;
+            }
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' => escaped = true,
+            '\'' => in_single_quote = true,
+            '"' => in_double_quote = true,
+            '|' | '&' | ';' | '(' | ')' | '{' | '}' | '<' | '>' | '`' => return true,
+            _ => {}
+        }
+    }
+
+    false
+}
+
+fn detect_unbracketed_paste_hazard(text: &str) -> Option<UnbracketedPasteHazard> {
+    if contains_heredoc_operator(text) {
+        return Some(UnbracketedPasteHazard::HereDoc);
+    }
+
+    if has_unterminated_shell_quote(text) {
+        return Some(UnbracketedPasteHazard::UnterminatedQuote);
+    }
+
+    None
+}
+
+fn terminal_shortcut_label(shortcut: &str) -> SharedString {
+    Kbd::format(&Keystroke::parse(shortcut).expect("终端快捷键定义非法")).into()
+}
+
+/// 判断按键是否为分屏快捷键（macOS: Cmd+Shift+X，其他: Ctrl+Shift+X）。
+fn is_split_shortcut(event: &KeyDownEvent, key: &str) -> bool {
+    let modifiers = event.keystroke.modifiers;
+    let k = event.keystroke.key.as_str();
+    let key_matches = k.eq_ignore_ascii_case(key);
+    if cfg!(target_os = "macos") {
+        modifiers.platform && modifiers.shift && !modifiers.control && !modifiers.alt && key_matches
+    } else {
+        modifiers.control && modifiers.shift && !modifiers.platform && !modifiers.alt && key_matches
+    }
+}
+
+/// 对路径进行简单 shell 转义（用单引号包裹，处理内部单引号）
+fn shell_escape(s: &str) -> String {
+    if s.chars()
+        .all(|c| c.is_alphanumeric() || c == '/' || c == '.' || c == '-' || c == '_')
+    {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
+/// 把多行文本拆分为批量命令队列。
+///
+/// 以换行符分隔命令，但会把行尾带反斜杠（`\`）的续行与其下一行合并为
+/// 一条完整命令，避免 shell 把续行命令当成多条独立输入。
+/// 仅当包含多条有效命令时返回 Some，否则返回 None。
+fn split_batch_commands(text: &str) -> Option<Vec<String>> {
+    if multiline_non_empty_line_count(text) <= 1 {
+        return None;
+    }
+
+    let mut commands = Vec::new();
+    let mut current = String::new();
+
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        if !current.is_empty() {
+            current.push('\n');
+        }
+        current.push_str(line);
+
+        let trimmed = line.trim_end();
+        let is_continuation = trimmed.ends_with('\\') || trimmed.ends_with('`');
+        if trimmed.is_empty() || !is_continuation {
+            commands.push(std::mem::take(&mut current));
+        }
+    }
+
+    if !current.is_empty() {
+        commands.push(current);
+    }
+
+    if commands.len() > 1 {
+        Some(commands)
+    } else {
+        None
+    }
+}
+
+fn batch_commands_for_paste(
+    use_bracketed: bool,
+    is_alt_screen: bool,
+    is_local: bool,
+    text: &str,
+) -> Option<Vec<String>> {
+    if use_bracketed || is_alt_screen || is_local || has_multiline_shell_structure(text) {
+        return None;
+    }
+
+    split_batch_commands(text)
+}
+
+fn normalize_paste_text(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn encode_bracketed_paste(text: &str) -> Vec<u8> {
+    const START: &[u8] = b"\x1b[200~";
+    const END: &[u8] = b"\x1b[201~";
+
+    let mut bytes = Vec::with_capacity(START.len() + text.len() + END.len());
+    bytes.extend_from_slice(START);
+    bytes.extend(text.bytes().filter(|byte| *byte != b'\x1b'));
+    bytes.extend_from_slice(END);
+    bytes
+}
+
+fn should_dismiss_history_prompt_for_keystroke(keystroke: &Keystroke) -> bool {
+    let modifiers = keystroke.modifiers;
+    let key = keystroke.key.as_str();
+
+    if modifiers.platform {
+        return true;
+    }
+
+    if modifiers.control && !modifiers.alt {
+        return !matches!(key, "r" | "u" | "c");
+    }
+
+    if modifiers.alt && !modifiers.control {
+        return key != "f";
+    }
+
+    if !modifiers.control && !modifiers.alt {
+        return matches!(
+            key,
+            "left" | "home" | "end" | "delete" | "pageup" | "pagedown" | "escape" | "tab"
+        );
+    }
+
+    true
+}
+
+fn should_dismiss_history_prompt_for_mouse(button: MouseButton) -> bool {
+    matches!(
+        button,
+        MouseButton::Left | MouseButton::Middle | MouseButton::Right
+    )
+}
+
+fn should_dismiss_history_prompt_for_scroll(lines: i32) -> bool {
+    lines != 0
+}
+
+fn should_reset_history_prompt_for_terminal_event(event: &TerminalModelEvent) -> bool {
+    matches!(
+        event,
+        TerminalModelEvent::PromptStart
+            | TerminalModelEvent::InputStart
+            | TerminalModelEvent::CommandStart
+    )
+}
+fn should_advance_command_queue(event: &TerminalModelEvent) -> bool {
+    matches!(event, TerminalModelEvent::InputStart)
+}
+
+fn history_prompt_available(
+    autocomplete_enabled: bool,
+    connection_kind: TerminalConnectionKind,
+    mode: TermMode,
+    shell_prompt_input_active: bool,
+) -> bool {
+    autocomplete_enabled
+        && connection_kind == TerminalConnectionKind::Ssh
+        && shell_prompt_input_active
+        && !terminal_application_mode_active(mode)
+        && !mode.contains(TermMode::ALT_SCREEN)
+        && !mode.contains(TermMode::VI)
+}
+
+fn terminal_application_mode_active(mode: TermMode) -> bool {
+    mode.intersects(TermMode::MOUSE_MODE)
+        || mode.contains(TermMode::FOCUS_IN_OUT)
+        || mode.contains(TermMode::DISAMBIGUATE_ESC_CODES)
+}
+
+fn local_tui_application_active(mode: TermMode) -> bool {
+    mode.contains(TermMode::ALT_SCREEN) || terminal_application_mode_active(mode)
+}
+
+fn should_confirm_local_terminal_close(
+    connection_kind: TerminalConnectionKind,
+    command_running: bool,
+    mode: TermMode,
+    child_exited: Option<i32>,
+) -> bool {
+    connection_kind == TerminalConnectionKind::Local
+        && child_exited.is_none()
+        && (command_running || local_tui_application_active(mode))
+}
+
+const HISTORY_PROMPT_DROPDOWN_MIN_WIDTH: f32 = 300.0;
+const HISTORY_PROMPT_DROPDOWN_MAX_WIDTH: f32 = 500.0;
+const HISTORY_PROMPT_DROPDOWN_GAP_Y: f32 = 6.0;
+const HISTORY_PROMPT_DROPDOWN_EDGE_PADDING: f32 = 8.0;
+const HISTORY_PROMPT_DROPDOWN_ROW_PADDING_Y: f32 = 12.0;
+const HISTORY_PROMPT_DROPDOWN_CONTAINER_PADDING_Y: f32 = 16.0;
+const HISTORY_PROMPT_DROPDOWN_SEARCH_HEADER_HEIGHT: f32 = 20.0;
+
+fn estimate_history_prompt_dropdown_height(
+    line_height: Pixels,
+    match_count: usize,
+    search_mode: bool,
+) -> Pixels {
+    let row_count = match_count.max(1) as f32;
+    let rows_height = (line_height + px(HISTORY_PROMPT_DROPDOWN_ROW_PADDING_Y)) * row_count;
+    let header_height = if search_mode {
+        px(HISTORY_PROMPT_DROPDOWN_SEARCH_HEADER_HEIGHT)
+    } else {
+        px(0.0)
+    };
+
+    px(HISTORY_PROMPT_DROPDOWN_CONTAINER_PADDING_Y) + header_height + rows_height
+}
+
+fn history_prompt_dropdown_origin(
+    terminal_bounds: Bounds<Pixels>,
+    cell_width: Pixels,
+    line_height: Pixels,
+    cursor_line: i32,
+    cursor_col: usize,
+    match_count: usize,
+    search_mode: bool,
+) -> Point<Pixels> {
+    let cursor_left = terminal_bounds.origin.x + cell_width * cursor_col as f32;
+    let cursor_top = terminal_bounds.origin.y + line_height * cursor_line as f32;
+    let dropdown_width = (terminal_bounds.size.width
+        - px(HISTORY_PROMPT_DROPDOWN_EDGE_PADDING * 2.0))
+    .min(px(HISTORY_PROMPT_DROPDOWN_MAX_WIDTH))
+    .max(px(HISTORY_PROMPT_DROPDOWN_MIN_WIDTH));
+    let dropdown_height =
+        estimate_history_prompt_dropdown_height(line_height, match_count, search_mode);
+    let min_left = terminal_bounds.origin.x;
+    let max_left = (terminal_bounds.right() - dropdown_width).max(min_left);
+    let left = cursor_left.min(max_left).max(min_left);
+    let below_top = cursor_top + line_height + px(HISTORY_PROMPT_DROPDOWN_GAP_Y);
+    let min_top = terminal_bounds.origin.y;
+    let max_top = (terminal_bounds.bottom() - dropdown_height).max(min_top);
+    let fits_below = below_top + dropdown_height <= terminal_bounds.bottom();
+    let preferred_above_top = cursor_top - dropdown_height - px(HISTORY_PROMPT_DROPDOWN_GAP_Y);
+    let top = if fits_below {
+        below_top.min(max_top)
+    } else {
+        preferred_above_top.max(min_top).min(max_top)
+    };
+
+    Point::new(left, top)
+}
+
+fn history_prompt_overlay_bounds(terminal_bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+    Bounds::new(Point::new(px(0.0), px(0.0)), terminal_bounds.size)
+}
+
+/// 正在调整大小的面板
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResizingPanel {
+    Sidebar,
+}
+
+pub fn init(cx: &mut App) {
+    crate::settings::init_settings(cx);
+    cx.bind_keys(init_keybindings(cx));
+    register_panel(cx, "Terminal", |_, panel_state, _, window, cx| {
+        let data = match &panel_state.info {
+            PanelInfo::Panel(data) => data,
+            _ => &serde_json::Value::Null,
+        };
+        let kind = data.get("kind").and_then(|value| value.as_str());
+        let view = if kind == Some("ssh") {
+            let connection = data
+                .get("connection_id")
+                .and_then(|value| value.as_i64())
+                .and_then(|id| {
+                    cx.global::<GlobalStorageState>()
+                        .storage
+                        .get::<ConnectionRepository>()
+                        .and_then(|repo| repo.get(id).ok().flatten())
+                });
+            connection.map(|connection| {
+                let working_dir = data
+                    .get("working_dir")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_owned);
+                cx.new(|cx| {
+                    TerminalView::new_ssh_with_index(
+                        connection,
+                        None,
+                        window,
+                        cx,
+                        working_dir.as_deref(),
+                        true,
+                    )
+                })
+            })
+        } else {
+            let config = data
+                .get("config")
+                .and_then(|value| serde_json::from_value(value.clone()).ok())
+                .unwrap_or_default();
+            Some(cx.new(|cx| TerminalView::new(config, window, cx)))
+        };
+
+        Box::new(
+            view.unwrap_or_else(|| {
+                cx.new(|cx| TerminalView::new(LocalConfig::default(), window, cx))
+            }),
+        )
+    });
+}
+
+pub fn refresh_keybindings(cx: &mut App) {
+    cx.bind_keys(refreshable_keybindings(cx));
+}
+
+/// 生成终端快捷键绑定。
+///
+/// `$aid` 是 `action_id::` 中的标识符（如 `TERMINAL_SEND_TAB`），
+/// `$act` 是 `actions!` 宏定义的类型/值名（如 `SendTab`），
+/// `$def` 是默认快捷键字符串 slice。
+macro_rules! terminal_bindings {
+    ($cx:expr, $init:expr, [$( ($aid:ident, $act:ident, $def:expr) ),* $(,)? ]) => {{
+        let mut keybindings = Vec::new();
+        $(
+            if $init {
+                keybindings.extend(
+                    shortcuts_for($cx, action_id::$aid, $def)
+                        .into_iter()
+                        .map(|key| KeyBinding::new(&key, $act, Some(TERMINAL_CONTEXT))),
+                );
+            } else {
+                keybindings.extend(rebind_keybindings(
+                    $cx,
+                    action_id::$aid,
+                    $def,
+                    Some(TERMINAL_CONTEXT),
+                    $act,
+                ));
+            }
+        )*
+        keybindings
+    }};
+}
+
+fn init_keybindings(cx: &App) -> Vec<KeyBinding> {
+    terminal_bindings!(
+        cx,
+        true,
+        [
+            (TERMINAL_SEND_TAB, SendTab, &["tab"]),
+            (TERMINAL_SEND_SHIFT_TAB, SendShiftTab, &["shift-tab"]),
+            (TERMINAL_COPY, Copy, &[TERMINAL_COPY_SHORTCUT]),
+            (TERMINAL_PASTE, Paste, &terminal_paste_defaults()),
+            (
+                TERMINAL_SELECT_ALL,
+                SelectAll,
+                &[TERMINAL_SELECT_ALL_SHORTCUT]
+            ),
+            (
+                TERMINAL_CLEAR_SCREEN,
+                ClearScreen,
+                &[TERMINAL_CLEAR_SCREEN_SHORTCUT]
+            ),
+            (TERMINAL_CLEAR_SELECTION, ClearSelection, &["escape"]),
+            (
+                TERMINAL_SEARCH_FORWARD,
+                SearchForward,
+                &[TERMINAL_SEARCH_FORWARD_SHORTCUT]
+            ),
+            (
+                TERMINAL_SEARCH_BACKWARD,
+                SearchBackward,
+                &[TERMINAL_SEARCH_BACKWARD_SHORTCUT]
+            ),
+            (
+                TERMINAL_TOGGLE_VI_MODE,
+                ToggleViMode,
+                &[TERMINAL_TOGGLE_VI_MODE_SHORTCUT]
+            ),
+            (
+                TERMINAL_INCREASE_FONT,
+                IncreaseFont,
+                &terminal_increase_font_defaults()
+            ),
+            (
+                TERMINAL_DECREASE_FONT,
+                DecreaseFont,
+                &[terminal_platform_shortcut("cmd--", "ctrl--")]
+            ),
+            (
+                TERMINAL_RESET_FONT,
+                ResetFont,
+                &[terminal_platform_shortcut("cmd-0", "ctrl-0")]
+            ),
+        ]
+    )
+}
+
+fn refreshable_keybindings(cx: &App) -> Vec<KeyBinding> {
+    terminal_bindings!(
+        cx,
+        false,
+        [
+            (TERMINAL_SEND_TAB, SendTab, &["tab"]),
+            (TERMINAL_SEND_SHIFT_TAB, SendShiftTab, &["shift-tab"]),
+            (TERMINAL_COPY, Copy, &[TERMINAL_COPY_SHORTCUT]),
+            (TERMINAL_PASTE, Paste, &terminal_paste_defaults()),
+            (
+                TERMINAL_SELECT_ALL,
+                SelectAll,
+                &[TERMINAL_SELECT_ALL_SHORTCUT]
+            ),
+            (
+                TERMINAL_CLEAR_SCREEN,
+                ClearScreen,
+                &[TERMINAL_CLEAR_SCREEN_SHORTCUT]
+            ),
+            (TERMINAL_CLEAR_SELECTION, ClearSelection, &["escape"]),
+            (
+                TERMINAL_SEARCH_FORWARD,
+                SearchForward,
+                &[TERMINAL_SEARCH_FORWARD_SHORTCUT]
+            ),
+            (
+                TERMINAL_SEARCH_BACKWARD,
+                SearchBackward,
+                &[TERMINAL_SEARCH_BACKWARD_SHORTCUT]
+            ),
+            (
+                TERMINAL_TOGGLE_VI_MODE,
+                ToggleViMode,
+                &[TERMINAL_TOGGLE_VI_MODE_SHORTCUT]
+            ),
+            (
+                TERMINAL_INCREASE_FONT,
+                IncreaseFont,
+                &terminal_increase_font_defaults()
+            ),
+            (
+                TERMINAL_DECREASE_FONT,
+                DecreaseFont,
+                &[terminal_platform_shortcut("cmd--", "ctrl--")]
+            ),
+            (
+                TERMINAL_RESET_FONT,
+                ResetFont,
+                &[terminal_platform_shortcut("cmd-0", "ctrl-0")]
+            ),
+        ]
+    )
+}
+
+fn terminal_paste_defaults() -> Vec<&'static str> {
+    if cfg!(target_os = "macos") {
+        vec![TERMINAL_PASTE_SHORTCUT]
+    } else {
+        vec![TERMINAL_PASTE_SHORTCUT, "shift-insert"]
+    }
+}
+
+fn terminal_increase_font_defaults() -> Vec<&'static str> {
+    if cfg!(target_os = "macos") {
+        vec!["cmd-+", "cmd-="]
+    } else {
+        vec!["ctrl-+", "ctrl-="]
+    }
+}
+
+fn terminal_platform_shortcut(macos: &'static str, other: &'static str) -> &'static str {
+    if cfg!(target_os = "macos") {
+        macos
+    } else {
+        other
+    }
+}
+
+/// IME composition state
+struct ImeState {
+    text: String,
+    marked_range: Option<std::ops::Range<usize>>,
+}
+
+struct SshMfaInput {
+    prompt: String,
+    echo: bool,
+    input: Entity<InputState>,
+}
+
+/// Terminal view component - supports both Local and SSH backends
+pub struct TerminalView {
+    // ====== 核心组件 ======
+    /// Terminal model entity
+    terminal: Entity<Terminal>,
+    /// 本地终端工作目录
+    local_working_dir: Option<PathBuf>,
+    /// 本地终端配置（用于复制标签页）
+    tab_panel: Option<WeakEntity<TabPanel>>,
+    local_config: Option<LocalConfig>,
+    /// 光标闪烁管理器
+    blink_manager: Entity<BlinkCursor>,
+    /// 侧边栏
+    sidebar: Entity<TerminalSidebar>,
+
+    // ====== 视觉配置（字体、颜色、主题） ======
+    font_size: Pixels,
+    line_height: Pixels,
+    font_family: SharedString,
+    font_weight: FontWeight,
+    font_fallbacks: Vec<SharedString>,
+    line_height_scale: f32,
+    cell_width: Pixels,
+    current_theme: TerminalTheme,
+
+    // ====== 尺寸与滚动状态 ======
+    last_size: Option<TerminalSurfaceSize>,
+    /// A split pane requests one resize after GPUI has assigned its initial canvas bounds.
+    post_split_resize_pending: bool,
+    /// A cancellable follow-up that remeasures after nested dock layout has settled.
+    post_split_resize_settle_task: Option<Task<()>>,
+    /// 上一帧 alacritty 是否处于 alt screen 模式。
+    ///
+    /// 用于检测主屏与备用屏切换:进入 alt screen 时主动调用 nudge_resize
+    /// 重发当前尺寸给 PTY,触发 SIGWINCH,让 TUI 应用刷新整屏画面,
+    /// 避免出现底部残留上一次渲染内容的问题。
+    last_alt_screen: bool,
+    scroll_lines_accumulated: f32,
+
+    // ====== 鼠标与交互 ======
+    mouse_state: MouseState,
+    mouse_position: Option<Point<Pixels>>,
+    /// 选区拖拽自动滚动的后台节拍任务
+    selection_autoscroll_task: Option<Task<()>>,
+    /// 自动滚动任务代数；重建或停止时自增，使旧任务的下一拍自行退出
+    autoscroll_epoch: u64,
+
+    // ====== 插件系统 ======
+    addon_manager: AddonManager,
+
+    // ====== 订阅与焦点 ======
+    _subscriptions: Vec<Subscription>,
+    focus_handle: FocusHandle,
+
+    // ====== 渲染状态 ======
+    render_cache: RenderCache,
+    terminal_bounds: Bounds<Pixels>,
+    /// False while a pane is collapsed, hidden, or has not received a valid layout.
+    pane_visible: bool,
+
+    // ====== IME 输入 ======
+    ime_state: Option<ImeState>,
+
+    // ====== 历史提示与自动补全 ======
+    history_prompt: HistoryPromptState,
+    /// 是否已检测到过 OSC 133 shell integration 事件
+    shell_integration_detected: bool,
+    /// shell prompt 当前是否处于可输入阶段，由 OSC 133 生命周期维护。
+    shell_prompt_input_active: bool,
+    /// InlineSuggest 防抖任务（30ms 延迟刷新建议）
+    suggestion_debounce: Option<gpui::Task<()>>,
+
+    // ====== 批量命令执行 ======
+    /// 本地 shell 命令是否处于执行阶段，由 OSC 133;C 到下一次 prompt/input 维护。
+    local_command_running: bool,
+    /// 批量命令执行队列（多行粘贴时逐行发送）
+    command_queue: VecDeque<String>,
+    /// 是否正在处理批量命令队列
+    command_queue_active: bool,
+    /// 批量命令队列的 fallback 定时器（无 shell integration 时使用）
+    command_queue_fallback_timer: Option<gpui::Task<()>>,
+
+    // ====== cd 目录补全 ======
+    /// `cd` 目录补全的独立 SFTP 连接
+    cd_completion_client: Option<Arc<Mutex<RusshSftpClient>>>,
+    /// 按父目录缓存远端子目录名，减少重复 SFTP 请求（LRU，最多 100 个目录）
+    cd_completion_cache: LruCache<String, Vec<String>>,
+    /// 当前正在加载目录候选的父目录
+    cd_completion_loading_parent: Option<String>,
+
+    // ====== SSH MFA 认证 ======
+    ssh_mfa_inputs: Vec<SshMfaInput>,
+    focus_terminal_after_connect: bool,
+
+    // ====== 标签页与分屏标识 ======
+    /// 标签页序号（用于多实例显示）
+    tab_index: Option<usize>,
+    /// 分屏序号（用于在连接标题后显示 Tab1/Tab2...）
+    pane_index: Option<usize>,
+
+    // ====== 用户偏好设置（可运行时切换） ======
+    /// 是否启用光标闪烁
+    cursor_blink_enabled: bool,
+    /// 高危命令是否弹确认
+    confirm_high_risk_command: bool,
+    /// 高危命令匹配规则
+    high_risk_command_patterns: Vec<String>,
+    /// 选中自动复制
+    auto_copy_on_select: bool,
+    /// 是否启用历史自动补全
+    autocomplete_enabled: bool,
+    /// 中键粘贴
+    middle_click_paste: bool,
+    /// 在 vim/less/man 等 alt-screen TUI 中,把鼠标滚轮转为方向键发送到 PTY
+    vim_scroll_to_arrow_keys: bool,
+
+    // ====== 侧边栏与布局 ======
+    /// 侧边栏面板大小
+    sidebar_panel_size: Pixels,
+    /// 正在调整大小的面板
+    resizing: Option<ResizingPanel>,
+    /// 视图边界
+    view_bounds: Bounds<Pixels>,
+
+    // ====== 滚动条 ======
+    scrollbar_metrics: Rc<RefCell<TerminalScrollbarMetrics>>,
+    scrollbar_handle: TerminalScrollbarHandle,
+
+    // ====== JMS 连接上下文 ======
+    /// JMS 资产树侧栏上下文(若为 JMS 终端),用于侧栏点资产开新 tab 时随事件传递
+    jms_context: Option<crate::sidebar::JmsSidebarContext>,
+    /// JMS Koko 连接参数(用于复制标签页时重新申请 token)
+    koko_params: Option<jms::KokoConnectParams>,
+    /// JMS 重连请求是否正在申请新的连接 token
+    jms_reconnect_in_flight: bool,
+}
+
+/// Mouse interaction state
+#[derive(Default)]
+struct MouseState {
+    selecting: bool,
+    pending_sgr_left_press: Option<PendingSgrMousePress>,
+    last_click_point: Option<AlacPoint>,
+    click_count: u32,
+    last_click_time: Option<std::time::Instant>,
+}
+
+struct PendingSgrMousePress {
+    point: AlacPoint,
+    position: Point<Pixels>,
+    modifiers: Modifiers,
+}
+
+#[derive(Debug, Clone)]
+struct TerminalScrollbarMetrics {
+    viewport_size: gpui::Size<Pixels>,
+    line_height: Pixels,
+    cell_width: Pixels,
+}
+
+impl Default for TerminalScrollbarMetrics {
+    fn default() -> Self {
+        Self {
+            viewport_size: size(px(0.0), px(0.0)),
+            line_height: px(1.0),
+            cell_width: px(1.0),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct TerminalScrollbarHandle {
+    proxy: TerminalScrollProxy,
+    metrics: Rc<RefCell<TerminalScrollbarMetrics>>,
+    future_display_offset: Rc<StdCell<Option<usize>>>,
+}
+
+impl TerminalScrollbarHandle {
+    fn new(proxy: TerminalScrollProxy, metrics: Rc<RefCell<TerminalScrollbarMetrics>>) -> Self {
+        Self {
+            proxy,
+            metrics,
+            future_display_offset: Rc::new(StdCell::new(None)),
+        }
+    }
+
+    fn take_future_display_offset(&self) -> Option<usize> {
+        self.future_display_offset.take()
+    }
+}
+
+impl ScrollbarHandle for TerminalScrollbarHandle {
+    fn offset(&self) -> Point<Pixels> {
+        let metrics = self.metrics.borrow();
+        let line_height = metrics.line_height.max(px(1.0));
+        // Snapshot terminal state in a single lock to avoid inconsistency
+        let snapshot = self.proxy.snapshot();
+        let max_offset = snapshot.history_size;
+        let scroll_offset = max_offset.saturating_sub(snapshot.display_offset);
+        Point::new(px(0.0), -(scroll_offset as f32 * line_height))
+    }
+
+    fn set_offset(&self, offset: Point<Pixels>) {
+        let metrics = self.metrics.borrow();
+        let line_height = metrics.line_height.max(px(1.0));
+        let snapshot = self.proxy.snapshot();
+        let max_offset = snapshot.history_size as i32;
+        if max_offset == 0 {
+            return;
+        }
+        let offset_delta = (offset.y / line_height).round() as i32;
+        let display_offset = (max_offset + offset_delta).clamp(0, max_offset) as usize;
+        self.future_display_offset.set(Some(display_offset));
+    }
+
+    fn content_size(&self) -> gpui::Size<Pixels> {
+        let metrics = self.metrics.borrow();
+        let line_height = metrics.line_height.max(px(1.0));
+        let snapshot = self.proxy.snapshot();
+        let total_lines = snapshot.history_size + snapshot.screen_lines;
+        let height = line_height * total_lines as f32;
+        let width = metrics
+            .viewport_size
+            .width
+            .max(metrics.cell_width * snapshot.columns as f32);
+        size(width, height)
+    }
+}
+
+impl TerminalView {
+    fn close_terminal_now(&mut self, cx: &mut Context<Self>) {
+        self.release_active_connection(cx);
+        let _ = self
+            .terminal
+            .update(cx, |terminal, _cx| terminal.shutdown());
+    }
+
+    /// Stop the underlying PTY/SSH/Koko session when a pane is removed.
+    ///
+    /// Pane removal does not necessarily drop the GPUI entity immediately, so
+    /// relying on `Terminal::Drop` is insufficient for releasing the backend
+    /// and its background task.
+    pub(crate) fn shutdown_terminal(&mut self, cx: &mut Context<Self>) {
+        self.close_terminal_now(cx);
+    }
+
+    fn confirm_local_terminal_close(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Task<bool> {
+        let confirmed = crate::dialog_helper::confirm_local_terminal_close_dialog(window, cx);
+        cx.spawn(async move |this, cx| {
+            let confirmed = confirmed.await;
+            if confirmed {
+                let _ = this.update(cx, |this, cx| this.close_terminal_now(cx));
+            }
+            confirmed
+        })
+    }
+
+    fn release_active_connection(&self, cx: &mut Context<Self>) {
+        let Some(connection_id) = self.terminal.read(cx).connection_id() else {
+            return;
+        };
+
+        cx.global_mut::<ActiveConnections>().remove(connection_id);
+    }
+
+    pub fn new(config: LocalConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::new_with_index(config, None, window, cx)
+    }
+
+    pub fn new_with_index(
+        config: LocalConfig,
+        tab_index: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        // 创建 Terminal Entity
+        let local_working_dir = resolve_local_working_dir(config.working_dir.clone());
+        let config_for_view = config.clone();
+        let init_error = Rc::new(RefCell::new(None));
+        let init_error_clone = init_error.clone();
+        let terminal = cx.new(move |cx| {
+            let (terminal, error) = Terminal::new_local_or_disconnected(config, cx);
+            *init_error_clone.borrow_mut() = error;
+            terminal
+        });
+        let view = Self::new_with_terminal(
+            terminal,
+            None,
+            None,
+            true,
+            local_working_dir,
+            tab_index,
+            None,
+            Some(config_for_view),
+            window,
+            cx,
+        );
+
+        if let Some(error) = init_error.borrow_mut().take() {
+            window.push_notification(
+                Notification::error(format!("创建本地终端失败: {}", error)).autohide(true),
+                cx,
+            );
+        }
+
+        view
+    }
+
+    pub fn new_ssh(conn: StoredConnection, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::new_ssh_with_index(conn, None, window, cx, None, true)
+    }
+
+    /// 创建 JumpServer Koko WebSocket 终端
+    pub fn new_jms_koko(
+        params: jms::KokoConnectParams,
+        tab_index: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new_jms_koko_with_context(params, None, tab_index, window, cx)
+    }
+
+    /// 创建 JumpServer Koko WebSocket 终端,并可携带资产树侧栏上下文
+    pub fn new_jms_koko_with_context(
+        params: jms::KokoConnectParams,
+        jms_context: Option<crate::sidebar::JmsSidebarContext>,
+        tab_index: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let params_for_view = params.clone();
+        let terminal = cx.new(|cx| Terminal::new_jms_koko(params, cx));
+        let mut view = Self::new_with_terminal(
+            terminal,
+            None,
+            None,
+            false,
+            None,
+            tab_index,
+            jms_context,
+            None,
+            window,
+            cx,
+        );
+        view.koko_params = Some(params_for_view);
+        view
+    }
+    /// Start a JMS connection on an already inserted placeholder pane.
+    pub fn connect_jms_koko(&mut self, params: jms::KokoConnectParams, cx: &mut Context<Self>) {
+        self.koko_params = Some(params.clone());
+        self.terminal.update(cx, |terminal, cx| {
+            terminal.connect_jms_koko(params, cx);
+        });
+    }
+
+    /// 创建 JMS Koko 占位终端(未连接,只有资产树侧栏,等用户从树里选资产)
+    pub fn new_jms_koko_placeholder(
+        jms_context: Option<crate::sidebar::JmsSidebarContext>,
+        tab_index: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let terminal = cx.new(|cx| Terminal::new_jms_koko_placeholder(cx));
+        Self::new_with_terminal(
+            terminal,
+            None,
+            None,
+            false,
+            None,
+            tab_index,
+            jms_context,
+            None,
+            window,
+            cx,
+        )
+    }
+
+    pub fn new_ssh_with_index(
+        conn: StoredConnection,
+        tab_index: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        working_dir: Option<&str>,
+        sync_path_with_terminal: bool,
+    ) -> Self {
+        // 创建 SSH Terminal Entity
+        let connection_id = conn.id;
+        let stored_conn = conn.clone();
+        let terminal = cx.new(|cx| Terminal::new_ssh(conn, cx, working_dir));
+        Self::new_with_terminal(
+            terminal,
+            connection_id,
+            Some(stored_conn),
+            sync_path_with_terminal,
+            None,
+            tab_index,
+            None,
+            None,
+            window,
+            cx,
+        )
+    }
+
+    fn new_with_terminal(
+        terminal: Entity<Terminal>,
+        connection_id: Option<i64>,
+        stored_connection: Option<StoredConnection>,
+        sync_path_enabled: bool,
+        local_working_dir: Option<PathBuf>,
+        tab_index: Option<usize>,
+        jms_context: Option<crate::sidebar::JmsSidebarContext>,
+        local_config: Option<LocalConfig>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let blink_manager = cx.new(|_| BlinkCursor::new());
+
+        // 获取初始颜色与尺寸
+        let (colors, screen_lines, columns) = {
+            let term = terminal.read(cx).term().lock();
+            (term.colors().clone(), term.screen_lines(), term.columns())
+        };
+        let is_local_terminal =
+            terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
+
+        // 创建默认主题（需要在创建侧边栏之前）
+        let initial_settings = current_settings(cx);
+        let default_theme = TerminalTheme::ocean();
+        let default_font_size = px(TERMINAL_RESET_FONT_SIZE);
+        let default_font_family: SharedString = initial_settings.font_family.clone().into();
+        let default_font_fallbacks = default_font_fallbacks();
+        let default_line_height_scale = DEFAULT_LINE_HEIGHT_SCALE;
+        let ssh_config = terminal.read(cx).ssh_config().cloned();
+        let ssh_session_manager = terminal.read(cx).ssh_session_manager().cloned();
+
+        // 创建侧边栏（传递 StoredConnection 用于文件管理器）
+        // 已连接的 JMS 终端不应再被视为占位终端：从资产树选择新资产时要新开 tab，
+        // 而不是覆盖当前已连接的 tab。
+        let mut jms_context = jms_context;
+        if let Some(ref mut ctx) = jms_context {
+            if terminal.read(cx).connection_state() == &ConnectionState::Connected {
+                ctx.is_placeholder = false;
+            }
+        }
+        let jms_context_for_view = jms_context.clone();
+        let sidebar = cx.new(|cx| {
+            TerminalSidebar::new(
+                connection_id,
+                stored_connection,
+                ssh_config,
+                ssh_session_manager,
+                jms_context,
+                &default_theme,
+                default_font_size,
+                default_font_family.clone(),
+                sync_path_enabled,
+                window,
+                cx,
+            )
+        });
+
+        // 订阅侧边栏事件（需要 window 以便弹确认对话框）
+        let sidebar_subscription = cx.subscribe_in(&sidebar, window, Self::handle_sidebar_event);
+
+        // 侧边栏的折叠状态直接决定终端核心区域的可用宽度；用户切换侧边栏时
+        // 必须让 TerminalView 重绘，使 canvas 重新计算并同步正确的 PTY 尺寸。
+        // 分屏后的首次同步另由 post_split_resize_pending 保证。
+        let sidebar_observer = cx.observe(&sidebar, |this, _, cx| {
+            cx.notify();
+            let _ = this;
+        });
+
+        // 订阅 Terminal 事件
+        let terminal_subscription = cx.subscribe_in(&terminal, window, Self::handle_terminal_event);
+
+        // 订阅 BlinkCursor 变化
+        let blink_subscription = cx.observe(&blink_manager, |this, _, cx| {
+            cx.notify();
+            let _ = this;
+        });
+
+        let focus_handle = cx.focus_handle();
+
+        // 焦点获得/失去订阅
+        let focus_subscription = cx.on_focus(&focus_handle, window, |this, _window, cx| {
+            if this.cursor_blink_enabled {
+                this.blink_manager.update(cx, BlinkCursor::start);
+            }
+            cx.emit(TerminalViewEvent::Focused);
+        });
+        let blur_subscription = cx.on_blur(&focus_handle, window, |this, _window, cx| {
+            if this.cursor_blink_enabled {
+                this.blink_manager.update(cx, BlinkCursor::stop);
+            }
+        });
+
+        let mut subscriptions = Vec::new();
+        subscriptions.push(sidebar_subscription);
+        subscriptions.push(sidebar_observer);
+        subscriptions.push(terminal_subscription);
+        subscriptions.push(blink_subscription);
+        subscriptions.push(focus_subscription);
+        subscriptions.push(blur_subscription);
+        if let Some(global_settings) = cx.try_global::<GlobalTerminalLocalSettings>().cloned() {
+            let settings_subscription = cx.subscribe_in(
+                &global_settings.0,
+                window,
+                Self::handle_terminal_settings_event,
+            );
+            subscriptions.push(settings_subscription);
+        }
+        subscriptions
+            .push(cx.observe_global_in::<AppSettings>(window, Self::handle_app_settings_changed));
+
+        let scrollbar_metrics = Rc::new(RefCell::new(TerminalScrollbarMetrics::default()));
+        let scrollbar_handle = TerminalScrollbarHandle::new(
+            terminal.read(cx).scroll_proxy(),
+            scrollbar_metrics.clone(),
+        );
+
+        let mut this = Self {
+            terminal,
+            local_working_dir: if is_local_terminal {
+                local_working_dir
+            } else {
+                None
+            },
+            tab_panel: None,
+            local_config: if is_local_terminal {
+                local_config
+            } else {
+                None
+            },
+            blink_manager,
+            sidebar,
+            font_size: default_font_size,
+            line_height: default_font_size * default_line_height_scale,
+            font_family: default_font_family.clone(),
+            font_weight: FontWeight(initial_settings.font_weight),
+            font_fallbacks: default_font_fallbacks,
+            line_height_scale: default_line_height_scale,
+            cell_width: DEFAULT_CELL_WIDTH,
+            // 初始化为 None，确保首次渲染时会触发 resize，
+            // 将正确的终端尺寸发送给 PTY
+            last_size: None,
+            post_split_resize_pending: false,
+            post_split_resize_settle_task: None,
+            last_alt_screen: false,
+            scroll_lines_accumulated: 0.0,
+            mouse_state: MouseState::default(),
+            addon_manager: Self::create_addon_manager(),
+            _subscriptions: subscriptions,
+            mouse_position: None,
+            selection_autoscroll_task: None,
+            autoscroll_epoch: 0,
+            render_cache: RenderCache::new(screen_lines, columns, colors),
+            focus_handle,
+            terminal_bounds: Bounds::default(),
+            pane_visible: false,
+            ime_state: None,
+            history_prompt: HistoryPromptState::default(),
+            shell_prompt_input_active: false,
+            local_command_running: false,
+            command_queue: VecDeque::new(),
+            command_queue_active: false,
+            shell_integration_detected: false,
+            command_queue_fallback_timer: None,
+            suggestion_debounce: None,
+            cd_completion_client: None,
+            cd_completion_cache: LruCache::new(std::num::NonZeroUsize::new(100).unwrap()),
+            cd_completion_loading_parent: None,
+            ssh_mfa_inputs: Vec::new(),
+            focus_terminal_after_connect: false,
+            current_theme: default_theme,
+            tab_index,
+            pane_index: None,
+            cursor_blink_enabled: false,
+            confirm_high_risk_command: true,
+            high_risk_command_patterns: Vec::new(),
+            auto_copy_on_select: true,
+            autocomplete_enabled: true,
+            middle_click_paste: true,
+            vim_scroll_to_arrow_keys: true,
+            sidebar_panel_size: SIDEBAR_DEFAULT_WIDTH,
+            resizing: None,
+            view_bounds: Bounds::default(),
+            scrollbar_metrics,
+            scrollbar_handle,
+            jms_context: jms_context_for_view,
+            koko_params: None,
+            jms_reconnect_in_flight: false,
+        };
+        this.apply_settings_snapshot(&initial_settings, window, cx);
+        this
+    }
+
+    fn handle_terminal_settings_event(
+        &mut self,
+        _store: &Entity<crate::settings::TerminalSettingsStore>,
+        event: &TerminalSettingsEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            TerminalSettingsEvent::Changed { current, .. } => {
+                self.apply_settings_snapshot(current, window, cx);
+            }
+        }
+    }
+
+    fn handle_app_settings_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let settings = current_settings(cx);
+        self.apply_settings_snapshot(&settings, window, cx);
+    }
+
+    /// 将已建立连接的 JMS 上下文标记为非占位状态。
+    fn mark_jms_context_connected(is_placeholder: &mut bool) {
+        *is_placeholder = false;
+    }
+
+    /// 处理侧边栏事件
+    fn handle_sidebar_event(
+        &mut self,
+        _sidebar: &Entity<TerminalSidebar>,
+        event: &TerminalSidebarEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            TerminalSidebarEvent::PanelChanged(_panel) => {
+                cx.notify();
+            }
+            TerminalSidebarEvent::SearchPatternChanged(pattern) => {
+                let _ = self.set_search_pattern(pattern);
+                cx.notify();
+            }
+            TerminalSidebarEvent::SearchPrevious => {
+                self.search_backward_internal(cx);
+            }
+            TerminalSidebarEvent::SearchNext => {
+                self.search_forward_internal(cx);
+            }
+            TerminalSidebarEvent::FontSizeChanged(size) => {
+                self.set_font_size(*size, cx);
+            }
+            TerminalSidebarEvent::FontFamilyChanged(family) => {
+                self.set_font_family(family.clone(), cx);
+            }
+            TerminalSidebarEvent::ThemeChanged(theme) => {
+                let theme_name = theme.name.to_string();
+                let _ = update_settings(cx, move |settings| {
+                    settings.theme = theme_name;
+                });
+            }
+            TerminalSidebarEvent::ExecuteCommand(command) => {
+                // 仅粘贴命令，不自动回车执行，降低误操作风险
+                self.paste_text(command, window, cx);
+            }
+            TerminalSidebarEvent::CursorBlinkChanged(enabled) => {
+                let enabled = *enabled;
+                let _ = update_settings(cx, move |settings| {
+                    settings.cursor_blink = enabled;
+                });
+            }
+            TerminalSidebarEvent::ConfirmHighRiskCommandChanged(enabled) => {
+                let enabled = *enabled;
+                let _ = update_settings(cx, move |settings| {
+                    settings.confirm_high_risk_command = enabled;
+                });
+            }
+            TerminalSidebarEvent::AutoCopyChanged(enabled) => {
+                self.set_auto_copy(*enabled, cx);
+            }
+            TerminalSidebarEvent::AutocompleteChanged(enabled) => {
+                self.set_autocomplete_enabled(*enabled, cx);
+            }
+            TerminalSidebarEvent::MiddleClickPasteChanged(enabled) => {
+                self.set_middle_click_paste(*enabled, cx);
+            }
+            TerminalSidebarEvent::VimScrollToArrowKeysChanged(enabled) => {
+                self.set_vim_scroll_to_arrow_keys(*enabled, cx);
+            }
+            TerminalSidebarEvent::SyncPathChanged(enabled) => {
+                let enabled = *enabled;
+                let _ = update_settings(cx, move |settings| {
+                    settings.sync_path_with_terminal = enabled;
+                });
+            }
+            TerminalSidebarEvent::CustomHighlightsChanged(rules) => {
+                let rules = rules.clone();
+                let _ = update_settings(cx, move |settings| {
+                    settings.custom_highlights = rules;
+                });
+            }
+            TerminalSidebarEvent::CdToTerminal(path) => {
+                // 向终端发送 cd 命令并回车
+                let cmd = format!("cd {}\n", shell_escape(path));
+                self.write_to_pty(cmd.into_bytes(), cx);
+            }
+            TerminalSidebarEvent::SyncWorkingDir => {
+                if let Some(path) = self
+                    .terminal
+                    .read(cx)
+                    .current_working_dir()
+                    .map(str::to_string)
+                {
+                    self.sidebar.update(cx, |sidebar, cx| {
+                        sidebar.sync_file_manager_path(path, cx);
+                    });
+                }
+            }
+            TerminalSidebarEvent::OpenJmsTerminal(params) => {
+                // 当前终端已从占位状态完成连接,新开的 JMS tab 不能继承占位标记。
+                if let Some(ctx) = self.jms_context.as_mut() {
+                    Self::mark_jms_context_connected(&mut ctx.is_placeholder);
+                }
+                cx.emit(TerminalViewEvent::OpenJmsTerminal(
+                    params.clone(),
+                    self.jms_context.clone(),
+                ));
+            }
+            TerminalSidebarEvent::ConnectJmsInCurrentTab(params) => {
+                // 在本 tab(占位终端)上直接连接,不新开 tab
+                // 保存连接参数,以便后续复制该标签页时能重新申请 token
+                self.koko_params = Some(params.clone());
+                self.terminal.update(cx, |t, cx| {
+                    t.connect_jms_koko(params.clone(), cx);
+                });
+            }
+        }
+    }
+
+    /// 内部搜索：向前搜索
+    fn search_forward_internal(&mut self, cx: &mut Context<Self>) {
+        if let Some(search) = self.addon_manager.get_as_mut::<SearchAddon>("search") {
+            let term = self.terminal.read(cx).term().clone();
+            let mut term = term.lock();
+            search.find_next(&mut term);
+        }
+        cx.notify();
+    }
+
+    /// 内部搜索：向后搜索
+    fn search_backward_internal(&mut self, cx: &mut Context<Self>) {
+        if let Some(search) = self.addon_manager.get_as_mut::<SearchAddon>("search") {
+            let term = self.terminal.read(cx).term().clone();
+            let mut term = term.lock();
+            search.find_previous(&mut term);
+        }
+        cx.notify();
+    }
+
+    fn history_prompt_enabled(&self, cx: &App) -> bool {
+        let terminal = self.terminal.read(cx);
+        let mode = terminal.mode();
+        let connection_kind = terminal.connection_kind();
+        history_prompt_available(
+            self.autocomplete_enabled,
+            connection_kind,
+            mode,
+            self.shell_prompt_input_active,
+        )
+    }
+
+    fn log_history_prompt_state(&self, reason: &str, detail: &str, cx: &App) {
+        let selected_match = self.history_prompt.selected_match().map(str::to_string);
+        tracing::debug!(
+            target: "terminal.history_prompt",
+            reason,
+            detail,
+            enabled = self.history_prompt_enabled(cx),
+            mode = ?self.history_prompt.mode(),
+            tracking = ?self.history_prompt.tracking_state(),
+            input = %self.history_prompt.input(),
+            query = %self.history_prompt.query_input(),
+            dropdown_visible = self.history_prompt.dropdown_visible(),
+            matches_len = self.history_prompt.matches().len(),
+            selected_index = ?self.history_prompt.selected_index(),
+            selected_match = ?selected_match,
+            "history prompt state"
+        );
+    }
+
+    fn refresh_history_prompt_matches(&mut self, cx: &mut Context<Self>) {
+        if !self.history_prompt_enabled(cx) {
+            self.hide_history_prompt_dropdown();
+            self.log_history_prompt_state("refresh_skipped", "history prompt disabled", cx);
+            return;
+        }
+
+        if !self.history_prompt.is_active() {
+            self.history_prompt.set_matches(Vec::new());
+            self.log_history_prompt_state("refresh_skipped", "tracking inactive", cx);
+            return;
+        }
+
+        if let Some(query) = self.current_cd_completion_query(cx) {
+            self.refresh_cd_completion_matches(query, cx);
+            return;
+        }
+
+        let terminal = self.terminal.read(cx);
+        let matches = match self.history_prompt.mode() {
+            HistoryPromptMode::InlineSuggest => terminal
+                .history_suggestions(self.history_prompt.query_input(), HISTORY_SUGGESTION_LIMIT),
+            HistoryPromptMode::Search => terminal.history_search_results(
+                self.history_prompt.query_input(),
+                HISTORY_SUGGESTION_LIMIT,
+            ),
+        };
+        let first_match = matches.first().cloned().unwrap_or_default();
+        self.history_prompt.set_matches(matches);
+        tracing::debug!(
+            target: "terminal.history_prompt",
+            reason = "refresh_matches",
+            mode = ?self.history_prompt.mode(),
+            query = %self.history_prompt.query_input(),
+            matches_len = self.history_prompt.matches().len(),
+            first_match = %first_match,
+            "history prompt refreshed"
+        );
+    }
+
+    fn current_cd_completion_query(&self, cx: &App) -> Option<CdCompletionQuery> {
+        if self.history_prompt.mode() != HistoryPromptMode::InlineSuggest {
+            return None;
+        }
+
+        let terminal = self.terminal.read(cx);
+        if terminal.connection_kind() != TerminalConnectionKind::Ssh {
+            return None;
+        }
+
+        parse_cd_completion_query(
+            self.history_prompt.query_input(),
+            terminal.current_working_dir(),
+        )
+    }
+
+    fn refresh_cd_completion_matches(&mut self, query: CdCompletionQuery, cx: &mut Context<Self>) {
+        if let Some(directory_names) = self.cd_completion_cache.get(&query.parent_dir) {
+            let matches = build_cd_completion_suggestions(&query, directory_names);
+            self.history_prompt.set_matches(matches);
+            tracing::debug!(
+                target: "terminal.history_prompt",
+                reason = "refresh_cd_matches_cached",
+                query = %self.history_prompt.query_input(),
+                parent_dir = %query.parent_dir,
+                matches_len = self.history_prompt.matches().len(),
+                "cd completion refreshed from cache"
+            );
+            return;
+        }
+
+        let Some(session_manager) = self.terminal.read(cx).ssh_session_manager().cloned() else {
+            self.history_prompt.set_matches(Vec::new());
+            return;
+        };
+
+        if self.cd_completion_loading_parent.as_deref() == Some(query.parent_dir.as_str()) {
+            return;
+        }
+
+        self.history_prompt.set_matches(Vec::new());
+        self.cd_completion_loading_parent = Some(query.parent_dir.clone());
+        let existing_client = self.cd_completion_client.clone();
+        let parent_dir = query.parent_dir.clone();
+        let request_parent_dir = parent_dir.clone();
+        let task = Tokio::spawn(cx, async move {
+            let client = match existing_client {
+                Some(client) => client,
+                None => {
+                    let shared_client = session_manager.client().await?;
+                    Arc::new(Mutex::new(
+                        RusshSftpClient::connect_with_client(shared_client).await?,
+                    ))
+                }
+            };
+            let entries = {
+                let mut client = client.lock().await;
+                client.list_dir(&request_parent_dir).await?
+            };
+            Ok::<_, anyhow::Error>((client, entries))
+        });
+
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.cd_completion_loading_parent = None;
+                match result {
+                    Ok(Ok((client, entries))) => {
+                        this.cd_completion_client = Some(client);
+                        let directory_names = entries
+                            .into_iter()
+                            .filter(|entry| entry.is_dir && entry.name != "." && entry.name != "..")
+                            .map(|entry| entry.name)
+                            .collect::<Vec<_>>();
+                        this.cd_completion_cache
+                            .put(parent_dir.clone(), directory_names);
+
+                        if let Some(current_query) = this.current_cd_completion_query(cx) {
+                            if current_query.parent_dir == parent_dir {
+                                if let Some(directory_names) =
+                                    this.cd_completion_cache.get(&parent_dir)
+                                {
+                                    let matches = build_cd_completion_suggestions(
+                                        &current_query,
+                                        directory_names,
+                                    );
+                                    this.history_prompt.set_matches(matches);
+                                    cx.notify();
+                                }
+                            }
+                        }
+                    }
+                    Ok(Err(error)) => {
+                        tracing::warn!(
+                            target: "terminal.history_prompt",
+                            parent_dir = %parent_dir,
+                            error = %error,
+                            "cd completion list_dir failed"
+                        );
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            target: "terminal.history_prompt",
+                            parent_dir = %parent_dir,
+                            error = %error,
+                            "cd completion task failed"
+                        );
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn dismiss_history_prompt(&mut self) {
+        self.history_prompt.dismiss();
+    }
+
+    fn hide_history_prompt_dropdown(&mut self) {
+        self.history_prompt.hide_dropdown();
+    }
+
+    fn apply_inline_input_to_history_prompt(&mut self, text: &str, cx: &mut Context<Self>) {
+        if !self.history_prompt_enabled(cx) {
+            self.hide_history_prompt_dropdown();
+            self.log_history_prompt_state("inline_input_skipped", "history prompt disabled", cx);
+            return;
+        }
+        self.history_prompt.append_text(text);
+        self.history_prompt.show_dropdown();
+        let detail = format!("text={text:?}");
+        self.log_history_prompt_state("inline_input", &detail, cx);
+        self.schedule_debounced_refresh(cx);
+    }
+
+    /// 防抖刷新建议匹配（30ms 延迟）
+    fn schedule_debounced_refresh(&mut self, cx: &mut Context<Self>) {
+        self.suggestion_debounce.take();
+        self.suggestion_debounce = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(30))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.refresh_history_prompt_matches(cx);
+                cx.notify();
+            });
+        }));
+    }
+
+    fn apply_paste_to_history_prompt(&mut self, text: &str, cx: &mut Context<Self>) {
+        if !self.history_prompt_enabled(cx) {
+            self.hide_history_prompt_dropdown();
+            self.log_history_prompt_state("paste_skipped", "history prompt disabled", cx);
+            return;
+        }
+        self.history_prompt.apply_paste(text);
+        let detail = format!(
+            "len={} multiline={}",
+            text.len(),
+            text.contains('\n') || text.contains('\r')
+        );
+        self.log_history_prompt_state("paste_input", &detail, cx);
+        self.refresh_history_prompt_matches(cx);
+    }
+
+    fn clear_history_prompt(&mut self) {
+        self.dismiss_history_prompt();
+    }
+
+    fn start_history_search(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.history_prompt_enabled(cx) || !self.history_prompt.is_active() {
+            self.hide_history_prompt_dropdown();
+            self.log_history_prompt_state("search_skipped", "history prompt unavailable", cx);
+            return false;
+        }
+
+        if self.history_prompt.mode() == HistoryPromptMode::Search {
+            return self.try_navigate_history_prompt(true, cx);
+        }
+
+        self.history_prompt.enter_search();
+        self.log_history_prompt_state("search_enter", "ctrl-r", cx);
+        self.refresh_history_prompt_matches(cx);
+        cx.notify();
+        true
+    }
+
+    fn exit_history_search(&mut self, cx: &mut Context<Self>) {
+        if self.history_prompt.mode() != HistoryPromptMode::Search {
+            return;
+        }
+        self.history_prompt.exit_search();
+        self.log_history_prompt_state("search_exit", "escape", cx);
+        self.refresh_history_prompt_matches(cx);
+        cx.notify();
+    }
+
+    fn dismiss_history_prompt_matches(&mut self) {
+        self.history_prompt.dismiss_matches();
+    }
+
+    fn replace_history_prompt_line(&mut self, command: &str, cx: &mut Context<Self>) {
+        tracing::debug!(
+            target: "terminal.history_prompt",
+            reason = "replace_line",
+            command = %command,
+            "history prompt replacing terminal line"
+        );
+        let mut bytes = Vec::with_capacity(command.len() + 1);
+        bytes.extend_from_slice(b"\x15");
+        bytes.extend_from_slice(command.as_bytes());
+        self.write_to_pty(bytes, cx);
+    }
+
+    fn try_accept_history_prompt(&mut self, cx: &mut Context<Self>) -> bool {
+        let selected_match = self.history_prompt.selected_match().map(str::to_string);
+        let Some(accepted) = self.history_prompt.accept_selected_suggestion() else {
+            tracing::debug!(
+                target: "terminal.history_prompt",
+                reason = "accept_rejected",
+                mode = ?self.history_prompt.mode(),
+                query = %self.history_prompt.query_input(),
+                selected_match = ?selected_match,
+                "history prompt accept rejected"
+            );
+            return false;
+        };
+        match accepted {
+            HistoryPromptAccept::AppendSuffix(suffix) => {
+                tracing::debug!(
+                    target: "terminal.history_prompt",
+                    reason = "accept_suffix",
+                    query = %self.history_prompt.query_input(),
+                    selected_match = ?selected_match,
+                    suffix = %suffix,
+                    "history prompt accepted suffix"
+                );
+                self.write_to_pty(suffix.into_bytes(), cx)
+            }
+            HistoryPromptAccept::ReplaceLine(command) => {
+                tracing::debug!(
+                    target: "terminal.history_prompt",
+                    reason = "accept_replace_line",
+                    query = %self.history_prompt.query_input(),
+                    selected_match = ?selected_match,
+                    command = %command,
+                    "history prompt accepted line replacement"
+                );
+                self.replace_history_prompt_line(&command, cx);
+            }
+        }
+        self.dismiss_history_prompt_matches();
+        self.log_history_prompt_state("accept_complete", "dismiss matches after accept", cx);
+        cx.notify();
+        true
+    }
+
+    /// 逐词接受建议（Ctrl+Right / Alt+F）
+    fn try_accept_next_word_history_prompt(&mut self, cx: &mut Context<Self>) -> bool {
+        let selected_match = self.history_prompt.selected_match().map(str::to_string);
+        let Some(accepted) = self.history_prompt.accept_next_word() else {
+            tracing::debug!(
+                target: "terminal.history_prompt",
+                reason = "accept_next_word_rejected",
+                query = %self.history_prompt.query_input(),
+                selected_match = ?selected_match,
+                "history prompt next-word accept rejected"
+            );
+            return false;
+        };
+        match accepted {
+            HistoryPromptAccept::AppendSuffix(suffix) => {
+                tracing::debug!(
+                    target: "terminal.history_prompt",
+                    reason = "accept_next_word_suffix",
+                    query = %self.history_prompt.query_input(),
+                    selected_match = ?selected_match,
+                    suffix = %suffix,
+                    "history prompt accepted next word"
+                );
+                self.write_to_pty(suffix.into_bytes(), cx)
+            }
+            HistoryPromptAccept::ReplaceLine(command) => {
+                tracing::debug!(
+                    target: "terminal.history_prompt",
+                    reason = "accept_next_word_replace_line",
+                    query = %self.history_prompt.query_input(),
+                    selected_match = ?selected_match,
+                    command = %command,
+                    "history prompt next-word triggered line replacement"
+                );
+                self.replace_history_prompt_line(&command, cx);
+            }
+        }
+        self.log_history_prompt_state("accept_next_word_complete", "after next-word accept", cx);
+        cx.notify();
+        true
+    }
+
+    fn try_navigate_history_prompt(&mut self, previous: bool, cx: &mut Context<Self>) -> bool {
+        if !self.history_prompt_enabled(cx) {
+            return false;
+        }
+
+        if self.history_prompt.matches().is_empty() {
+            self.refresh_history_prompt_matches(cx);
+        }
+
+        let command = if previous {
+            self.history_prompt.navigate_previous()
+        } else {
+            self.history_prompt.navigate_next()
+        };
+        if command.is_none() {
+            return false;
+        }
+        cx.notify();
+        true
+    }
+
+    fn select_history_prompt_match(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(_) = self.history_prompt.select_match(index) else {
+            return;
+        };
+        cx.notify();
+    }
+
+    fn render_history_prompt_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.history_prompt_enabled(cx) || !self.history_prompt.is_active() {
+            return None;
+        }
+
+        if !self.history_prompt.dropdown_visible() {
+            return None;
+        }
+
+        let search_mode = self.history_prompt.mode() == HistoryPromptMode::Search;
+        let matches = self.history_prompt.matches().to_vec();
+        if !search_mode && matches.is_empty() {
+            return None;
+        }
+
+        let (cursor_line, cursor_col) = {
+            let terminal = self.terminal.read(cx);
+            let term = terminal.term().lock();
+            let cursor = term.grid().cursor.point;
+            let display_offset = term.grid().display_offset() as i32;
+            (cursor.line.0 + display_offset, cursor.column.0)
+        };
+
+        if cursor_line < 0 {
+            return None;
+        }
+
+        let selected_index = self.history_prompt.selected_index();
+        let search_query = self.history_prompt.query_input().to_string();
+        let view = cx.entity().clone();
+        let overlay_bounds = history_prompt_overlay_bounds(self.terminal_bounds);
+        let ghost_left = self.cell_width * cursor_col as f32;
+        let ghost_top = self.line_height * cursor_line as f32;
+        let dropdown_origin = history_prompt_dropdown_origin(
+            overlay_bounds,
+            self.cell_width,
+            self.line_height,
+            cursor_line,
+            cursor_col,
+            matches.len(),
+            search_mode,
+        );
+        let ghost_suffix = if search_mode {
+            None
+        } else {
+            self.history_prompt.selected_match().map(|selected| {
+                selected
+                    .strip_prefix(self.history_prompt.query_input())
+                    .unwrap_or_default()
+                    .to_string()
+            })
+        };
+
+        Some(
+            div()
+                .absolute()
+                .left(px(0.0))
+                .top(px(0.0))
+                .right(px(0.0))
+                .bottom(px(0.0))
+                .when_some(ghost_suffix, |this, ghost_suffix| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .left(ghost_left)
+                            .top(ghost_top)
+                            .text_color(self.current_theme.foreground.opacity(0.35))
+                            .text_size(self.font_size)
+                            .child(ghost_suffix),
+                    )
+                })
+                .child(
+                    div()
+                        .absolute()
+                        .left(dropdown_origin.x)
+                        .top(dropdown_origin.y)
+                        .min_w(px(HISTORY_PROMPT_DROPDOWN_MIN_WIDTH))
+                        .max_w(px(HISTORY_PROMPT_DROPDOWN_MAX_WIDTH))
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .px_2()
+                        .py_2()
+                        .rounded_md()
+                        .bg(self.current_theme.background.opacity(0.96))
+                        .border_1()
+                        .border_color(self.current_theme.foreground.opacity(0.18))
+                        .when(search_mode, |this| {
+                            this.child(
+                                div()
+                                    .px_2()
+                                    .pb_1()
+                                    .text_color(self.current_theme.foreground.opacity(0.7))
+                                    .text_size(px(11.0))
+                                    .child(format!("history search: {}", search_query)),
+                            )
+                        })
+                        .children(matches.into_iter().enumerate().map(|(index, command)| {
+                            let active = selected_index == Some(index);
+                            div()
+                                .on_mouse_move({
+                                    let view = view.clone();
+                                    move |_, _, cx| {
+                                        cx.stop_propagation();
+                                        view.update(cx, |this, cx| {
+                                            this.select_history_prompt_match(index, cx);
+                                        });
+                                    }
+                                })
+                                .on_mouse_down(MouseButton::Left, {
+                                    let view = view.clone();
+                                    move |_, _, cx| {
+                                        cx.stop_propagation();
+                                        view.update(cx, |this, cx| {
+                                            this.select_history_prompt_match(index, cx);
+                                            let _ = this.try_accept_history_prompt(cx);
+                                        });
+                                    }
+                                })
+                                .cursor_pointer()
+                                .px_3()
+                                .py_1p5()
+                                .rounded_sm()
+                                .bg(if active {
+                                    self.current_theme.foreground.opacity(0.18)
+                                } else {
+                                    transparent_black()
+                                })
+                                .text_color(if active {
+                                    self.current_theme.foreground
+                                } else {
+                                    self.current_theme.foreground.opacity(0.8)
+                                })
+                                .text_size(px(12.0))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(Icon::new(IconName::Calendar).xsmall().text_color(
+                                            self.current_theme.foreground.opacity(if active {
+                                                0.85
+                                            } else {
+                                                0.55
+                                            }),
+                                        ))
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .overflow_x_hidden()
+                                                .text_ellipsis()
+                                                .whitespace_nowrap()
+                                                .child(command),
+                                        ),
+                                )
+                        })),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn handle_terminal_event(
+        &mut self,
+        _terminal: &Entity<Terminal>,
+        event: &TerminalModelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(event, TerminalModelEvent::Wakeup) {
+            tracing::debug!(
+                target: "terminal.history_prompt",
+                reason = "terminal_event",
+                event = ?event,
+                reset = should_reset_history_prompt_for_terminal_event(event),
+                "terminal model event observed"
+            );
+        }
+        match event {
+            TerminalModelEvent::InputStart => {
+                self.shell_prompt_input_active = true;
+                self.local_command_running = false;
+                self.shell_integration_detected = true;
+            }
+            TerminalModelEvent::PromptStart => {
+                self.shell_prompt_input_active = false;
+                self.local_command_running = false;
+                self.shell_integration_detected = true;
+            }
+            TerminalModelEvent::CommandStart => {
+                self.shell_prompt_input_active = false;
+                self.local_command_running = true;
+                self.shell_integration_detected = true;
+            }
+            TerminalModelEvent::ChildExit(_) => {
+                self.shell_prompt_input_active = false;
+                self.local_command_running = false;
+                self.clear_command_queue();
+            }
+            _ => {}
+        }
+
+        if should_advance_command_queue(event) {
+            self.on_shell_prompt_ready(window, cx);
+        }
+
+        if should_reset_history_prompt_for_terminal_event(event) {
+            self.dismiss_history_prompt();
+            self.log_history_prompt_state("terminal_event_reset", "prompt lifecycle event", cx);
+        }
+
+        match event {
+            TerminalModelEvent::Wakeup => {
+                self.sync_ssh_mfa_inputs(window, cx);
+                self.focus_terminal_after_connect_if_ready(window, cx);
+                if self.history_prompt.is_active() {
+                    self.refresh_history_prompt_matches(cx);
+                }
+                cx.notify();
+            }
+            TerminalModelEvent::SshMfaChanged => {
+                self.sync_ssh_mfa_inputs(window, cx);
+                self.focus_terminal_after_connect_if_ready(window, cx);
+                cx.notify();
+            }
+            TerminalModelEvent::PromptStart
+            | TerminalModelEvent::InputStart
+            | TerminalModelEvent::CommandStart => {
+                cx.notify();
+            }
+            TerminalModelEvent::TitleChanged(_) => {
+                cx.emit(TabContentEvent::StateChanged);
+            }
+            TerminalModelEvent::Bell => {
+                // 可选：播放声音或闪烁标签
+            }
+            TerminalModelEvent::ChildExit(_) => {
+                cx.notify();
+            }
+            TerminalModelEvent::ClipboardStore(data) => {
+                cx.write_to_clipboard(ClipboardItem::new_string(data.clone()));
+            }
+            TerminalModelEvent::WorkingDirChanged(path) => {
+                let path = path.clone();
+                self.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.set_file_manager_initial_dir(path.clone(), cx);
+                    sidebar.sync_file_manager_path(path, cx);
+                });
+            }
+        }
+    }
+
+    fn sync_ssh_mfa_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(request) = self.terminal.read(cx).ssh_mfa_request() else {
+            self.ssh_mfa_inputs.clear();
+            return;
+        };
+
+        let inputs_match_request = self.ssh_mfa_inputs.len() == request.prompts.len()
+            && self
+                .ssh_mfa_inputs
+                .iter()
+                .zip(request.prompts.iter())
+                .all(|(input, prompt)| input.prompt == prompt.prompt && input.echo == prompt.echo);
+
+        if !inputs_match_request {
+            self.ssh_mfa_inputs = request
+                .prompts
+                .iter()
+                .map(|prompt| SshMfaInput {
+                    prompt: prompt.prompt.clone(),
+                    echo: prompt.echo,
+                    input: cx.new(|cx| {
+                        let mut state =
+                            InputState::new(window, cx).placeholder(prompt.prompt.clone());
+                        if !prompt.echo {
+                            state = state.masked(true);
+                        }
+                        state
+                    }),
+                })
+                .collect();
+        }
+        if let Some(input) = self.ssh_mfa_inputs.first() {
+            input.input.update(cx, |state, cx| state.focus(window, cx));
+        }
+    }
+
+    fn submit_ssh_mfa(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let responses = self
+            .ssh_mfa_inputs
+            .iter()
+            .map(|input| input.input.read(cx).text().to_string())
+            .collect();
+        if self.terminal.read(cx).submit_ssh_mfa(responses) {
+            self.ssh_mfa_inputs.clear();
+            self.focus_terminal_after_connect = true;
+            self.focus_terminal_after_connect_if_ready(window, cx);
+        }
+        cx.notify();
+    }
+
+    fn focus_terminal_after_connect_if_ready(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.focus_terminal_after_connect {
+            return;
+        }
+
+        let (connection_state, has_mfa_request) = {
+            let terminal = self.terminal.read(cx);
+            (
+                terminal.connection_state().clone(),
+                terminal.ssh_mfa_request().is_some(),
+            )
+        };
+
+        match connection_state {
+            ConnectionState::Connected if !has_mfa_request => {
+                self.focus_terminal_after_connect = false;
+                self.focus_terminal(window, cx);
+            }
+            ConnectionState::Disconnected { .. } => {
+                self.focus_terminal_after_connect = false;
+            }
+            _ => {}
+        }
+    }
+
+    fn create_addon_manager() -> AddonManager {
+        let mut manager = AddonManager::new();
+        register_default_addons(&mut manager);
+        manager
+    }
+
+    /// Apply a terminal theme
+    pub fn set_theme(&mut self, theme: TerminalTheme, cx: &mut Context<Self>) {
+        self.current_theme = theme;
+        cx.notify();
+    }
+
+    /// Get current theme
+    pub fn current_theme(&self) -> &TerminalTheme {
+        &self.current_theme
+    }
+
+    /// 获取连接类型（本地 / SSH）
+    pub fn connection_kind(&self, cx: &App) -> TerminalConnectionKind {
+        self.terminal.read(cx).connection_kind()
+    }
+
+    /// 获取 SSH 连接 ID（本地终端返回 None）
+    pub fn connection_id(&self, cx: &App) -> Option<i64> {
+        self.terminal.read(cx).connection_id()
+    }
+
+    /// 获取本地终端的工作目录
+    pub fn local_working_dir(&self) -> Option<&std::path::Path> {
+        self.local_working_dir.as_deref()
+    }
+
+    /// 获取本地终端配置（用于复制标签页）
+    pub fn local_config(&self) -> Option<&LocalConfig> {
+        self.local_config.as_ref()
+    }
+    pub(crate) fn tab_panel(&self) -> Option<Entity<TabPanel>> {
+        self.tab_panel.as_ref().and_then(WeakEntity::upgrade)
+    }
+    /// Collapse the sidebar for terminals created as split panes.
+    pub fn collapse_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar.update(cx, |sidebar, cx| {
+            if !sidebar.is_collapsed() {
+                sidebar.toggle_collapsed(cx);
+            }
+        });
+    }
+
+    /// Re-send terminal geometry after a split has been inserted into the dock.
+    ///
+    /// A local sidebar starts collapsed, so `collapse_sidebar` can be a no-op. The resize must
+    /// therefore be requested independently from sidebar state changes. A second, delayed pass
+    /// is required because the first canvas measurement may precede the final nested dock layout.
+    pub(crate) fn request_post_split_resize(&mut self, cx: &mut Context<Self>) {
+        self.post_split_resize_pending = true;
+        self.post_split_resize_settle_task.take();
+        self.post_split_resize_settle_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(75))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.post_split_resize_pending = true;
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    /// 设置分屏序号（用于在连接标题后显示 Tab1/Tab2...）
+    pub fn set_pane_index(&mut self, index: usize) {
+        self.pane_index = Some(index);
+    }
+
+    /// 获取当前工作目录（主要由 SSH 终端通过 OSC 7 更新）
+    pub fn current_working_dir(&self, cx: &App) -> Option<String> {
+        self.terminal
+            .read(cx)
+            .current_working_dir()
+            .map(String::from)
+    }
+
+    /// 获取终端连接状态
+    pub fn connection_state(&self, cx: &App) -> ConnectionState {
+        self.terminal.read(cx).connection_state().clone()
+    }
+
+    /// 判断关闭当前终端是否需要用户确认（本地终端有运行中命令/TUI 时）。
+    pub fn should_confirm_close(&self, cx: &App) -> bool {
+        let terminal = self.terminal.read(cx);
+        should_confirm_local_terminal_close(
+            terminal.connection_kind(),
+            self.local_command_running,
+            terminal.mode(),
+            terminal.child_exited(),
+        )
+    }
+
+    /// 获取 JMS 资产树侧栏上下文
+    pub fn jms_context(&self) -> Option<&crate::sidebar::JmsSidebarContext> {
+        self.jms_context.as_ref()
+    }
+
+    /// 获取 JMS Koko 连接参数（用于复制标签页时重新申请 token）
+    pub fn koko_params(&self) -> Option<&jms::KokoConnectParams> {
+        self.koko_params.as_ref()
+    }
+
+    /// Returns the JMS asset name for the pane title, without its account name.
+    fn jms_asset_name(&self, cx: &App) -> Option<String> {
+        if self.terminal.read(cx).connection_kind() != TerminalConnectionKind::JmsKoko {
+            return None;
+        }
+
+        let params = self.koko_params.as_ref()?;
+        let title = params.title.trim();
+        let mut asset_name = title.strip_prefix("[JMS] ").unwrap_or(title).trim();
+
+        if let Some(account_name) = params.account_name.as_deref() {
+            let suffix = format!(" ({account_name})");
+            if let Some(stripped) = asset_name.strip_suffix(&suffix) {
+                asset_name = stripped.trim();
+            }
+        }
+
+        (!asset_name.is_empty()).then(|| asset_name.to_string())
+    }
+
+    /// Get all available themes
+    pub fn available_themes() -> Vec<TerminalTheme> {
+        TerminalTheme::all()
+    }
+
+    /// 设置字体大小
+    pub fn set_font_size(&mut self, size: f32, cx: &mut Context<Self>) {
+        let clamped = size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
+        let current = f32::from(self.font_size);
+        if (current - clamped).abs() < f32::EPSILON {
+            return;
+        }
+        let _ = update_settings(cx, move |settings| {
+            settings.font_size = clamped;
+        });
+    }
+
+    pub fn apply_terminal_settings(
+        &mut self,
+        font_size: f32,
+        font_family: impl Into<SharedString>,
+        font_weight: f32,
+        auto_copy: bool,
+        autocomplete_enabled: bool,
+        middle_click_paste: bool,
+        sync_path: bool,
+        vim_scroll_to_arrow_keys: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // 字体大小
+        let clamped = font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
+        let current = f32::from(self.font_size);
+        if (current - clamped).abs() >= f32::EPSILON {
+            self.font_size = px(clamped);
+            self.line_height = self.font_size * self.line_height_scale;
+        }
+
+        self.font_family = font_family.into();
+        self.font_weight = FontWeight(font_weight);
+        self.auto_copy_on_select = auto_copy;
+        self.apply_autocomplete_enabled(autocomplete_enabled, cx);
+        if !self.history_prompt_enabled(cx) {
+            self.suggestion_debounce.take();
+            self.hide_history_prompt_dropdown();
+            self.dismiss_history_prompt_matches();
+        }
+        self.middle_click_paste = middle_click_paste;
+        self.vim_scroll_to_arrow_keys = vim_scroll_to_arrow_keys;
+
+        let theme = self.current_theme.clone();
+        self.sidebar.update(cx, |sidebar, cx| {
+            sidebar.update_current_theme(&theme, window, cx);
+            sidebar.set_font_size(clamped, window, cx);
+            sidebar.set_font_family(self.font_family.clone(), cx);
+            sidebar.set_auto_copy(auto_copy, cx);
+            sidebar.set_middle_click_paste(middle_click_paste, cx);
+            sidebar.set_vim_scroll_to_arrow_keys(vim_scroll_to_arrow_keys, cx);
+            sidebar.set_sync_path_enabled(sync_path, cx);
+        });
+
+        cx.notify();
+    }
+
+    fn apply_settings_snapshot(
+        &mut self,
+        settings: &TerminalSettings,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.apply_terminal_settings(
+            settings.font_size,
+            settings.font_family.clone(),
+            settings.font_weight,
+            settings.auto_copy,
+            settings.enable_autocomplete,
+            settings.middle_click_paste,
+            settings.sync_path_with_terminal,
+            settings.vim_scroll_to_arrow_keys,
+            window,
+            cx,
+        );
+        self.apply_cursor_blink(settings.cursor_blink, window, cx);
+        self.apply_high_risk_command_settings(
+            settings.confirm_high_risk_command,
+            &settings.high_risk_command_patterns,
+            cx,
+        );
+        self.apply_custom_highlight_rules(&settings.custom_highlights, cx);
+        if let Some(theme) = TerminalTheme::find_by_name(&settings.theme) {
+            self.apply_theme(&theme, window, cx);
+        }
+    }
+
+    fn apply_custom_highlight_rules(
+        &mut self,
+        rules: &[TerminalHighlightRule],
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(addon) = self
+            .addon_manager
+            .get_as_mut::<CustomHighlightAddon>("custom_highlights")
+        {
+            addon.set_rules(rules);
+        }
+        self.sidebar.update(cx, |sidebar, cx| {
+            sidebar.set_custom_highlights(rules.to_vec(), cx);
+        });
+        cx.notify();
+    }
+
+    /// 应用主题（不 emit 事件，用于跨 tab 同步）
+    pub fn apply_theme(
+        &mut self,
+        theme: &TerminalTheme,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.current_theme.name == theme.name {
+            return;
+        }
+        self.current_theme = theme.clone();
+        self.sync_sidebar_theme(window, cx);
+        cx.notify();
+    }
+
+    /// 应用光标闪烁（不 emit 事件，用于跨 tab 同步）
+    pub fn apply_cursor_blink(
+        &mut self,
+        enabled: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.cursor_blink_enabled = enabled;
+        if enabled {
+            if self.focus_handle.is_focused(window) {
+                self.blink_manager.update(cx, BlinkCursor::start);
+            }
+        } else {
+            self.blink_manager.update(cx, BlinkCursor::stop);
+        }
+        self.sidebar.update(cx, |sidebar, cx| {
+            sidebar.set_cursor_blink(enabled, cx);
+        });
+        cx.notify();
+    }
+
+    pub fn apply_high_risk_command_settings(
+        &mut self,
+        enabled: bool,
+        patterns: &[String],
+        cx: &mut Context<Self>,
+    ) {
+        self.confirm_high_risk_command = enabled;
+        self.high_risk_command_patterns = patterns.to_vec();
+        self.sidebar.update(cx, |sidebar, cx| {
+            sidebar.set_confirm_high_risk_command(enabled, cx);
+        });
+        cx.notify();
+    }
+
+    pub fn sync_sidebar_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let theme = self.current_theme.clone();
+        self.sidebar.update(cx, |sidebar, cx| {
+            sidebar.update_current_theme(&theme, window, cx);
+        });
+    }
+
+    pub fn set_auto_copy(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.auto_copy_on_select == enabled {
+            return;
+        }
+        let _ = update_settings(cx, move |settings| {
+            settings.auto_copy = enabled;
+        });
+    }
+
+    pub fn apply_autocomplete_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.autocomplete_enabled == enabled {
+            return;
+        }
+        self.autocomplete_enabled = enabled;
+        if !enabled {
+            self.suggestion_debounce.take();
+            self.dismiss_history_prompt();
+            self.hide_history_prompt_dropdown();
+            self.dismiss_history_prompt_matches();
+        }
+        self.sidebar.update(cx, |sidebar, cx| {
+            sidebar.set_autocomplete_enabled(enabled, cx);
+        });
+        cx.notify();
+    }
+
+    pub fn set_autocomplete_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.autocomplete_enabled == enabled {
+            return;
+        }
+        let _ = update_settings(cx, move |settings| {
+            settings.enable_autocomplete = enabled;
+        });
+    }
+
+    pub fn set_middle_click_paste(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.middle_click_paste == enabled {
+            return;
+        }
+        let _ = update_settings(cx, move |settings| {
+            settings.middle_click_paste = enabled;
+        });
+    }
+
+    pub fn set_vim_scroll_to_arrow_keys(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.vim_scroll_to_arrow_keys == enabled {
+            return;
+        }
+        let _ = update_settings(cx, move |settings| {
+            settings.vim_scroll_to_arrow_keys = enabled;
+        });
+    }
+
+    /// 增大字体
+    pub fn increase_font_size(&mut self, cx: &mut Context<Self>) {
+        let current = f32::from(self.font_size);
+        self.set_font_size(current + 1.0, cx);
+    }
+
+    /// 减小字体
+    pub fn decrease_font_size(&mut self, cx: &mut Context<Self>) {
+        let current = f32::from(self.font_size);
+        self.set_font_size(current - 1.0, cx);
+    }
+
+    /// 重置字体大小为默认值
+    pub fn reset_font_size(&mut self, cx: &mut Context<Self>) {
+        self.set_font_size(TERMINAL_RESET_FONT_SIZE, cx);
+    }
+
+    /// 获取当前字体大小
+    pub fn font_size(&self) -> f32 {
+        f32::from(self.font_size)
+    }
+
+    /// 设置主字体
+    pub fn set_font_family(&mut self, family: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.font_family = family.into();
+        cx.notify();
+    }
+
+    /// 获取当前主字体
+    pub fn font_family(&self) -> &SharedString {
+        &self.font_family
+    }
+
+
+    /// 设置字体粗细
+    pub fn set_font_weight(&mut self, weight: f32, cx: &mut Context<Self>) {
+        self.font_weight = FontWeight(weight);
+        let _ = update_settings(cx, move |settings| {
+            settings.font_weight = weight;
+        });
+        cx.notify();
+    }
+
+    /// 获取当前字体粗细
+    pub fn font_weight(&self) -> FontWeight {
+        self.font_weight
+    }
+    /// 设置行高比例
+    pub fn set_line_height_scale(&mut self, scale: f32, cx: &mut Context<Self>) {
+        self.line_height_scale = scale.clamp(1.0, 2.5);
+        self.line_height = self.font_size * self.line_height_scale;
+        cx.notify();
+    }
+
+    /// 获取当前行高比例
+    pub fn line_height_scale(&self) -> f32 {
+        self.line_height_scale
+    }
+
+    pub fn reconnect(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.terminal.read(cx).connection_kind() == TerminalConnectionKind::JmsKoko {
+            self.reconnect_jms(cx);
+            return;
+        }
+
+        let working_dir = self
+            .terminal
+            .read(cx)
+            .current_working_dir()
+            .map(str::to_string);
+        self.focus_terminal_after_connect = true;
+        self.terminal.update(cx, |terminal, cx| {
+            terminal.reconnect(cx);
+        });
+
+        cx.spawn(async move |this, cx| {
+            loop {
+                let state = match this.update(cx, |this, cx| {
+                    this.terminal.read(cx).connection_state().clone()
+                }) {
+                    Ok(state) => state,
+                    Err(_) => break,
+                };
+
+                match state {
+                    ConnectionState::Connected => {
+                        let _ = this.update(cx, |this, cx| {
+                            this.sidebar.update(cx, |sidebar, cx| {
+                                sidebar.reconnect_file_manager(working_dir.clone(), cx);
+                            });
+                        });
+                        break;
+                    }
+                    ConnectionState::Disconnected { .. } => break,
+                    ConnectionState::Connecting => {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(100))
+                            .await;
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// 为 JMS Koko 终端重新申请一次性 token 后重建 WebSocket 连接。
+    fn reconnect_jms(&mut self, cx: &mut Context<Self>) {
+        if self.jms_reconnect_in_flight {
+            return;
+        }
+
+        let Some(jms_context) = self.jms_context.clone() else {
+            return;
+        };
+        let Some(old_params) = self.koko_params.clone() else {
+            return;
+        };
+        let Some(asset_id) = old_params.asset_id.clone() else {
+            return;
+        };
+        let account_name = old_params.account_name.clone().unwrap_or_default();
+
+        self.jms_reconnect_in_flight = true;
+        cx.notify();
+
+        let client = jms_context.client.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut client = client;
+                    client.create_connect_token(&asset_id, &account_name).await
+                })
+                .await;
+
+            let _ = this.update(cx, |this, cx| {
+                this.jms_reconnect_in_flight = false;
+                match result {
+                    Ok(token) => {
+                        let new_params = jms::KokoConnectParams {
+                            token_id: token.id,
+                            ..old_params
+                        };
+                        this.koko_params = Some(new_params.clone());
+                        this.terminal.update(cx, |terminal, cx| {
+                            terminal.connect_jms_koko(new_params, cx);
+                        });
+                    }
+                    Err(error) => {
+                        tracing::warn!("JMS 重连失败: {}", error);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn write_to_pty(&mut self, data: Vec<u8>, cx: &mut Context<Self>) {
+        // 用户输入时自动滚动到底部
+        let display_offset = self.terminal.read(cx).term().lock().grid().display_offset();
+        if should_scroll_to_bottom_on_user_input(
+            display_offset,
+            &self.scrollbar_handle.future_display_offset,
+        ) {
+            self.terminal.update(cx, |terminal, _| {
+                terminal
+                    .term()
+                    .lock()
+                    .scroll_display(alacritty_terminal::grid::Scroll::Bottom);
+            });
+        }
+        self.terminal.read(cx).write(&data);
+    }
+
+    fn commit_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        if !text.is_empty() {
+            self.apply_inline_input_to_history_prompt(text, cx);
+            self.write_to_pty(text.as_bytes().to_vec(), cx);
+        }
+    }
+
+    fn set_marked_text(
+        &mut self,
+        text: String,
+        range: Option<std::ops::Range<usize>>,
+        cx: &mut Context<Self>,
+    ) {
+        if text.is_empty() {
+            self.ime_state = None;
+        } else {
+            self.ime_state = Some(ImeState {
+                text,
+                marked_range: range,
+            });
+        }
+        cx.notify();
+    }
+
+    fn clear_marked_text(&mut self, cx: &mut Context<Self>) {
+        if self.ime_state.is_some() {
+            self.ime_state = None;
+            cx.notify();
+        }
+    }
+
+    fn marked_text_range(&self) -> Option<std::ops::Range<usize>> {
+        self.ime_state
+            .as_ref()
+            .and_then(|state| state.marked_range.clone())
+    }
+
+    fn handle_key_event(
+        &mut self,
+        event: &KeyDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        tracing::info!(
+            "TerminalView handle_key_event: key={}, ctrl={}, shift={}, alt={}, platform={}",
+            event.keystroke.key,
+            event.keystroke.modifiers.control,
+            event.keystroke.modifiers.shift,
+            event.keystroke.modifiers.alt,
+            event.keystroke.modifiers.platform,
+        );
+
+        // 输入时暂停闪烁
+        if self.cursor_blink_enabled {
+            self.blink_manager.update(cx, BlinkCursor::pause);
+        }
+
+        if keystroke_matches_shortcuts(
+            &event.keystroke,
+            &shortcuts_for(cx, action_id::TERMINAL_PASTE, &terminal_paste_defaults()),
+        ) {
+            self.paste(&Paste, _window, cx);
+            return;
+        }
+
+        if keystroke_matches_shortcuts(
+            &event.keystroke,
+            &shortcuts_for(cx, action_id::TERMINAL_COPY, &[TERMINAL_COPY_SHORTCUT]),
+        ) {
+            self.copy(&Copy, _window, cx);
+            return;
+        }
+
+        // 分屏快捷键：优先于终端输入处理，冒泡给 TerminalPaneArea
+        if is_split_shortcut(event, "o") {
+            tracing::info!("TerminalView: split shortcut Ctrl+Shift+O detected");
+            cx.emit(TerminalViewEvent::SplitPaneRight);
+            return;
+        }
+        if is_split_shortcut(event, "e") {
+            tracing::info!("TerminalView: split shortcut Ctrl+Shift+E detected");
+            cx.emit(TerminalViewEvent::SplitPaneDown);
+            return;
+        }
+        if is_split_shortcut(event, "w") {
+            tracing::info!("TerminalView: split shortcut Ctrl+Shift+W detected");
+            cx.emit(TerminalViewEvent::ClosePane);
+            return;
+        }
+        if is_split_shortcut(event, "z") {
+            tracing::info!("TerminalView: split shortcut Ctrl+Shift+Z detected");
+            cx.emit(TerminalViewEvent::TogglePaneZoom);
+            return;
+        }
+
+        let mode = self.terminal.read(cx).mode();
+
+        if mode.contains(TermMode::VI) {
+            self.hide_history_prompt_dropdown();
+            self.handle_vi_key_event(event, cx);
+            return;
+        }
+
+        let modifiers = event.keystroke.modifiers;
+        let key = event.keystroke.key.as_str();
+        tracing::debug!(
+            target: "terminal.history_prompt",
+            reason = "key_event",
+            key,
+            modifiers = ?modifiers,
+            shell_mode = ?mode,
+            "terminal key event"
+        );
+
+        if modifiers.control && !modifiers.alt && !modifiers.platform && key == "r" {
+            if self.start_history_search(cx) {
+                return;
+            }
+        }
+
+        if self.history_prompt.mode() == HistoryPromptMode::Search {
+            if !modifiers.control && !modifiers.alt && !modifiers.platform {
+                match key {
+                    "up" if self.try_navigate_history_prompt(false, cx) => return,
+                    "down" if self.try_navigate_history_prompt(true, cx) => return,
+                    "right" | "enter" if self.try_accept_history_prompt(cx) => return,
+                    "backspace" => {
+                        self.history_prompt.backspace();
+                        self.refresh_history_prompt_matches(cx);
+                        cx.notify();
+                        return;
+                    }
+                    "escape" => {
+                        self.exit_history_search(cx);
+                        return;
+                    }
+                    "space" => {
+                        self.history_prompt.append_text(" ");
+                        self.refresh_history_prompt_matches(cx);
+                        cx.notify();
+                        return;
+                    }
+                    _ if key.len() == 1 => {
+                        self.history_prompt.append_text(key);
+                        self.history_prompt.show_dropdown();
+                        self.refresh_history_prompt_matches(cx);
+                        cx.notify();
+                        return;
+                    }
+                    _ => {
+                        self.hide_history_prompt_dropdown();
+                    }
+                }
+            } else {
+                self.hide_history_prompt_dropdown();
+            }
+        }
+
+        if modifiers.control && !modifiers.alt && !modifiers.platform {
+            match key {
+                "u" | "c" => self.clear_history_prompt(),
+                // Ctrl+Right: 逐词接受建议
+                "right" if self.try_accept_next_word_history_prompt(cx) => return,
+                _ if should_dismiss_history_prompt_for_keystroke(&event.keystroke) => {
+                    self.dismiss_history_prompt();
+                }
+                _ => self.hide_history_prompt_dropdown(),
+            }
+        }
+
+        if !modifiers.control && !modifiers.alt && !modifiers.platform {
+            match key {
+                "up" if self.try_navigate_history_prompt(false, cx) => return,
+                "down" if self.try_navigate_history_prompt(true, cx) => return,
+                "right" if self.try_accept_history_prompt(cx) => return,
+                "backspace" => {
+                    if self.history_prompt_enabled(cx) {
+                        self.history_prompt.backspace();
+                        self.refresh_history_prompt_matches(cx);
+                    }
+                }
+                "enter" => {
+                    if self.connection_kind(cx) == TerminalConnectionKind::Local
+                        && self.history_prompt.is_valid()
+                    {
+                        let command = self.history_prompt.input().to_string();
+                        self.terminal.update(cx, |terminal, cx| {
+                            terminal.record_command(&command, cx);
+                        });
+                    }
+                    self.clear_history_prompt();
+                }
+                "left" | "home" | "end" | "delete" => {
+                    self.dismiss_history_prompt();
+                }
+                "pageup" | "pagedown" => {
+                    self.dismiss_history_prompt();
+                }
+                "escape" => {
+                    self.dismiss_history_prompt();
+                }
+                _ => {
+                    if should_defer_inline_history_prompt_input_to_text_system(&event.keystroke) {
+                        // 普通文本输入统一走 EntityInputHandler::replace_text_in_range -> commit_text，
+                        // 避免 keydown 与文本系统各自追加一次，导致 history_prompt 双写。
+                    } else if should_dismiss_history_prompt_for_keystroke(&event.keystroke) {
+                        self.dismiss_history_prompt();
+                    }
+                }
+            }
+        } else if modifiers.alt && !modifiers.control && !modifiers.platform {
+            // Alt+F: 逐词接受建议（emacs 风格）
+            if key == "f" && self.try_accept_next_word_history_prompt(cx) {
+                return;
+            }
+            self.dismiss_history_prompt();
+        } else {
+            self.dismiss_history_prompt();
+        }
+
+        if let Some(esc_str) = crate::keys::to_esc_str(&event.keystroke, &mode, false) {
+            let bytes = match esc_str {
+                Cow::Borrowed(s) => s.as_bytes().to_vec(),
+                Cow::Owned(s) => s.into_bytes(),
+            };
+            self.write_to_pty(bytes, cx);
+        }
+    }
+
+    fn handle_vi_key_event(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        use alacritty_terminal::vi_mode::ViMotion;
+
+        let key = &event.keystroke.key;
+        let shift = event.keystroke.modifiers.shift;
+        let ctrl = event.keystroke.modifiers.control;
+
+        let motion = match (key.as_str(), shift, ctrl) {
+            ("h", true, false) => Some(ViMotion::High),
+            ("m", true, false) => Some(ViMotion::Middle),
+            ("l", true, false) => Some(ViMotion::Low),
+            ("b", true, false) => Some(ViMotion::WordLeft),
+            ("w", true, false) => Some(ViMotion::WordRight),
+            ("e", true, false) => Some(ViMotion::WordRightEnd),
+            ("h" | "left", false, false) => Some(ViMotion::Left),
+            ("j" | "down", false, false) => Some(ViMotion::Down),
+            ("k" | "up", false, false) => Some(ViMotion::Up),
+            ("l" | "right", false, false) => Some(ViMotion::Right),
+            ("0", _, false) => Some(ViMotion::First),
+            ("$", _, false) => Some(ViMotion::Last),
+            ("^", _, false) => Some(ViMotion::FirstOccupied),
+            ("b", false, false) => Some(ViMotion::SemanticLeft),
+            ("w", false, false) => Some(ViMotion::SemanticRight),
+            ("e", false, false) => Some(ViMotion::SemanticRightEnd),
+            ("%", _, false) => Some(ViMotion::Bracket),
+            ("{", _, false) => Some(ViMotion::ParagraphUp),
+            ("}", _, false) => Some(ViMotion::ParagraphDown),
+            _ => None,
+        };
+
+        if let Some(ref motion) = motion {
+            let term = self.terminal.read(cx).term().clone();
+            let mut term = term.lock();
+            term.vi_motion(motion.clone());
+            drop(term);
+            cx.notify();
+            return;
+        }
+
+        let term = self.terminal.read(cx).term().clone();
+
+        match key.as_str() {
+            "v" if !ctrl && !shift => {
+                self.vi_start_selection(SelectionType::Simple, cx);
+            }
+            "v" if shift => {
+                self.vi_start_selection(SelectionType::Lines, cx);
+            }
+            "y" => {
+                let term = term.lock();
+                if let Some(text) = term.selection_to_string() {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                }
+                drop(term);
+                self.terminal.read(cx).term().lock().selection = None;
+                cx.notify();
+            }
+            "u" if ctrl => {
+                let mut term = term.lock();
+                let lines = term.screen_lines() as i32 / 2;
+                let vi_cursor = term.vi_mode_cursor.scroll(&term, lines);
+                term.vi_goto_point(vi_cursor.point);
+                drop(term);
+                cx.notify();
+            }
+            "d" if ctrl => {
+                let mut term = term.lock();
+                let lines = term.screen_lines() as i32 / 2;
+                let vi_cursor = term.vi_mode_cursor.scroll(&term, -lines);
+                term.vi_goto_point(vi_cursor.point);
+                drop(term);
+                cx.notify();
+            }
+            "g" if !shift => {
+                let mut term = term.lock();
+                let point = AlacPoint::new(Line(term.topmost_line().0), Column(0));
+                term.vi_goto_point(point);
+                drop(term);
+                cx.notify();
+            }
+            "g" if shift => {
+                let mut term = term.lock();
+                let point = AlacPoint::new(term.bottommost_line(), Column(0));
+                term.vi_goto_point(point);
+                drop(term);
+                cx.notify();
+            }
+            _ => {}
+        }
+    }
+
+    fn vi_start_selection(&mut self, selection_type: SelectionType, cx: &mut Context<Self>) {
+        use alacritty_terminal::selection::Selection;
+
+        let term = self.terminal.read(cx).term().clone();
+        let mut term = term.lock();
+        let point = term.vi_mode_cursor.point;
+        if term.selection.is_some() {
+            term.selection = None;
+        } else {
+            term.selection = Some(Selection::new(selection_type, point, Side::Left));
+        }
+        drop(term);
+        cx.notify();
+    }
+
+    fn toggle_vi_mode(&mut self, _: &ToggleViMode, window: &mut Window, cx: &mut Context<Self>) {
+        let in_vi_mode = self.terminal.update(cx, |terminal, _| {
+            terminal.toggle_vi_mode();
+            terminal.mode().contains(TermMode::VI)
+        });
+        let shortcut = terminal_shortcut_label(TERMINAL_TOGGLE_VI_MODE_SHORTCUT);
+        let message = if in_vi_mode {
+            t!("TerminalView.vi_mode_enabled", shortcut = shortcut).to_string()
+        } else {
+            t!("TerminalView.vi_mode_disabled", shortcut = shortcut).to_string()
+        };
+        window.push_notification(message, cx);
+        cx.notify();
+    }
+
+    fn copy(&mut self, _: &Copy, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = self.terminal.read(cx).selection_text() {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        }
+        self.focus_terminal(window, cx);
+    }
+
+    fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(clipboard) = cx.read_from_clipboard() {
+            if let Some(text) = clipboard.text() {
+                self.paste_text(&text, window, cx);
+            }
+        }
+    }
+
+    fn increase_font(&mut self, _: &IncreaseFont, window: &mut Window, cx: &mut Context<Self>) {
+        self.increase_font_size(cx);
+        self.sync_sidebar_theme(window, cx);
+    }
+
+    fn decrease_font(&mut self, _: &DecreaseFont, window: &mut Window, cx: &mut Context<Self>) {
+        self.decrease_font_size(cx);
+        self.sync_sidebar_theme(window, cx);
+    }
+
+    fn reset_font(&mut self, _: &ResetFont, window: &mut Window, cx: &mut Context<Self>) {
+        self.reset_font_size(cx);
+        self.sync_sidebar_theme(window, cx);
+        window.push_notification(
+            Notification::info(t!("TerminalView.font_reset_triggered").to_string()).autohide(true),
+            cx,
+        );
+    }
+
+    /// 粘贴文本到终端
+    ///
+    /// 优先保留 bracketed paste 的完整字节流；仅在远端不支持该模式、内容是多条
+    /// 独立简单命令时使用逐命令队列。复杂 shell 结构和高风险命令需要整体发送或确认。
+    fn paste_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let mode = self.terminal.read(cx).mode();
+        let is_local = self.connection_kind(cx) == TerminalConnectionKind::Local;
+
+        if mode.contains(TermMode::ALT_SCREEN) {
+            self.paste_text_unchecked(text, window, cx);
+            return;
+        }
+
+        if self.confirm_high_risk_command && self.contains_high_risk_command(text) {
+            self.show_paste_confirm_dialog(
+                text.to_string(),
+                t!("TerminalView.high_risk_paste_title").to_string(),
+                t!("TerminalView.high_risk_paste_message").to_string(),
+                window,
+                cx,
+            );
+            return;
+        }
+
+        // Windows ConPTY supports bracketed paste through the console input mode even though
+        // it does not advertise BRACKETED_PASTE through the terminal parser.
+        let is_bracketed_paste = mode.contains(TermMode::BRACKETED_PASTE) || is_local;
+
+        if !is_bracketed_paste {
+            if let Some(hazard) = detect_unbracketed_paste_hazard(text) {
+                self.show_unbracketed_paste_block_dialog(text, hazard, window, cx);
+                return;
+            }
+        }
+
+        self.paste_text_unchecked(text, window, cx);
+    }
+
+    fn paste_text_unchecked(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.command_queue_active {
+            return;
+        }
+
+        let mode = self.terminal.read(cx).mode();
+        let is_local = self.connection_kind(cx) == TerminalConnectionKind::Local;
+        let use_bracketed = mode.contains(TermMode::BRACKETED_PASTE);
+        let normalized = normalize_paste_text(text);
+
+        if let Some(commands) = batch_commands_for_paste(
+            use_bracketed,
+            mode.contains(TermMode::ALT_SCREEN),
+            is_local,
+            &normalized,
+        ) {
+            self.clear_command_queue();
+            self.start_command_queue(commands, window, cx);
+            return;
+        }
+
+        self.apply_paste_to_history_prompt(&normalized, cx);
+        if use_bracketed {
+            self.write_to_pty(encode_bracketed_paste(&normalized), cx);
+        } else if is_local {
+            let lines: Vec<&str> = normalized.split('\n').collect();
+            if lines.len() > 1 {
+                let data_clone: Vec<Vec<u8>> = lines
+                    .iter()
+                    .map(|line| {
+                        let mut buf = line.as_bytes().to_vec();
+                        buf.push(b'\r');
+                        buf
+                    })
+                    .collect();
+                cx.spawn(async move |this, cx| {
+                    for chunk in data_clone {
+                        let _ = this.update(cx, |this, cx| {
+                            this.write_to_pty(chunk, cx);
+                        });
+                        cx.background_executor()
+                            .timer(Duration::from_millis(30))
+                            .await;
+                    }
+                })
+                .detach();
+            } else {
+                let mut data = normalized.as_bytes().to_vec();
+                data.push(b'\r');
+                self.write_to_pty(data, cx);
+            }
+        } else {
+            self.write_to_pty(normalized.into_bytes(), cx);
+        }
+        self.focus_terminal(window, cx);
+    }
+
+    /// 执行队列中的下一条命令
+    fn execute_next_queued_command(&mut self, cx: &mut Context<Self>) {
+        if let Some(command) = self.command_queue.pop_front() {
+            let mut data = command.into_bytes();
+            data.push(b'\n');
+            self.write_to_pty(data, cx);
+        }
+        if self.command_queue.is_empty() {
+            self.command_queue_active = false;
+            self.command_queue_fallback_timer.take();
+        }
+    }
+
+    /// shell prompt 就绪时触发队列下一条命令
+    fn on_shell_prompt_ready(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // 收到 OSC 133 事件后取消 fallback 定时器，改由事件驱动
+        self.command_queue_fallback_timer.take();
+        if self.command_queue_active && !self.command_queue.is_empty() {
+            self.execute_next_queued_command(cx);
+            self.focus_terminal(window, cx);
+        } else {
+            self.command_queue_active = false;
+        }
+    }
+
+    /// 启动批量命令队列
+    fn start_command_queue(
+        &mut self,
+        commands: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.clear_command_queue();
+        self.command_queue.extend(commands);
+        self.command_queue_active = true;
+
+        if self.shell_prompt_input_active {
+            // shell 已经处于可输入状态，直接发送第一条
+            self.execute_next_queued_command(cx);
+            self.focus_terminal(window, cx);
+        } else if !self.shell_integration_detected {
+            // 未检测到 shell integration，使用 fallback 定时器
+            self.start_fallback_timer(cx);
+        }
+        // 否则等待下一个 InputStart/PromptStart 事件
+    }
+
+    /// 清空批量命令队列
+    fn clear_command_queue(&mut self) {
+        self.command_queue.clear();
+        self.command_queue_active = false;
+        self.command_queue_fallback_timer.take();
+    }
+
+    /// 无 shell integration 时的兜底定时器
+    fn start_fallback_timer(&mut self, cx: &mut Context<Self>) {
+        let task = cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(1500))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.command_queue_active
+                    && !this.command_queue.is_empty()
+                    && !this.shell_integration_detected
+                {
+                    this.execute_next_queued_command(cx);
+                    // 继续 fallback 直到检测 integration 或队列空
+                    this.start_fallback_timer(cx);
+                }
+            });
+        });
+        self.command_queue_fallback_timer = Some(task);
+    }
+
+    fn paste_preview_text(text: &str) -> String {
+        let preview = text.lines().take(6).collect::<Vec<_>>().join("\n");
+        if text.lines().count() > 6 {
+            format!("{preview}\n...")
+        } else {
+            preview
+        }
+    }
+
+    fn show_paste_confirm_dialog(
+        &mut self,
+        text: String,
+        title: String,
+        message: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let preview_text = Self::paste_preview_text(&text);
+        let view = cx.entity().clone();
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let view_ok = view.clone();
+            let text_ok = text.clone();
+
+            dialog
+                .title(title.clone())
+                .confirm()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(div().text_sm().child(message.clone()))
+                        .child(div().text_xs().child(t!("TerminalView.paste_preview")))
+                        .child(
+                            div()
+                                .max_h(px(180.0))
+                                .overflow_hidden()
+                                .text_xs()
+                                .child(preview_text.clone()),
+                        )
+                        .into_any_element(),
+                )
+                .button_props(
+                    DialogButtonProps::default()
+                        .ok_text(t!("Common.ok"))
+                        .cancel_text(t!("Common.cancel")),
+                )
+                .on_ok(move |_event, window, cx| {
+                    view_ok.update(cx, |this, cx| {
+                        this.paste_text_unchecked(&text_ok, window, cx);
+                    });
+                    true
+                })
+        });
+    }
+
+    fn focus_terminal(&self, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus_handle, cx);
+    }
+
+    fn show_unbracketed_paste_block_dialog(
+        &mut self,
+        text: &str,
+        hazard: UnbracketedPasteHazard,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let title = t!("TerminalView.unbracketed_paste_block_title").to_string();
+        let message = match hazard {
+            UnbracketedPasteHazard::HereDoc => {
+                t!("TerminalView.unbracketed_paste_heredoc_message").to_string()
+            }
+            UnbracketedPasteHazard::UnterminatedQuote => {
+                t!("TerminalView.unbracketed_paste_quote_message").to_string()
+            }
+        };
+        let preview_text = Self::paste_preview_text(text);
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            dialog
+                .title(title.clone())
+                .alert()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(div().text_sm().child(message.clone()))
+                        .child(div().text_xs().child(t!("TerminalView.paste_preview")))
+                        .child(
+                            div()
+                                .max_h(px(180.0))
+                                .overflow_hidden()
+                                .text_xs()
+                                .child(preview_text.clone()),
+                        )
+                        .into_any_element(),
+                )
+                .button_props(DialogButtonProps::default().ok_text(t!("Common.close")))
+        });
+    }
+
+    fn contains_high_risk_command(&self, text: &str) -> bool {
+        high_risk_command_matches(&self.high_risk_command_patterns, text)
+    }
+    fn select_all(&mut self, _: &SelectAll, _window: &mut Window, cx: &mut Context<Self>) {
+        self.terminal.update(cx, |terminal, _| {
+            terminal.select_all();
+        });
+        cx.notify();
+    }
+
+    fn clear_screen(&mut self, _: &ClearScreen, window: &mut Window, cx: &mut Context<Self>) {
+        self.clear_history_prompt();
+        self.terminal.update(cx, |terminal, cx| {
+            terminal.clear_screen(cx);
+        });
+        self.reset_render_cache(cx);
+        self.focus_terminal(window, cx);
+        cx.notify();
+    }
+
+    fn reset_render_cache(&mut self, cx: &mut Context<Self>) {
+        let (screen_lines, columns, colors) = {
+            let terminal = self.terminal.read(cx);
+            let term = terminal.term().lock();
+            (term.screen_lines(), term.columns(), term.colors().clone())
+        };
+        self.render_cache = RenderCache::new(screen_lines, columns, colors);
+    }
+
+    fn clear_selection(&mut self, _: &ClearSelection, window: &mut Window, cx: &mut Context<Self>) {
+        // 如果侧边栏有激活的面板，按 Escape 关闭它
+        if self.sidebar.read(cx).active_panel().is_some() {
+            self.sidebar.update(cx, |sidebar, cx| {
+                sidebar.set_active_panel(None, cx);
+            });
+            // 清除搜索
+            self.sidebar.update(cx, |sidebar, cx| {
+                sidebar.set_search_value("", window, cx);
+            });
+            if let Some(search) = self.addon_manager.get_as_mut::<SearchAddon>("search") {
+                search.clear();
+            }
+            cx.notify();
+            return;
+        }
+
+        let term = self.terminal.read(cx).term().clone();
+        let mut term_lock = term.lock();
+        let in_vi_mode = term_lock.mode().contains(TermMode::VI);
+        let has_selection = term_lock.selection.is_some();
+
+        if in_vi_mode {
+            if has_selection {
+                term_lock.selection = None;
+            } else {
+                term_lock.toggle_vi_mode();
+            }
+            drop(term_lock);
+            cx.notify();
+        } else if has_selection {
+            term_lock.selection = None;
+            drop(term_lock);
+            cx.notify();
+        } else {
+            drop(term_lock);
+            self.write_to_pty(b"\x1b".to_vec(), cx);
+        }
+    }
+
+    fn search_forward(&mut self, _: &SearchForward, _window: &mut Window, cx: &mut Context<Self>) {
+        // 如果侧边栏设置面板未激活，则激活它
+        if self.sidebar.read(cx).active_panel() != Some(SidebarPanel::Settings) {
+            self.sidebar.update(cx, |sidebar, cx| {
+                sidebar.set_active_panel(Some(SidebarPanel::Settings), cx);
+            });
+            cx.notify();
+            return;
+        }
+        // 执行向前搜索
+        self.search_forward_internal(cx);
+    }
+
+    fn search_backward(
+        &mut self,
+        _: &SearchBackward,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // 如果侧边栏设置面板未激活，则激活它
+        if self.sidebar.read(cx).active_panel() != Some(SidebarPanel::Settings) {
+            self.sidebar.update(cx, |sidebar, cx| {
+                sidebar.set_active_panel(Some(SidebarPanel::Settings), cx);
+            });
+            cx.notify();
+            return;
+        }
+        // 执行向后搜索
+        self.search_backward_internal(cx);
+    }
+
+    pub fn set_search_pattern(&mut self, pattern: &str) -> Result<()> {
+        if let Some(search) = self.addon_manager.get_as_mut::<SearchAddon>("search") {
+            search
+                .set_pattern(pattern)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+        }
+        Ok(())
+    }
+
+    fn resize_if_needed(&mut self, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
+        let bounds_w = f32::from(bounds.size.width);
+        let bounds_h = f32::from(bounds.size.height);
+        let Some(new_size) =
+            TerminalSurfaceSize::from_bounds(bounds, self.cell_width, self.line_height)
+        else {
+            self.pane_visible = false;
+            self.last_size = None;
+            tracing::debug!(
+                target: "terminal_residue",
+                bounds_w,
+                bounds_h,
+                cell_width = ?self.cell_width,
+                line_height = ?self.line_height,
+                "resize_if_needed skipped for hidden/invalid pane"
+            );
+            return;
+        };
+        self.pane_visible = true;
+
+        if self.last_size != Some(new_size) {
+            tracing::info!(
+                target: "terminal_residue",
+                old = ?self.last_size,
+                new = ?new_size,
+                bounds_w = ?bounds.size.width,
+                bounds_h = ?bounds.size.height,
+                cell_width = ?self.cell_width,
+                line_height = ?self.line_height,
+                "resize_if_needed -> Terminal::resize"
+            );
+            self.last_size = Some(new_size);
+            self.terminal.update(cx, |terminal, _| {
+                terminal.resize(
+                    new_size.cols,
+                    new_size.rows,
+                    new_size.pixel_width,
+                    new_size.pixel_height,
+                );
+            });
+        }
+    }
+
+    fn get_line_text(&self, screen_line: usize, cx: &Context<Self>) -> String {
+        let term = self.terminal.read(cx).term().lock();
+        let grid = term.grid();
+        let display_offset = grid.display_offset();
+        let grid_line = screen_line as i32 - display_offset as i32;
+
+        if grid_line < -(term.history_size() as i32) || grid_line >= term.screen_lines() as i32 {
+            return String::new();
+        }
+
+        let line = &grid[Line(grid_line)];
+        let text: String = line[..].iter().map(|cell| cell.c).collect();
+        text.trim_end_matches(|c: char| c == ' ' || c == '\0')
+            .to_string()
+    }
+
+    fn render_terminal(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.pane_visible {
+            return TerminalElement::new(
+                &self.render_cache,
+                self.font_family.clone(),
+                self.font_size,
+                self.font_weight,
+                self.font_fallbacks.iter().map(|s| s.to_string()).collect(),
+                self.line_height_scale,
+                false,
+                self.cell_width,
+            )
+            .into_element();
+        }
+
+        // Prepare addons before rendering
+        {
+            let is_local =
+                self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
+            let term = self.terminal.read(cx).term().lock();
+            let display_offset = term.grid().display_offset();
+            let visible_lines = 0..term.screen_lines();
+            let context = TerminalAddonFrameContext {
+                term: &term,
+                visible_lines,
+                display_offset,
+                is_local,
+                base_dir: self.local_working_dir.as_deref(),
+            };
+            self.addon_manager.dispatch_frame(&context);
+        }
+
+        // Update render cache with decorations from all addons
+        {
+            let term = self.terminal.read(cx).term().clone();
+            let mut term = term.lock();
+
+            self.render_cache
+                .update(&mut term, &self.addon_manager, &self.current_theme);
+        }
+
+        // 获取光标可见性
+        let cursor_visible = if self.cursor_blink_enabled {
+            self.blink_manager.read(cx).visible()
+        } else {
+            true
+        };
+
+        let ime_text = self.ime_state.as_ref().map(|s| s.text.clone());
+
+        TerminalElement::new(
+            &self.render_cache,
+            self.font_family.clone(),
+            self.font_size,
+            self.font_weight,
+            self.font_fallbacks.iter().map(|s| s.to_string()).collect(),
+            self.line_height_scale,
+            cursor_visible,
+            self.cell_width, // 传入预计算的 cell_width，确保与 resize 一致
+        )
+        .ime_text(ime_text)
+        .into_element()
+    }
+
+    /// 构建终端右键菜单
+    fn build_context_menu(
+        menu: PopupMenu,
+        has_selection: bool,
+        selection_text: Option<String>,
+        view: &Entity<Self>,
+        sidebar: &Entity<TerminalSidebar>,
+        _window: &mut Window,
+        _cx: &mut Context<PopupMenu>,
+    ) -> PopupMenu {
+        let view_copy = view.clone();
+        let view_paste = view.clone();
+        let view_select_all = view.clone();
+        let view_clear_screen = view.clone();
+        let view_clear = view.clone();
+        let copy_shortcut = terminal_shortcut_label(TERMINAL_COPY_SHORTCUT);
+        let paste_shortcut = terminal_shortcut_label(TERMINAL_PASTE_SHORTCUT);
+        let select_all_shortcut = terminal_shortcut_label(TERMINAL_SELECT_ALL_SHORTCUT);
+        let clear_screen_shortcut = terminal_shortcut_label(TERMINAL_CLEAR_SCREEN_SHORTCUT);
+
+        let mut menu = menu
+            // 复制
+            .item(
+                PopupMenuItem::new(t!(
+                    "ContextMenu.copy_with_shortcut",
+                    shortcut = copy_shortcut
+                ))
+                .icon(IconName::Copy)
+                .action(Box::new(Copy))
+                .disabled(!has_selection)
+                .on_click(move |_, window, cx| {
+                    let _ = view_copy.update(cx, |this, cx| {
+                        this.copy(&Copy, window, cx);
+                    });
+                }),
+            )
+            // 粘贴
+            .item(
+                PopupMenuItem::new(t!(
+                    "ContextMenu.paste_with_shortcut",
+                    shortcut = paste_shortcut
+                ))
+                .action(Box::new(Paste))
+                .on_click(move |_, window, cx| {
+                    let _ = view_paste.update(cx, |this, cx| {
+                        this.paste(&Paste, window, cx);
+                    });
+                }),
+            )
+            .separator()
+            .item(
+                PopupMenuItem::new(t!(
+                    "ContextMenu.clear_screen_with_shortcut",
+                    shortcut = clear_screen_shortcut
+                ))
+                .icon(IconName::Delete)
+                .action(Box::new(ClearScreen))
+                .on_click(move |_, window, cx| {
+                    let _ = view_clear_screen.update(cx, |this, cx| {
+                        this.clear_screen(&ClearScreen, window, cx);
+                    });
+                }),
+            )
+            .separator()
+            // 全选
+            .item(
+                PopupMenuItem::new(t!(
+                    "ContextMenu.select_all_with_shortcut",
+                    shortcut = select_all_shortcut
+                ))
+                .action(Box::new(SelectAll))
+                .on_click(move |_, window, cx| {
+                    let _ = view_select_all.update(cx, |this, cx| {
+                        this.select_all(&SelectAll, window, cx);
+                    });
+                }),
+            )
+            // 清除选择
+            .item(
+                PopupMenuItem::new(t!("ContextMenu.clear_selection"))
+                    .action(Box::new(ClearSelection))
+                    .disabled(!has_selection)
+                    .on_click(move |_, window, cx| {
+                        let _ = view_clear.update(cx, |this, cx| {
+                            this.clear_selection(&ClearSelection, window, cx);
+                        });
+                    }),
+            );
+
+        // 保存快捷命令（仅在有选中文本时可用）
+        if let Some(text) = selection_text {
+            let save_text = text.trim().to_string();
+            let sidebar_quick = sidebar.clone();
+            if !save_text.is_empty() {
+                menu = menu.item(
+                    PopupMenuItem::new(t!("ContextMenu.save_quick_command"))
+                        .icon(IconName::SquareTerminal)
+                        .on_click(move |_, _window, cx| {
+                            sidebar_quick.update(cx, |sidebar, cx| {
+                                sidebar.add_quick_command(save_text.clone(), cx);
+                            });
+                        }),
+                );
+            }
+        }
+
+        menu
+    }
+
+    /// 是否为 JMS 占位终端(尚未连接任何资产:JmsKoko + Disconnected 且无错误)
+    fn is_jms_placeholder(&self, cx: &App) -> bool {
+        let term = self.terminal.read(cx);
+        term.connection_kind() == TerminalConnectionKind::JmsKoko
+            && matches!(
+                term.connection_state(),
+                ConnectionState::Disconnected { error: None }
+            )
+    }
+
+    /// JMS 占位终端的引导提示(请从左侧资产树选择资产)
+    fn render_jms_placeholder_overlay(&self, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(Hsla {
+                h: 0.,
+                s: 0.,
+                l: 0.,
+                a: 0.6,
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_3()
+                    .p_6()
+                    .child(
+                        Icon::new(IconName::Server)
+                            .mono()
+                            .with_size(px(40.0))
+                            .text_color(rgb(0x10b981)),
+                    )
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(0xffffff))
+                            .child("已登录 JumpServer"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0xa0a0a0))
+                            .child("请从右侧资产树选择一个资产开始连接"),
+                    ),
+            )
+    }
+
+    fn render_connection_overlay(
+        &self,
+        can_reconnect: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let connection_state = self.terminal.read(cx).connection_state().clone();
+        let is_connecting = matches!(connection_state, ConnectionState::Connecting);
+        let error_msg = match &connection_state {
+            ConnectionState::Disconnected { error } => error.clone(),
+            _ => None,
+        };
+        let mfa_request = self.terminal.read(cx).ssh_mfa_request();
+        let has_mfa_request = mfa_request.is_some();
+
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(Hsla {
+                h: 0.,
+                s: 0.,
+                l: 0.,
+                a: 0.7,
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_4()
+                    .p_6()
+                    .bg(rgb(0x2d2d2d))
+                    .rounded_lg()
+                    .shadow_lg()
+                    .w(px(560.0))
+                    .max_w(px(640.0))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                Icon::new(if is_connecting {
+                                    IconName::Loader
+                                } else {
+                                    IconName::CircleX
+                                })
+                                .mono()
+                                .with_size(px(24.0))
+                                .text_color(if is_connecting {
+                                    rgb(0xfbbf24)
+                                } else {
+                                    rgb(0xef4444)
+                                }),
+                            )
+                            .child(
+                                div()
+                                    .text_lg()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(rgb(0xffffff))
+                                    .child(if is_connecting {
+                                        t!("SshSession.connecting")
+                                    } else {
+                                        t!("SshSession.connection_lost")
+                                    }),
+                            ),
+                    )
+                    .when_some(error_msg, |this, msg| {
+                        this.child(
+                            div()
+                                .text_sm()
+                                .text_color(rgb(0xef4444))
+                                .max_w(px(350.0))
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .child(msg),
+                        )
+                    })
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0x9ca3af))
+                            .child(if is_connecting {
+                                t!("SshSession.establishing")
+                            } else {
+                                t!("SshSession.disconnected")
+                            }),
+                    )
+                    .when_some(mfa_request, |this, request| {
+                        this.child(
+                            v_flex()
+                                .gap_2()
+                                .w_full()
+                                .items_center()
+                                .children((0..request.prompts.len()).map(|index| {
+                                    let input = self.ssh_mfa_inputs.get(index);
+                                    div()
+                                        .w(px(320.0))
+                                        .when_some(input, |this, input| {
+                                            let input_element = if input.echo {
+                                                Input::new(&input.input).into_any_element()
+                                            } else {
+                                                Input::new(&input.input)
+                                                    .mask_toggle()
+                                                    .into_any_element()
+                                            };
+                                            this.child(input_element)
+                                        })
+                                        .into_any_element()
+                                }))
+                                .child(
+                                    h_flex().justify_center().child(
+                                        Button::new("submit-ssh-mfa")
+                                            .label(t!("Common.ok"))
+                                            .primary()
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.submit_ssh_mfa(window, cx);
+                                            })),
+                                    ),
+                                ),
+                        )
+                    })
+                    .when(
+                        can_reconnect
+                            && !is_connecting
+                            && !has_mfa_request
+                            && !self.jms_reconnect_in_flight,
+                        |this| {
+                            this.child(
+                                Button::new("reconnect-btn")
+                                    .label(t!("SshSession.reconnect"))
+                                    .primary()
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.reconnect(window, cx);
+                                    })),
+                            )
+                        },
+                    ),
+            )
+    }
+
+    fn handle_scroll(
+        &mut self,
+        event: &ScrollWheelEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let delta_pixels = event.delta.pixel_delta(self.line_height);
+        let delta_lines = delta_pixels.y / self.line_height;
+        self.scroll_lines_accumulated += delta_lines;
+
+        let mode = self.terminal.read(cx).mode();
+        let lines = take_whole_scroll_lines(&mut self.scroll_lines_accumulated);
+        tracing::debug!(
+            target: "terminal.history_prompt",
+            reason = "scroll_event",
+            lines,
+            shell_mode = ?mode,
+            "terminal scroll event"
+        );
+
+        if should_dismiss_history_prompt_for_scroll(lines) {
+            self.dismiss_history_prompt();
+            self.log_history_prompt_state("scroll_dismiss", "scroll moved terminal viewport", cx);
+        }
+
+        if mode.contains(TermMode::ALT_SCREEN) {
+            if sgr_mouse_mode_enabled(mode) {
+                let point = self.pixel_to_point(event.position, self.terminal_bounds, cx);
+                if let Some(report) =
+                    sgr_mouse_wheel_report(lines, point.column.0, point.line.0 as usize)
+                {
+                    for _ in 0..lines.unsigned_abs() {
+                        self.write_to_pty(report.as_bytes().to_vec(), cx);
+                    }
+                }
+            } else if self.vim_scroll_to_arrow_keys && lines != 0 {
+                // alt-screen TUI(vim/less/man 等)未启用鼠标报告:
+                // 把滚轮转为方向键发给 PTY,既能滚动又不会触发 vim 的 VISUAL 选区
+                let seq: &[u8] = if mode.contains(TermMode::APP_CURSOR) {
+                    if lines > 0 { b"\x1bOA" } else { b"\x1bOB" }
+                } else if lines > 0 {
+                    b"\x1b[A"
+                } else {
+                    b"\x1b[B"
+                };
+                for _ in 0..lines.unsigned_abs() {
+                    self.write_to_pty(seq.to_vec(), cx);
+                }
+            }
+            return;
+        }
+
+        if lines != 0 {
+            let term = self.terminal.read(cx).term().clone();
+
+            if mode.contains(TermMode::VI) {
+                let mut term = term.lock();
+                // 沿用 Alacritty `ViModeCursor::scroll` 的符号语义，直接传入离散后的行数
+                let vi_cursor = term.vi_mode_cursor.scroll(&term, lines);
+                term.vi_goto_point(vi_cursor.point);
+
+                let display_offset = term.grid().display_offset();
+                let cursor_line = vi_cursor.point.line.0;
+                let screen_lines = term.screen_lines() as i32;
+
+                if cursor_line < -(display_offset as i32) {
+                    let delta = cursor_line + display_offset as i32;
+                    term.scroll_display(alacritty_terminal::grid::Scroll::Delta(delta));
+                } else if cursor_line >= screen_lines - (display_offset as i32) {
+                    let delta = cursor_line - screen_lines + 1 + display_offset as i32;
+                    term.scroll_display(alacritty_terminal::grid::Scroll::Delta(delta));
+                }
+            } else {
+                // 沿用终端 display scroll 的符号语义，直接传入离散后的行数
+                term.lock()
+                    .scroll_display(alacritty_terminal::grid::Scroll::Delta(lines));
+            }
+            cx.notify();
+        }
+    }
+
+    fn pixel_to_point(
+        &self,
+        position: Point<Pixels>,
+        bounds: Bounds<Pixels>,
+        cx: &Context<Self>,
+    ) -> AlacPoint {
+        let relative_x = position.x - bounds.origin.x;
+        let relative_y = position.y - bounds.origin.y;
+
+        let col = (relative_x / self.cell_width).floor().max(0.0) as usize;
+        let line = (relative_y / self.line_height).floor().max(0.0) as i32;
+
+        let term = self.terminal.read(cx).term().lock();
+        let col = col.min(term.columns().saturating_sub(1));
+        let line = line.clamp(0, term.screen_lines() as i32 - 1);
+        drop(term);
+
+        AlacPoint::new(Line(line), Column(col))
+    }
+
+    /// 根据鼠标在单元格内的位置计算 Side
+    fn pixel_to_side(&self, position: Point<Pixels>, bounds: Bounds<Pixels>) -> Side {
+        let relative_x = position.x - bounds.origin.x;
+        let col_f = (relative_x / self.cell_width).max(0.0);
+        let cell_offset = col_f.fract();
+        if cell_offset < 0.5 {
+            Side::Left
+        } else {
+            Side::Right
+        }
+    }
+
+    /// 停止选区拖拽自动滚动：递增代数使旧任务下一拍退出，并丢弃任务句柄。
+    fn stop_selection_autoscroll(&mut self) {
+        self.autoscroll_epoch += 1;
+        self.selection_autoscroll_task.take();
+    }
+
+    /// 若指针处于边缘触发区且尚无节拍任务，则启动选区拖拽自动滚动。
+    /// 任务每 50ms 拍一次：按当前指针位置滚动视口并把选区扩展到指针所在行，
+    /// 直到指针离开触发区、选区结束或代数被递增（外部停止）。
+    fn ensure_selection_autoscroll(&mut self, cx: &mut Context<Self>) {
+        if self.selection_autoscroll_task.is_some() {
+            return;
+        }
+        let Some(position) = self.mouse_position else {
+            return;
+        };
+        if self.terminal_bounds.size.height <= px(0.0) || self.line_height <= px(0.0) {
+            return;
+        }
+        if selection_drag_autoscroll_delta(position, self.terminal_bounds, self.line_height) == 0 {
+            return;
+        }
+        self.autoscroll_epoch += 1;
+        let epoch = self.autoscroll_epoch;
+        self.selection_autoscroll_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(50))
+                    .await;
+                let should_continue = this
+                    .update(cx, |this, cx| {
+                        if this.autoscroll_epoch != epoch {
+                            return false;
+                        }
+                        this.selection_autoscroll_step(cx)
+                    })
+                    .unwrap_or(false);
+                if !should_continue {
+                    break;
+                }
+            }
+            // 任务自然结束后清空槽位，允许下一次拖拽重新启动
+            let _ = this.update(cx, |this, _cx| {
+                this.selection_autoscroll_task = None;
+            });
+        }));
+    }
+
+    /// 自动滚动单拍。返回 false 表示应终止节拍任务。
+    fn selection_autoscroll_step(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.mouse_state.selecting {
+            return false;
+        }
+        let Some(position) = self.mouse_position else {
+            return false;
+        };
+        let bounds = self.terminal_bounds;
+        if bounds.size.height <= px(0.0) || self.line_height <= px(0.0) {
+            return false;
+        }
+        let delta = selection_drag_autoscroll_delta(position, bounds, self.line_height);
+        if delta == 0 {
+            return false;
+        }
+        // 备用屏没有可滚动历史；选区被清除（如 Escape）后也无须继续
+        if self.terminal.read(cx).mode().contains(TermMode::ALT_SCREEN) {
+            return false;
+        }
+        if self
+            .terminal
+            .read(cx)
+            .term()
+            .lock()
+            .selection
+            .is_none()
+        {
+            return false;
+        }
+        self.terminal.update(cx, |terminal, _| {
+            terminal.scroll(delta);
+        });
+        // 滚动后按新视口把选区扩展到指针位置；pixel_to_point 会把
+        // 超出可视区的坐标钳制到边缘行，update_selection 内部再换算 display_offset
+        let point = self.pixel_to_point(position, bounds, cx);
+        let side = self.pixel_to_side(position, bounds);
+        self.terminal.update(cx, |terminal, _| {
+            terminal.update_selection(point, side);
+        });
+        cx.notify();
+        true
+    }
+
+    /// 当终端启用 SGR 鼠标 + 任意鼠标报告模式时，把按钮按下/释放事件以 SGR 形式
+    /// 回报给 PTY。返回 true 表示已经处理，调用方应跳过 selection/dismiss/paste 等本地行为。
+    ///
+    /// 特殊穿透:Shift+Left 永远走终端自身的文本选区,不向 TUI 转发 —— 这是 xterm/iTerm/
+    /// kitty/wezterm 等的通用约定,让用户在 vim/tmux 等捕获鼠标的应用里仍能复制文本。
+    /// 同理 mouse_up 时,如果当前正在终端选区(由 shift+drag 启动),也跳过 release 回报,
+    /// 避免在 release 阶段 shift 已松开就把 release 事件错发给 TUI、丢掉 selection 收尾。
+    fn try_report_sgr_mouse_button(
+        &mut self,
+        button: MouseButton,
+        position: Point<Pixels>,
+        modifiers: Modifiers,
+        pressed: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if button == MouseButton::Left
+            && (modifiers.shift || (!pressed && self.mouse_state.selecting))
+        {
+            return false;
+        }
+        let mode = self.terminal.read(cx).mode();
+        if !sgr_mouse_mode_enabled(mode) {
+            return false;
+        }
+        self.write_sgr_mouse_button_report(button, position, modifiers, pressed, cx)
+    }
+
+    fn write_sgr_mouse_button_report(
+        &mut self,
+        button: MouseButton,
+        position: Point<Pixels>,
+        modifiers: Modifiers,
+        pressed: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(base) = mouse_button_code(button) else {
+            return false;
+        };
+        let point = self.pixel_to_point(position, self.terminal_bounds, cx);
+        let encoded = base | encode_mouse_modifiers(modifiers);
+        let report =
+            sgr_mouse_button_report(encoded, point.column.0, point.line.0 as usize, pressed);
+        self.write_to_pty(report.into_bytes(), cx);
+        true
+    }
+
+    fn handle_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.terminal.read(cx).ssh_mfa_request().is_none() {
+            window.focus(&self.focus_handle, cx);
+        }
+        let mode = self.terminal.read(cx).mode();
+        if should_defer_sgr_left_press(event.button, event.modifiers, mode) {
+            self.mouse_state.pending_sgr_left_press = Some(PendingSgrMousePress {
+                point: self.pixel_to_point(event.position, self.terminal_bounds, cx),
+                position: event.position,
+                modifiers: event.modifiers,
+            });
+            return;
+        }
+        // SGR 鼠标模式下把按钮按下事件交给 TUI，跳过 selection/URL/dismiss
+        if self.try_report_sgr_mouse_button(event.button, event.position, event.modifiers, true, cx)
+        {
+            return;
+        }
+        tracing::debug!(
+            target: "terminal.history_prompt",
+            reason = "mouse_down",
+            button = ?event.button,
+            position = ?event.position,
+            "terminal mouse down"
+        );
+
+        if should_dismiss_history_prompt_for_mouse(event.button) {
+            self.dismiss_history_prompt();
+            self.log_history_prompt_state("mouse_dismiss", "mouse interaction", cx);
+        }
+
+        if event.button != MouseButton::Left {
+            return;
+        }
+
+        let bounds = self.terminal_bounds;
+
+        let point = self.pixel_to_point(event.position, bounds, cx);
+        let screen_line = point.line.0 as usize;
+        let column = point.column.0;
+        let line_text = self.get_line_text(screen_line, cx);
+        let is_local = self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
+        let consumed = {
+            let mut open_url = |url: &str| cx.open_url(url);
+            let mut context = TerminalAddonMouseContext::new(
+                screen_line,
+                column,
+                &line_text,
+                event.modifiers,
+                event.position,
+                is_local,
+                self.local_working_dir.as_deref(),
+                &mut open_url,
+            );
+            self.addon_manager.dispatch_mouse_down(&mut context)
+        };
+
+        if consumed {
+            return;
+        }
+
+        let now = std::time::Instant::now();
+        let is_double_click = self.mouse_state.last_click_point == Some(point)
+            && self
+                .mouse_state
+                .last_click_time
+                .map_or(false, |t| now.duration_since(t).as_millis() < 500);
+
+        if is_double_click {
+            self.mouse_state.click_count += 1;
+        } else {
+            self.mouse_state.click_count = 1;
+        }
+
+        self.mouse_state.last_click_point = Some(point);
+        self.mouse_state.last_click_time = Some(now);
+
+        let selection_type = match self.mouse_state.click_count {
+            1 => SelectionType::Simple,
+            2 => SelectionType::Semantic,
+            _ => SelectionType::Lines,
+        };
+
+        self.terminal.update(cx, |terminal, _| {
+            terminal.start_selection(
+                selection_type,
+                point,
+                self.pixel_to_side(event.position, bounds),
+            );
+        });
+
+        self.mouse_state.selecting = true;
+        cx.notify();
+    }
+
+    fn handle_middle_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // SGR 鼠标模式下中键按下走 TUI 报告而不是 middle-click paste
+        if self.try_report_sgr_mouse_button(
+            MouseButton::Middle,
+            event.position,
+            event.modifiers,
+            true,
+            cx,
+        ) {
+            return;
+        }
+        if !self.middle_click_paste {
+            return;
+        }
+        if let Some(clipboard) = cx.read_from_clipboard() {
+            if let Some(text) = clipboard.text() {
+                self.paste_text(&text, window, cx);
+            }
+        }
+    }
+
+    fn handle_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // 焦点跟随鼠标：光标移入未聚焦的已连接终端区域时自动聚焦，
+        // 避免分屏/多标签场景下必须点击才能输入。
+        if !self.focus_handle.is_focused(window) {
+            let term = self.terminal.read(cx);
+            if matches!(term.connection_state(), ConnectionState::Connected)
+                && term.ssh_mfa_request().is_none()
+            {
+                self.focus_terminal(window, cx);
+            }
+        }
+
+        let bounds = self.terminal_bounds;
+        self.mouse_position = Some(event.position);
+        let point = self.pixel_to_point(event.position, bounds, cx);
+        let screen_line = point.line.0 as usize;
+        let column = point.column.0;
+        if let Some(pending) = &self.mouse_state.pending_sgr_left_press {
+            if should_start_selection_from_pending_sgr_press(pending.point, point) {
+                let pending = self.mouse_state.pending_sgr_left_press.take().unwrap();
+                let now = std::time::Instant::now();
+                let is_double_click = self.mouse_state.last_click_point == Some(pending.point)
+                    && self
+                        .mouse_state
+                        .last_click_time
+                        .map_or(false, |t| now.duration_since(t).as_millis() < 500);
+
+                self.mouse_state.click_count = if is_double_click {
+                    self.mouse_state.click_count + 1
+                } else {
+                    1
+                };
+                self.mouse_state.last_click_point = Some(pending.point);
+                self.mouse_state.last_click_time = Some(now);
+                let selection_type = match self.mouse_state.click_count {
+                    1 => SelectionType::Simple,
+                    2 => SelectionType::Semantic,
+                    _ => SelectionType::Lines,
+                };
+
+                self.terminal.update(cx, |terminal, _| {
+                    terminal.start_selection(
+                        selection_type,
+                        pending.point,
+                        self.pixel_to_side(pending.position, bounds),
+                    );
+                });
+                self.mouse_state.selecting = true;
+            }
+        }
+        let line_text = self.get_line_text(screen_line, cx);
+        let is_local = self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
+        let hover_changed = {
+            let mut open_url = |url: &str| cx.open_url(url);
+            let mut context = TerminalAddonMouseContext::new(
+                screen_line,
+                column,
+                &line_text,
+                event.modifiers,
+                event.position,
+                is_local,
+                self.local_working_dir.as_deref(),
+                &mut open_url,
+            );
+            self.addon_manager.dispatch_mouse_move(&mut context)
+        };
+        if hover_changed {
+            cx.notify();
+        }
+
+        if !self.mouse_state.selecting {
+            return;
+        }
+
+        let point = self.pixel_to_point(event.position, bounds, cx);
+        let side = self.pixel_to_side(event.position, bounds);
+
+        self.terminal.update(cx, |terminal, _| {
+            terminal.update_selection(point, side);
+        });
+        cx.notify();
+
+        // 指针进入上下边缘触发区时启动自动滚动节拍（已在运行时忽略）
+        self.ensure_selection_autoscroll(cx);
+    }
+
+    fn handle_mouse_up(
+        &mut self,
+        event: &MouseUpEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(pending) = self.mouse_state.pending_sgr_left_press.take() {
+            self.terminal.update(cx, |terminal, _| {
+                terminal.clear_selection();
+            });
+            if sgr_mouse_mode_enabled(self.terminal.read(cx).mode()) {
+                self.write_sgr_mouse_button_report(
+                    MouseButton::Left,
+                    pending.position,
+                    pending.modifiers,
+                    true,
+                    cx,
+                );
+                self.write_sgr_mouse_button_report(
+                    MouseButton::Left,
+                    event.position,
+                    event.modifiers,
+                    false,
+                    cx,
+                );
+            }
+            return;
+        }
+        // SGR 鼠标模式下：先回报释放，然后跳过 selection 收尾
+        if self.try_report_sgr_mouse_button(
+            event.button,
+            event.position,
+            event.modifiers,
+            false,
+            cx,
+        ) {
+            return;
+        }
+        if event.button != MouseButton::Left {
+            return;
+        }
+        let bounds = self.terminal_bounds;
+        let point = self.pixel_to_point(event.position, bounds, cx);
+        let screen_line = point.line.0 as usize;
+        let column = point.column.0;
+        let line_text = self.get_line_text(screen_line, cx);
+        let is_local = self.terminal.read(cx).connection_kind() == TerminalConnectionKind::Local;
+        {
+            let mut open_url = |url: &str| cx.open_url(url);
+            let mut context = TerminalAddonMouseContext::new(
+                screen_line,
+                column,
+                &line_text,
+                event.modifiers,
+                event.position,
+                is_local,
+                self.local_working_dir.as_deref(),
+                &mut open_url,
+            );
+            let _ = self.addon_manager.dispatch_mouse_up(&mut context);
+        }
+        self.mouse_state.selecting = false;
+        self.stop_selection_autoscroll();
+        if self.auto_copy_on_select {
+            if let Some(text) = self.terminal.read(cx).selection_text() {
+                if !text.is_empty() {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn send_tab(&mut self, _: &SendTab, _window: &mut Window, cx: &mut Context<Self>) {
+        self.dismiss_history_prompt();
+        self.write_to_pty(b"\x09".to_vec(), cx);
+    }
+
+    fn send_shift_tab(&mut self, _: &SendShiftTab, _window: &mut Window, cx: &mut Context<Self>) {
+        self.dismiss_history_prompt();
+        self.write_to_pty(b"\x1b[Z".to_vec(), cx);
+    }
+
+    fn render_sidebar_resize_handle(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let view = cx.entity().clone();
+
+        resize_handle::<ResizePanel, ResizePanel>(
+            "terminal-sidebar-resize-handle",
+            Axis::Horizontal,
+        )
+        .placement(HandlePlacement::Right)
+        .on_drag(ResizePanel, move |info, _, _, cx| {
+            cx.stop_propagation();
+            view.update(cx, |view, cx| {
+                view.resizing = Some(ResizingPanel::Sidebar);
+                cx.notify();
+            });
+            cx.new(|_| info.deref().clone())
+        })
+    }
+
+    fn resize_sidebar(
+        &mut self,
+        mouse_position: Point<Pixels>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(resizing) = self.resizing else {
+            return;
+        };
+
+        match resizing {
+            ResizingPanel::Sidebar => {
+                let new_size = self.view_bounds.right() - mouse_position.x;
+                self.sidebar_panel_size = new_size.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+            }
+        }
+
+        cx.notify();
+    }
+
+    fn done_resizing(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.resizing = None;
+        cx.notify();
+    }
+}
+
+impl Focusable for TerminalView {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl EventEmitter<TabContentEvent> for TerminalView {}
+
+/// 请求 HomePage 代为创建并插入新 pane 的上下文。
+#[derive(Clone, Debug)]
+pub struct SplitPaneRequest {
+    pub placement: gpui_component::Placement,
+    pub source: Entity<TerminalView>,
+    pub connection_kind: TerminalConnectionKind,
+    pub connection_id: Option<i64>,
+    pub working_dir: Option<String>,
+    pub local_config: Option<LocalConfig>,
+    pub jms_context: Option<crate::sidebar::JmsSidebarContext>,
+    pub koko_params: Option<jms::KokoConnectParams>,
+    pub pane_index: Option<usize>,
+}
+
+/// TerminalView 对外事件(供 HomePage 订阅)
+#[derive(Clone, Debug)]
+pub enum TerminalViewEvent {
+    /// 请求打开新的 JMS 终端(资产树侧栏点击资产→选账号后冒泡),携带资产树上下文
+    OpenJmsTerminal(
+        jms::KokoConnectParams,
+        Option<crate::sidebar::JmsSidebarContext>,
+    ),
+    /// 请求将当前 pane 向右分屏(本地终端使用)
+    SplitPaneRight,
+    /// 请求将当前 pane 向下分屏(本地终端使用)
+    SplitPaneDown,
+    /// 请求关闭当前 pane
+    ClosePane,
+    /// 请求放大/还原当前 pane
+    TogglePaneZoom,
+    /// 请求 HomePage 代为创建并插入 SSH/JMS 终端 pane
+    RequestSplitPane(SplitPaneRequest),
+    /// 当前 pane 已获得输入焦点。
+    Focused,
+    /// 终端 pane 已从 Dock 布局中永久移除
+    Closed,
+}
+
+impl EventEmitter<TerminalViewEvent> for TerminalView {}
+
+impl EventEmitter<PanelEvent> for TerminalView {}
+
+impl Panel for TerminalView {
+    fn panel_name(&self) -> &'static str {
+        "Terminal"
+    }
+
+    fn on_added_to(
+        &mut self,
+        tab_panel: WeakEntity<TabPanel>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        self.tab_panel = Some(tab_panel);
+    }
+
+    fn on_removed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.tab_panel = None;
+        let terminal = cx.entity();
+        window.defer(cx, move |_, cx| {
+            _ = terminal.update(cx, |terminal, cx| {
+                if terminal.tab_panel.is_none() {
+                    cx.emit(TerminalViewEvent::Closed);
+                }
+            });
+        });
+    }
+
+    fn title(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(asset_name) = self.jms_asset_name(cx) {
+            asset_name.into_any_element()
+        } else {
+            <TerminalView as TabContent>::title(self, cx).into_any_element()
+        }
+    }
+
+    fn tab_name(&self, cx: &App) -> Option<SharedString> {
+        Some(<TerminalView as TabContent>::title(self, cx))
+    }
+
+    fn closable(&self, _cx: &App) -> bool {
+        true
+    }
+
+    fn dump(&self, cx: &App) -> PanelState {
+        let data = match self.connection_kind(cx) {
+            TerminalConnectionKind::Ssh => serde_json::json!({
+                "version": 1,
+                "kind": "ssh",
+                "connection_id": self.connection_id(cx),
+                "working_dir": self.current_working_dir(cx),
+            }),
+            TerminalConnectionKind::Local => serde_json::json!({
+                "version": 1,
+                "kind": "local",
+                "config": self.local_config().cloned().unwrap_or_default(),
+            }),
+            _ => serde_json::json!({ "version": 1, "kind": "local" }),
+        };
+        let mut state = PanelState::new(self);
+        state.info = PanelInfo::panel(data);
+        state
+    }
+}
+
+impl TabContent for TerminalView {
+    fn content_key(&self) -> &'static str {
+        "Terminal"
+    }
+
+    fn title(&self, cx: &App) -> SharedString {
+        let terminal = self.terminal.read(cx);
+        let base_title = if terminal.connection_kind() == TerminalConnectionKind::JmsKoko {
+            self.koko_params
+                .as_ref()
+                .map(|params| params.title.trim())
+                .filter(|title| !title.is_empty())
+                .unwrap_or("[JMS] JMS Terminal")
+                .to_string()
+        } else if terminal.connection_kind() == TerminalConnectionKind::Ssh {
+            // SSH 连接的保存名称是资产名称，SSH 用户名是账号名称。
+            // 两者都保留，确保分屏标题不会退化成裸 Tab1/Tab2。
+            let asset_name = terminal
+                .connection_name()
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or("SSH");
+            let account_name = terminal
+                .ssh_config()
+                .map(|config| config.ssh_config.username.trim())
+                .filter(|username| !username.is_empty());
+            account_name
+                .map(|username| format!("{} ({})", asset_name.trim(), username))
+                .unwrap_or_else(|| asset_name.trim().to_string())
+        } else if let Some(name) = terminal.connection_name() {
+            name.to_string()
+        } else if !terminal.title().is_empty() {
+            terminal.title().to_string()
+        } else {
+            "Terminal".to_string()
+        };
+
+        // 所有连接类型的分屏都保留基础标题，并在末尾附加 pane 序号，
+        // 避免用默认的裸 Tab1/Tab2 覆盖资产、账号或连接名称。
+        if let Some(index) = self.pane_index {
+            return SharedString::from(format!("{} (Tab{})", base_title, index));
+        }
+
+        // 如果有序号，添加到标题后
+        if let Some(index) = self.tab_index {
+            SharedString::from(format!("{}({})", base_title, index))
+        } else {
+            SharedString::from(base_title)
+        }
+    }
+
+    fn icon(&self, _cx: &App) -> Option<Icon> {
+        Some(IconName::SquareTerminal.mono())
+    }
+
+    fn closeable(&self, _cx: &App) -> bool {
+        true
+    }
+
+    fn try_close(
+        &mut self,
+        _tab_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Task<bool> {
+        let should_confirm = {
+            let terminal = self.terminal.read(cx);
+            should_confirm_local_terminal_close(
+                terminal.connection_kind(),
+                self.local_command_running,
+                terminal.mode(),
+                terminal.child_exited(),
+            )
+        };
+
+        if should_confirm {
+            return self.confirm_local_terminal_close(window, cx);
+        }
+
+        self.close_terminal_now(cx);
+        Task::ready(true)
+    }
+}
+
+impl Render for TerminalView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 创建与 terminal_element 一致的字体配置（包含 fallbacks）
+        let fallbacks = if self.font_fallbacks.is_empty() {
+            None
+        } else {
+            Some(FontFallbacks::from_fonts(
+                self.font_fallbacks
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>(),
+            ))
+        };
+        let features = FontFeatures(std::sync::Arc::new(vec![("calt".to_string(), 0)]));
+
+        let font = Font {
+            family: self.font_family.clone(),
+            weight: self.font_weight,
+            style: FontStyle::Normal,
+            features,
+            fallbacks,
+        };
+        let font_id = window.text_system().resolve_font(&font);
+        // 使用 advance('m').width 计算 cell_width
+        // advance 返回字符的前进宽度，比 em_width 更准确反映等宽字体的单元格宽度
+        let new_cell_width = window
+            .text_system()
+            .advance(font_id, self.font_size, 'm')
+            .map(|size| size.width)
+            .unwrap_or(self.font_size * 0.6);
+
+        if self.cell_width != new_cell_width {
+            self.cell_width = new_cell_width;
+        }
+
+        self.line_height = self.font_size * self.line_height_scale;
+
+        if let Some(new_display_offset) = self.scrollbar_handle.take_future_display_offset() {
+            self.terminal.update(cx, |terminal, _| {
+                let current = terminal.term().lock().grid().display_offset() as i32;
+                let target = new_display_offset as i32;
+                let delta = target - current;
+                if delta != 0 {
+                    terminal.scroll(delta);
+                }
+            });
+        }
+
+        let connection_state = self.terminal.read(cx).connection_state().clone();
+        let can_reconnect = self.terminal.read(cx).can_reconnect()
+            || (self.terminal.read(cx).connection_kind() == TerminalConnectionKind::JmsKoko
+                && self.jms_context.is_some()
+                && self
+                    .koko_params
+                    .as_ref()
+                    .is_some_and(|params| params.asset_id.is_some()));
+        let bg_color = self.current_theme.background;
+        let has_selection = self.terminal.read(cx).term().lock().selection.is_some();
+        let selection_text = self.terminal.read(cx).selection_text();
+        let sidebar_visible = self.sidebar.read(cx).is_visible();
+        let sidebar_collapsed = self.sidebar.read(cx).is_collapsed();
+        let sidebar_panel_size = self.sidebar_panel_size;
+        let view = cx.entity().clone();
+        let terminal_mode = self.terminal.read(cx).mode();
+        let history_size = self.terminal.read(cx).term().lock().history_size();
+        let show_scrollbar = !terminal_mode.contains(TermMode::ALT_SCREEN) && history_size > 0;
+        let rss_bytes = if tracing::enabled!(target: "terminal_residue", tracing::Level::TRACE) {
+            current_rss_bytes()
+        } else {
+            None
+        };
+        tracing::trace!(
+            target: "terminal_residue",
+            rss_bytes = ?rss_bytes,
+            pane_visible = self.pane_visible,
+            scrollback_lines = history_size,
+            "terminal runtime diagnostics"
+        );
+
+        // 检测主屏 ↔ alt screen 切换。
+        // 进入 alt screen 时(opencode/lazygit/vim 等 TUI 启动),主动重发当前尺寸到 PTY,
+        // 触发 SIGWINCH 让 TUI 重新查询尺寸并刷新整屏,避免底部残留旧画面。
+        // 仅在 last_size 已就绪时(说明 PTY 已收到过正确尺寸)才 nudge,
+        // 避免覆盖即将到来的首次 resize_if_needed。
+        let alt_screen = terminal_mode.contains(TermMode::ALT_SCREEN);
+        if alt_screen != self.last_alt_screen {
+            tracing::info!(
+                target: "terminal_residue",
+                from = self.last_alt_screen,
+                to = alt_screen,
+                last_size = ?self.last_size,
+                "alt_screen mode transition"
+            );
+            self.last_alt_screen = alt_screen;
+            if alt_screen && self.last_size.is_some() {
+                tracing::info!(target: "terminal_residue", "nudge_resize fired on enter alt_screen");
+                self.terminal
+                    .update(cx, |terminal, _| terminal.nudge_resize());
+            }
+        }
+
+        div()
+            .size_full()
+            .min_w(px(160.0))
+            .min_h(px(80.0))
+            .flex()
+            .flex_row()
+            .bg(bg_color)
+            .child({
+                let tooltip = self.addon_manager.tooltip();
+                let mouse_pos = self.mouse_position;
+                let terminal_bounds = self.terminal_bounds;
+                let entity = cx.entity().downgrade();
+                let focus_handle = self.focus_handle.clone();
+                let terminal_core = div()
+                    .track_focus(&focus_handle)
+                    .key_context(TERMINAL_CONTEXT)
+                    .on_action(cx.listener(Self::send_tab))
+                    .on_action(cx.listener(Self::send_shift_tab))
+                    .on_action(cx.listener(Self::copy))
+                    .on_action(cx.listener(Self::paste))
+                    .on_action(cx.listener(Self::select_all))
+                    .on_action(cx.listener(Self::clear_screen))
+                    .on_action(cx.listener(Self::clear_selection))
+                    .on_action(cx.listener(Self::search_forward))
+                    .on_action(cx.listener(Self::search_backward))
+                    .on_action(cx.listener(Self::toggle_vi_mode))
+                    .on_action(cx.listener(Self::increase_font))
+                    .on_action(cx.listener(Self::decrease_font))
+                    .on_action(cx.listener(Self::reset_font))
+                    .on_key_down(cx.listener(Self::handle_key_event))
+                    .flex_1()
+                    .relative()
+                    .overflow_hidden()
+                    .on_scroll_wheel(cx.listener(Self::handle_scroll))
+                    .on_mouse_down(MouseButton::Left, cx.listener(Self::handle_mouse_down))
+                    .on_mouse_down(
+                        MouseButton::Middle,
+                        cx.listener(Self::handle_middle_mouse_down),
+                    )
+                    .on_mouse_move(cx.listener(Self::handle_mouse_move))
+                    .on_mouse_up(MouseButton::Left, cx.listener(Self::handle_mouse_up))
+                    .child(
+                        canvas(
+                            move |bounds, _window, cx| {
+                                if let Some(entity) = entity.upgrade() {
+                                    entity.update(cx, |this, cx| {
+                                        this.terminal_bounds = bounds;
+                                        {
+                                            let mut metrics = this.scrollbar_metrics.borrow_mut();
+                                            metrics.viewport_size = bounds.size;
+                                            metrics.line_height = this.line_height;
+                                            metrics.cell_width = this.cell_width;
+                                        }
+                                        this.resize_if_needed(bounds, cx);
+                                        if this.pane_visible && this.post_split_resize_pending {
+                                            this.post_split_resize_pending = false;
+                                            this.terminal
+                                                .update(cx, |terminal, _| terminal.nudge_resize());
+                                        }
+                                    });
+                                }
+                            },
+                            {
+                                let entity = cx.entity().downgrade();
+                                let focus_handle = focus_handle.clone();
+                                move |bounds, _state, window, cx| {
+                                    if let Some(entity) = entity.upgrade() {
+                                        let input_handler =
+                                            ElementInputHandler::new(bounds, entity);
+                                        window.handle_input(&focus_handle, input_handler, cx);
+                                    }
+                                }
+                            },
+                        )
+                        .absolute()
+                        .left(px(12.))
+                        .right(px(12.))
+                        .top(px(12.))
+                        .bottom(px(12.)),
+                    )
+                    .child({
+                        let view = cx.entity().clone();
+                        let sidebar = self.sidebar.clone();
+                        div()
+                            .absolute()
+                            .left(px(12.))
+                            .right(px(12.))
+                            .top(px(12.))
+                            .bottom(px(12.))
+                            .bg(self.current_theme.background)
+                            .overflow_hidden()
+                            .child(self.render_terminal(cx))
+                            .when_some(self.render_history_prompt_overlay(cx), |this, overlay| {
+                                this.child(overlay)
+                            })
+                            .context_menu(move |menu, window, cx| {
+                                Self::build_context_menu(
+                                    menu,
+                                    has_selection,
+                                    selection_text.clone(),
+                                    &view,
+                                    &sidebar,
+                                    window,
+                                    cx,
+                                )
+                            })
+                    })
+                    .when_some(tooltip.zip(mouse_pos), |this, (tooltip, pos)| {
+                        let relative_x = pos.x - terminal_bounds.origin.x;
+                        let relative_y = pos.y - terminal_bounds.origin.y;
+                        this.child(
+                            div()
+                                .absolute()
+                                .left(relative_x + px(10.0))
+                                .top(relative_y + px(20.0))
+                                .px_2()
+                                .py_1()
+                                .bg(rgb(0x3d3d3d))
+                                .rounded_md()
+                                .shadow_md()
+                                .text_size(px(11.0))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .child(
+                                            div()
+                                                .px_1()
+                                                .bg(rgb(0x4d4d4d))
+                                                .rounded_sm()
+                                                .text_color(rgb(0xcccccc))
+                                                .child(tooltip.action_hint),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_color(rgb(0x888888))
+                                                .child(tooltip.action_text),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .text_color(tooltip.display_color)
+                                        .overflow_hidden()
+                                        .max_w(px(400.0))
+                                        .text_ellipsis()
+                                        .child(tooltip.display_text),
+                                ),
+                        )
+                    })
+                    .when(
+                        matches!(connection_state, ConnectionState::Disconnected { .. })
+                            || matches!(connection_state, ConnectionState::Connecting),
+                        |this| {
+                            if self.is_jms_placeholder(cx) {
+                                this.child(self.render_jms_placeholder_overlay(cx))
+                            } else {
+                                this.child(self.render_connection_overlay(can_reconnect, cx))
+                            }
+                        },
+                    );
+
+                div()
+                    .relative()
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .child(terminal_core)
+                    .when(show_scrollbar, |this| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .top(px(12.0))
+                                .right(px(2.0))
+                                .bottom(px(12.0))
+                                .w(px(6.0))
+                                .child(
+                                    Scrollbar::vertical(&self.scrollbar_handle)
+                                        .scrollbar_show(ScrollbarShow::Always),
+                                ),
+                        )
+                    })
+            })
+            // 渲染侧边栏
+            .when(sidebar_visible, |this| {
+                this.child(
+                    div()
+                        .relative()
+                        .h_full()
+                        .w(sidebar_panel_size)
+                        .flex_shrink_0()
+                        .child(self.render_sidebar_resize_handle(window, cx))
+                        .child(self.sidebar.clone()),
+                )
+            })
+            .when(!sidebar_visible && !sidebar_collapsed, |this| {
+                this.child(self.sidebar.clone())
+            })
+            // 折叠时显示一个半透明的展开按钮
+            .when(sidebar_collapsed, |this| {
+                let sidebar = self.sidebar.clone();
+                this.child(
+                    div()
+                        .id("sidebar-expand-overlay")
+                        .absolute()
+                        .right(px(8.0))
+                        .top(px(8.0))
+                        .w(px(36.0))
+                        .h(px(36.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_full()
+                        .bg(Hsla {
+                            h: 0.,
+                            s: 0.,
+                            l: 0.2,
+                            a: 0.2,
+                        })
+                        .cursor_pointer()
+                        .hover(|s| {
+                            s.bg(Hsla {
+                                h: 0.,
+                                s: 0.,
+                                l: 0.3,
+                                a: 0.35,
+                            })
+                        })
+                        .on_click(move |_, _window, cx| {
+                            sidebar.update(cx, |sidebar, cx| {
+                                sidebar.expand(cx);
+                            });
+                        })
+                        .child(
+                            Icon::new(IconName::ChevronRight)
+                                .with_size(Size::Medium)
+                                .text_color(gpui::white()),
+                        ),
+                )
+            })
+            .child(ResizeEventHandler { view })
+    }
+}
+
+impl EntityInputHandler for TerminalView {
+    fn text_for_range(
+        &mut self,
+        _range: std::ops::Range<usize>,
+        _actual_range: &mut Option<std::ops::Range<usize>>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<String> {
+        None
+    }
+
+    fn selected_text_range(
+        &mut self,
+        _ignore_disabled_input: bool,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<UTF16Selection> {
+        Some(UTF16Selection {
+            range: 0..0,
+            reversed: false,
+        })
+    }
+
+    fn marked_text_range(
+        &self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<std::ops::Range<usize>> {
+        self.marked_text_range()
+    }
+
+    fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.clear_marked_text(cx);
+    }
+
+    fn replace_text_in_range(
+        &mut self,
+        _replacement_range: Option<std::ops::Range<usize>>,
+        text: &str,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.clear_marked_text(cx);
+        self.commit_text(text, cx);
+    }
+
+    fn replace_and_mark_text_in_range(
+        &mut self,
+        _range: Option<std::ops::Range<usize>>,
+        new_text: &str,
+        new_marked_range: Option<std::ops::Range<usize>>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_marked_text(new_text.to_string(), new_marked_range, cx);
+    }
+
+    fn bounds_for_range(
+        &mut self,
+        _range: std::ops::Range<usize>,
+        _bounds: Bounds<Pixels>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
+        // 获取光标位置用于 IME 定位
+        let term = self.terminal.read(cx).term().lock();
+        let cursor = term.grid().cursor.point;
+        let display_offset = term.grid().display_offset();
+        let is_wide = term.grid()[cursor.line][cursor.column]
+            .flags
+            .contains(alacritty_terminal::term::cell::Flags::WIDE_CHAR);
+        drop(term);
+
+        let screen_line = cursor.line.0 + display_offset as i32;
+        let col = cursor.column.0;
+
+        // 计算像素位置
+        let origin = Point::new(
+            self.terminal_bounds.origin.x + self.cell_width * col as f32,
+            self.terminal_bounds.origin.y + self.line_height * screen_line as f32,
+        );
+
+        let width = if is_wide { self.cell_width * 2.0 } else { self.cell_width };
+        Some(Bounds::new(origin, size(width, self.line_height)))
+    }
+
+    fn character_index_for_point(
+        &mut self,
+        _point: Point<Pixels>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<usize> {
+        None
+    }
+}
+
+struct ResizeEventHandler {
+    view: Entity<TerminalView>,
+}
+
+impl IntoElement for ResizeEventHandler {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for ResizeEventHandler {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        (window.request_layout(Style::default(), None, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        let bounds = window.bounds();
+        self.view.update(cx, |view, _| {
+            view.view_bounds = Bounds {
+                origin: Point::default(),
+                size: bounds.size,
+            };
+        });
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        _: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        window.on_mouse_event({
+            let view = self.view.clone();
+            let resizing = view.read(cx).resizing;
+            move |e: &MouseMoveEvent, phase, window, cx| {
+                if resizing.is_none() {
+                    return;
+                }
+                if !phase.bubble() {
+                    return;
+                }
+                view.update(cx, |view, cx| view.resize_sidebar(e.position, window, cx));
+            }
+        });
+
+        window.on_mouse_event({
+            let view = self.view.clone();
+            move |_: &MouseUpEvent, phase, window, cx| {
+                if phase.bubble() {
+                    view.update(cx, |view, cx| view.done_resizing(window, cx));
+                }
+            }
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        TERMINAL_MIN_COLS, TERMINAL_MIN_ROWS, TerminalSurfaceSize, TerminalView,
+        UnbracketedPasteHazard, batch_commands_for_paste, detect_unbracketed_paste_hazard,
+        encode_bracketed_paste, encode_mouse_modifiers, has_multiline_shell_structure,
+        has_unterminated_shell_quote, high_risk_command_matches, history_prompt_available,
+        history_prompt_dropdown_origin, history_prompt_overlay_bounds, mouse_button_code,
+        normalize_paste_text, sgr_mouse_button_report, sgr_mouse_mode_enabled,
+        sgr_mouse_wheel_report, selection_drag_autoscroll_delta, should_advance_command_queue,
+        should_confirm_local_terminal_close,
+        should_defer_inline_history_prompt_input_to_text_system, should_defer_sgr_left_press,
+        should_dismiss_history_prompt_for_keystroke, should_dismiss_history_prompt_for_mouse,
+        should_dismiss_history_prompt_for_scroll, should_reset_history_prompt_for_terminal_event,
+        should_scroll_to_bottom_on_user_input, should_start_selection_from_pending_sgr_press,
+        split_batch_commands, take_whole_scroll_lines,
+    };
+    use crate::terminal_element::{TERMINAL_SURFACE_MAX_COLS, TERMINAL_SURFACE_MAX_LINES};
+    #[test]
+    fn terminal_surface_size_uses_available_grid_dimensions() {
+        let size = TerminalSurfaceSize::from_bounds(
+            Bounds::new(Point::default(), size(px(800.0), px(280.0))),
+            px(8.0),
+            px(20.0),
+        )
+        .expect("valid bounds should produce a terminal size");
+
+        assert_eq!(size.cols, 100);
+        assert_eq!(size.rows, 14);
+        assert_eq!(size.pixel_width, 800);
+        assert_eq!(size.pixel_height, 280);
+    }
+
+    #[test]
+    fn terminal_surface_size_caps_grid_and_pixel_extent_together() {
+        let cell_width = px(8.0);
+        let line_height = px(20.0);
+        let size = TerminalSurfaceSize::from_bounds(
+            Bounds::new(
+                Point::default(),
+                size(
+                    cell_width * (TERMINAL_SURFACE_MAX_COLS as f32 + 20.0),
+                    line_height * (TERMINAL_SURFACE_MAX_LINES as f32 + 20.0),
+                ),
+            ),
+            cell_width,
+            line_height,
+        )
+        .expect("oversized bounds should be safely capped");
+
+        assert_eq!(size.cols, TERMINAL_SURFACE_MAX_COLS);
+        assert_eq!(size.rows, TERMINAL_SURFACE_MAX_LINES);
+        assert_eq!(size.pixel_width, (TERMINAL_SURFACE_MAX_COLS * 8) as u16);
+        assert_eq!(size.pixel_height, (TERMINAL_SURFACE_MAX_LINES * 20) as u16);
+    }
+
+    #[test]
+    fn terminal_surface_size_keeps_terminal_minimums() {
+        let size = TerminalSurfaceSize::from_bounds(
+            Bounds::new(Point::default(), size(px(1.0), px(1.0))),
+            px(8.0),
+            px(20.0),
+        )
+        .expect("positive bounds should preserve the minimum terminal grid");
+
+        assert_eq!(size.cols, TERMINAL_MIN_COLS);
+        assert_eq!(size.rows, TERMINAL_MIN_ROWS);
+    }
+
+    #[test]
+    fn terminal_surface_size_rejects_invalid_geometry() {
+        assert!(
+            TerminalSurfaceSize::from_bounds(
+                Bounds::new(Point::default(), size(px(0.0), px(280.0))),
+                px(8.0),
+                px(20.0),
+            )
+            .is_none()
+        );
+        assert!(
+            TerminalSurfaceSize::from_bounds(
+                Bounds::new(Point::default(), size(px(800.0), px(280.0))),
+                px(0.0),
+                px(20.0),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn connected_jms_context_is_not_placeholder() {
+        let mut is_placeholder = true;
+
+        TerminalView::mark_jms_context_connected(&mut is_placeholder);
+
+        assert!(!is_placeholder);
+    }
+
+    #[test]
+    fn marking_connected_jms_context_is_idempotent() {
+        let mut is_placeholder = false;
+
+        TerminalView::mark_jms_context_connected(&mut is_placeholder);
+
+        assert!(!is_placeholder);
+    }
+
+    use crate::history_prompt::{HistoryPromptAccept, HistoryPromptState};
+    use alacritty_terminal::index::{Column, Line, Point as AlacPoint};
+    use alacritty_terminal::term::TermMode;
+    use gpui::{Bounds, Keystroke, Modifiers, MouseButton, Point, px, size};
+    use std::cell::Cell as StdCell;
+    use terminal::terminal::{TerminalConnectionKind, TerminalModelEvent};
+
+    #[test]
+    fn local_terminal_close_confirms_while_command_is_running() {
+        assert!(should_confirm_local_terminal_close(
+            TerminalConnectionKind::Local,
+            true,
+            TermMode::empty(),
+            None,
+        ));
+    }
+
+    #[test]
+    fn local_terminal_close_confirms_while_tui_is_running() {
+        assert!(should_confirm_local_terminal_close(
+            TerminalConnectionKind::Local,
+            false,
+            TermMode::ALT_SCREEN,
+            None,
+        ));
+    }
+
+    #[test]
+    fn local_terminal_close_does_not_confirm_when_shell_is_idle() {
+        assert!(!should_confirm_local_terminal_close(
+            TerminalConnectionKind::Local,
+            false,
+            TermMode::empty(),
+            None,
+        ));
+    }
+
+    #[test]
+    fn terminal_close_confirmation_is_only_for_local_terminals() {
+        assert!(!should_confirm_local_terminal_close(
+            TerminalConnectionKind::Ssh,
+            true,
+            TermMode::ALT_SCREEN,
+            None,
+        ));
+    }
+
+    #[test]
+    fn take_whole_scroll_lines_preserves_fractional_remainder() {
+        let mut accumulated = 0.4;
+        assert_eq!(take_whole_scroll_lines(&mut accumulated), 0);
+        assert!((accumulated - 0.4).abs() < f32::EPSILON);
+
+        accumulated += 0.8;
+        assert_eq!(take_whole_scroll_lines(&mut accumulated), 1);
+        assert!((accumulated - 0.2).abs() < 0.0001);
+    }
+
+    #[test]
+    fn take_whole_scroll_lines_handles_negative_accumulation() {
+        let mut accumulated = -0.45;
+        assert_eq!(take_whole_scroll_lines(&mut accumulated), 0);
+        assert!((accumulated + 0.45).abs() < f32::EPSILON);
+
+        accumulated -= 0.8;
+        assert_eq!(take_whole_scroll_lines(&mut accumulated), -1);
+        assert!((accumulated + 0.25).abs() < 0.0001);
+    }
+
+    #[test]
+    fn terminal_keybindings_bind_ctrl_zero_to_reset_font() {
+        let source = include_str!("view.rs");
+
+        assert!(source.contains(r#"terminal_platform_shortcut("cmd-0", "ctrl-0")"#));
+        assert!(source.contains("ResetFont"));
+    }
+
+    #[test]
+    fn terminal_keybindings_bind_clear_screen_shortcut() {
+        let source = include_str!("view.rs");
+
+        assert!(source.contains("TERMINAL_CLEAR_SCREEN_SHORTCUT"));
+        assert!(source.contains("ClearScreen"));
+    }
+
+    #[test]
+    fn terminal_context_menu_exposes_clear_screen() {
+        let source = include_str!("view.rs");
+
+        assert!(source.contains("ContextMenu.clear_screen_with_shortcut"));
+        assert!(source.contains("this.clear_screen(&ClearScreen, window, cx)"));
+    }
+
+    #[test]
+    fn terminal_reset_font_size_is_fifteen() {
+        assert_eq!(super::TERMINAL_RESET_FONT_SIZE, 15.0);
+    }
+
+    #[test]
+    fn terminal_theme_source_does_not_define_font_settings() {
+        let source = include_str!("theme.rs");
+
+        assert!(!source.contains("pub font_size"));
+        assert!(!source.contains("pub font_family"));
+        assert!(!source.contains("pub font_fallbacks"));
+        assert!(!source.contains("pub line_height_scale"));
+    }
+
+    #[test]
+    fn sgr_mouse_wheel_report_maps_positive_lines_to_wheel_up() {
+        assert_eq!(
+            sgr_mouse_wheel_report(1, 4, 2).as_deref(),
+            Some("\x1b[<64;5;3M")
+        );
+    }
+
+    #[test]
+    fn sgr_mouse_wheel_report_maps_negative_lines_to_wheel_down() {
+        assert_eq!(
+            sgr_mouse_wheel_report(-1, 4, 2).as_deref(),
+            Some("\x1b[<65;5;3M")
+        );
+        assert_eq!(sgr_mouse_wheel_report(0, 4, 2), None);
+    }
+
+    #[test]
+    fn sgr_mouse_button_report_uses_capital_m_on_press() {
+        // 左键按下，列 0、行 0 -> 转 1-based
+        let s = sgr_mouse_button_report(0, 0, 0, true);
+        assert_eq!(s, "\x1b[<0;1;1M");
+    }
+
+    #[test]
+    fn sgr_mouse_button_report_uses_lowercase_m_on_release() {
+        let s = sgr_mouse_button_report(2, 9, 4, false);
+        // 右键 (button=2) 释放在 1-based col=10 row=5
+        assert_eq!(s, "\x1b[<2;10;5m");
+    }
+
+    #[test]
+    fn sgr_mouse_button_report_supports_modifier_encoded_buttons() {
+        // 左键 + shift (4) + ctrl (16) -> button=20
+        let s = sgr_mouse_button_report(20, 0, 0, true);
+        assert_eq!(s, "\x1b[<20;1;1M");
+    }
+
+    #[test]
+    fn sgr_mouse_button_report_supports_drag_button_codes() {
+        // 拖动事件：button + 32（xterm 拖动位）
+        // 左键拖动 = 32
+        let s = sgr_mouse_button_report(32, 7, 11, true);
+        assert_eq!(s, "\x1b[<32;8;12M");
+    }
+
+    #[test]
+    fn mouse_button_code_maps_three_main_buttons() {
+        assert_eq!(mouse_button_code(MouseButton::Left), Some(0));
+        assert_eq!(mouse_button_code(MouseButton::Middle), Some(1));
+        assert_eq!(mouse_button_code(MouseButton::Right), Some(2));
+    }
+
+    #[test]
+    fn encode_mouse_modifiers_packs_shift_alt_control() {
+        let none = Modifiers::default();
+        assert_eq!(encode_mouse_modifiers(none), 0);
+
+        let shift = Modifiers {
+            shift: true,
+            ..Default::default()
+        };
+        assert_eq!(encode_mouse_modifiers(shift), 4);
+
+        let alt = Modifiers {
+            alt: true,
+            ..Default::default()
+        };
+        assert_eq!(encode_mouse_modifiers(alt), 8);
+
+        let ctrl = Modifiers {
+            control: true,
+            ..Default::default()
+        };
+        assert_eq!(encode_mouse_modifiers(ctrl), 16);
+
+        let all = Modifiers {
+            shift: true,
+            alt: true,
+            control: true,
+            ..Default::default()
+        };
+        assert_eq!(encode_mouse_modifiers(all), 28);
+    }
+
+    #[test]
+    fn sgr_mouse_mode_enabled_requires_sgr_and_mouse_reporting() {
+        assert!(!sgr_mouse_mode_enabled(TermMode::SGR_MOUSE));
+        assert!(!sgr_mouse_mode_enabled(TermMode::MOUSE_REPORT_CLICK));
+        assert!(sgr_mouse_mode_enabled(
+            TermMode::SGR_MOUSE | TermMode::MOUSE_REPORT_CLICK
+        ));
+    }
+
+    #[test]
+    fn should_defer_sgr_left_press_only_for_plain_left_mouse_in_sgr_mode() {
+        let mode = TermMode::SGR_MOUSE | TermMode::MOUSE_REPORT_CLICK;
+        let none = Modifiers::default();
+        let shift = Modifiers {
+            shift: true,
+            ..Default::default()
+        };
+        let control = Modifiers {
+            control: true,
+            ..Default::default()
+        };
+        let alt = Modifiers {
+            alt: true,
+            ..Default::default()
+        };
+        let platform = Modifiers {
+            platform: true,
+            ..Default::default()
+        };
+
+        assert!(should_defer_sgr_left_press(MouseButton::Left, none, mode));
+        assert!(!should_defer_sgr_left_press(MouseButton::Right, none, mode));
+        assert!(!should_defer_sgr_left_press(MouseButton::Left, shift, mode));
+        assert!(!should_defer_sgr_left_press(
+            MouseButton::Left,
+            control,
+            mode
+        ));
+        assert!(!should_defer_sgr_left_press(MouseButton::Left, alt, mode));
+        assert!(!should_defer_sgr_left_press(
+            MouseButton::Left,
+            platform,
+            mode
+        ));
+        assert!(!should_defer_sgr_left_press(
+            MouseButton::Left,
+            none,
+            TermMode::default()
+        ));
+    }
+
+    #[test]
+    fn selection_autoscroll_stays_idle_in_the_middle() {
+        let bounds = Bounds::new(Point::new(px(0.0), px(100.0)), size(px(800.0), px(400.0)));
+        let line_height = px(20.0);
+        // 中部死区
+        assert_eq!(
+            selection_drag_autoscroll_delta(Point::new(px(10.0), px(300.0)), bounds, line_height),
+            0
+        );
+        // 上下边缘内侧半行内仍以 1 行/拍 触发（便于拖到底部最后一行时续选）
+        assert_eq!(
+            selection_drag_autoscroll_delta(Point::new(px(10.0), px(105.0)), bounds, line_height),
+            1
+        );
+        assert_eq!(
+            selection_drag_autoscroll_delta(Point::new(px(10.0), px(495.0)), bounds, line_height),
+            -1
+        );
+    }
+
+    #[test]
+    fn selection_autoscroll_accelerates_with_overshoot_and_caps() {
+        let bounds = Bounds::new(Point::new(px(0.0), px(100.0)), size(px(800.0), px(400.0)));
+        let line_height = px(20.0);
+        // 拖出窗口外侧：每超出一行速度 +1，封顶 5 行/拍
+        assert_eq!(
+            selection_drag_autoscroll_delta(Point::new(px(10.0), px(80.0)), bounds, line_height),
+            2
+        );
+        assert_eq!(
+            selection_drag_autoscroll_delta(
+                Point::new(px(10.0), px(-1000.0)),
+                bounds,
+                line_height
+            ),
+            5
+        );
+        assert_eq!(
+            selection_drag_autoscroll_delta(
+                Point::new(px(10.0), px(540.0)),
+                bounds,
+                line_height
+            ),
+            -3
+        );
+        assert_eq!(
+            selection_drag_autoscroll_delta(
+                Point::new(px(10.0), px(10000.0)),
+                bounds,
+                line_height
+            ),
+            -5
+        );
+        // 非法行高不触发
+        assert_eq!(
+            selection_drag_autoscroll_delta(
+                Point::new(px(10.0), px(10000.0)),
+                bounds,
+                px(0.0)
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn pending_sgr_press_starts_selection_after_mouse_reaches_another_cell() {
+        let start = AlacPoint::new(Line(1), Column(1));
+        assert!(!should_start_selection_from_pending_sgr_press(start, start));
+        assert!(should_start_selection_from_pending_sgr_press(
+            start,
+            AlacPoint::new(Line(1), Column(2))
+        ));
+        assert!(should_start_selection_from_pending_sgr_press(
+            start,
+            AlacPoint::new(Line(2), Column(1))
+        ));
+    }
+
+    #[test]
+    fn configured_high_risk_patterns_match_case_insensitively() {
+        let patterns = vec![r"\brm\s+-rf\b".to_string()];
+        assert!(high_risk_command_matches(&patterns, "sudo RM -RF /tmp"));
+        assert!(!high_risk_command_matches(&patterns, "echo rm -r /tmp"));
+    }
+
+    #[test]
+    fn configured_high_risk_patterns_match_any_pasted_line() {
+        let patterns = vec![r"\bsystemctl\s+stop\b".to_string()];
+        assert!(high_risk_command_matches(
+            &patterns,
+            "echo safe\nsystemctl stop ssh"
+        ));
+    }
+
+    #[test]
+    fn command_queue_advances_only_after_prompt_input_is_ready() {
+        assert!(!should_advance_command_queue(
+            &TerminalModelEvent::PromptStart
+        ));
+        assert!(should_advance_command_queue(
+            &TerminalModelEvent::InputStart
+        ));
+        assert!(!should_advance_command_queue(
+            &TerminalModelEvent::CommandStart
+        ));
+    }
+
+    #[test]
+    fn split_batch_commands_returns_none_for_single_line() {
+        assert_eq!(split_batch_commands("echo hello"), None);
+    }
+
+    #[test]
+    fn split_batch_commands_returns_none_for_empty_lines_only() {
+        assert_eq!(split_batch_commands("\n\n\n"), None);
+    }
+
+    #[test]
+    fn split_batch_commands_returns_none_for_one_nonempty_line_with_blanks() {
+        assert_eq!(split_batch_commands("echo 1\n\n"), None);
+    }
+
+    #[test]
+    fn split_batch_commands_splits_multiple_commands() {
+        assert_eq!(
+            split_batch_commands("echo 1\necho 2\necho 3"),
+            Some(vec![
+                "echo 1".to_string(),
+                "echo 2".to_string(),
+                "echo 3".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn split_batch_commands_filters_blank_lines() {
+        assert_eq!(
+            split_batch_commands("echo 1\n\n\necho 2"),
+            Some(vec!["echo 1".to_string(), "echo 2".to_string()])
+        );
+    }
+
+    #[test]
+    fn split_batch_commands_filters_leading_and_trailing_blank_lines() {
+        assert_eq!(
+            split_batch_commands("\n\necho 1\necho 2\n\n"),
+            Some(vec!["echo 1".to_string(), "echo 2".to_string()])
+        );
+    }
+
+    #[test]
+    fn split_batch_commands_joins_line_continuations() {
+        // 行尾反斜杠表示续行，合并后只剩一条命令，返回 None 走普通粘贴路径
+        assert_eq!(split_batch_commands("ps \\\n-ef"), None);
+
+        // 续行与后续普通命令混合
+        assert_eq!(
+            split_batch_commands("ps \\\n-ef\necho done"),
+            Some(vec!["ps \\\n-ef".to_string(), "echo done".to_string()])
+        );
+
+        // 多条续行命令
+        assert_eq!(
+            split_batch_commands("echo a \\\n&& echo b\necho c"),
+            Some(vec![
+                "echo a \\\n&& echo b".to_string(),
+                "echo c".to_string()
+            ])
+        );
+
+        // 反斜杠后带空格仍视为续行
+        assert_eq!(split_batch_commands("ps \\  \n-ef"), None);
+    }
+    #[test]
+    fn split_batch_commands_preserves_the_requested_process_diagnostics() {
+        assert_eq!(
+            split_batch_commands(
+                "cd /usr/local/nginx/seo/logs\ncat pm2.pid\nps -fp \"$(cat pm2.pid)\"\nps -ef | grep '[p]m2'\nfind pids -maxdepth 2 -type f -ls\ncat pm2.log"
+            ),
+            Some(vec![
+                "cd /usr/local/nginx/seo/logs".to_string(),
+                "cat pm2.pid".to_string(),
+                "ps -fp \"$(cat pm2.pid)\"".to_string(),
+                "ps -ef | grep '[p]m2'".to_string(),
+                "find pids -maxdepth 2 -type f -ls".to_string(),
+                "cat pm2.log".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn detect_unbracketed_paste_hazard_matches_heredoc() {
+        let text = "cat <<EOF\nhello\nEOF";
+        assert_eq!(
+            detect_unbracketed_paste_hazard(text),
+            Some(UnbracketedPasteHazard::HereDoc)
+        );
+    }
+
+    #[test]
+    fn detect_unbracketed_paste_hazard_ignores_line_continuation() {
+        assert_eq!(
+            detect_unbracketed_paste_hazard("echo hello \\\nworld"),
+            None
+        );
+    }
+
+    #[test]
+    fn detect_unbracketed_paste_hazard_matches_unterminated_quote() {
+        assert!(has_unterminated_shell_quote("printf 'hello\nworld"));
+        assert_eq!(
+            detect_unbracketed_paste_hazard("printf 'hello\nworld"),
+            Some(UnbracketedPasteHazard::UnterminatedQuote)
+        );
+    }
+
+    #[test]
+    fn detect_unbracketed_paste_hazard_ignores_plain_text() {
+        assert_eq!(
+            detect_unbracketed_paste_hazard("printf '%s\\n' hello"),
+            None
+        );
+        assert!(!has_unterminated_shell_quote("printf '%s\\n' hello"));
+    }
+
+    #[test]
+    fn heredoc_detection_ignores_quoted_shift_operators() {
+        assert_eq!(
+            detect_unbracketed_paste_hazard("sed -n 's/<<foo/bar/' file\nprintf \"a << b\\n\""),
+            None
+        );
+    }
+
+    #[test]
+    fn heredoc_detection_only_treats_token_start_hash_as_comment() {
+        assert_eq!(
+            detect_unbracketed_paste_hazard("# ignored <<EOF\necho ok"),
+            None
+        );
+        assert_eq!(
+            detect_unbracketed_paste_hazard("echo foo#bar; cat <<EOF\nvalue\nEOF"),
+            Some(UnbracketedPasteHazard::HereDoc)
+        );
+    }
+
+    #[test]
+    fn quote_detection_respects_opposite_quote_characters() {
+        assert!(!has_unterminated_shell_quote("echo \"it's fine\""));
+        assert!(!has_unterminated_shell_quote("echo 'say \"hello\"'"));
+    }
+
+    #[test]
+    fn complex_shell_structures_are_not_batch_split_candidates() {
+        assert!(has_multiline_shell_structure(
+            "cat <<'EOF'\nfirst\n\nthird\nEOF"
+        ));
+        assert!(has_multiline_shell_structure(
+            "for x in a b; do\n  echo \"$x\"\ndone"
+        ));
+        assert!(has_multiline_shell_structure(concat!(
+            "printf '%s' ",
+            "\\",
+            "\n  one"
+        )));
+    }
+
+    #[test]
+    fn newline_separated_shell_keyword_blocks_are_complex() {
+        assert!(has_multiline_shell_structure(
+            "if true\nthen\n  echo yes\nfi"
+        ));
+        assert!(has_multiline_shell_structure(
+            "for x in a b\ndo\n  echo \"$x\"\ndone"
+        ));
+    }
+
+    #[test]
+    fn bracketed_paste_never_uses_the_command_queue() {
+        assert_eq!(
+            batch_commands_for_paste(true, false, false, "echo one\necho two"),
+            None
+        );
+    }
+
+    #[test]
+    fn complex_multiline_paste_never_uses_the_command_queue() {
+        assert_eq!(
+            batch_commands_for_paste(false, false, false, "cat <<'EOF'\none\n\ntwo\nEOF"),
+            None
+        );
+        assert_eq!(
+            batch_commands_for_paste(false, false, false, "for x in a b; do\n echo \"$x\"\ndone"),
+            None
+        );
+    }
+
+    #[test]
+    fn simple_unbracketed_remote_commands_can_use_the_queue() {
+        assert_eq!(
+            batch_commands_for_paste(false, false, false, "echo one\necho two"),
+            Some(vec!["echo one".to_string(), "echo two".to_string()])
+        );
+    }
+
+    #[test]
+    fn bracketed_paste_normalizes_newlines_and_preserves_blank_lines() {
+        let normalized = normalize_paste_text("echo 一\r\n\r\necho two\r");
+        assert_eq!(normalized, "echo 一\n\necho two\n");
+        assert_eq!(
+            encode_bracketed_paste(&normalized),
+            "\u{1b}[200~echo 一\n\necho two\n\u{1b}[201~".as_bytes()
+        );
+    }
+
+    #[test]
+    fn bracketed_paste_removes_embedded_escape_bytes() {
+        assert_eq!(
+            encode_bracketed_paste("echo\u{1b}[201~injected"),
+            b"\x1b[200~echo[201~injected\x1b[201~"
+        );
+    }
+
+    #[test]
+    fn history_prompt_requires_global_autocomplete_switch() {
+        let mode = TermMode::empty();
+
+        assert!(!history_prompt_available(
+            true,
+            TerminalConnectionKind::Local,
+            mode,
+            true,
+        ));
+        assert!(!history_prompt_available(
+            false,
+            TerminalConnectionKind::Local,
+            mode,
+            true,
+        ));
+    }
+
+    #[test]
+    fn history_prompt_only_remains_available_for_ssh() {
+        let mode = TermMode::empty();
+
+        assert!(!history_prompt_available(
+            true,
+            TerminalConnectionKind::Local,
+            mode,
+            true,
+        ));
+        assert!(!history_prompt_available(
+            true,
+            TerminalConnectionKind::Local,
+            mode,
+            true,
+        ));
+        assert!(history_prompt_available(
+            true,
+            TerminalConnectionKind::Ssh,
+            mode,
+            true,
+        ));
+    }
+
+    #[test]
+    fn history_prompt_is_unavailable_in_terminal_application_modes() {
+        for mode in [
+            TermMode::FOCUS_IN_OUT,
+            TermMode::MOUSE_MODE,
+            TermMode::DISAMBIGUATE_ESC_CODES,
+        ] {
+            assert!(!history_prompt_available(
+                true,
+                TerminalConnectionKind::Ssh,
+                mode,
+                true,
+            ));
+        }
+    }
+
+    #[test]
+    fn history_prompt_requires_active_shell_prompt_input() {
+        assert!(!history_prompt_available(
+            true,
+            TerminalConnectionKind::Ssh,
+            TermMode::empty(),
+            false,
+        ));
+        assert!(history_prompt_available(
+            true,
+            TerminalConnectionKind::Ssh,
+            TermMode::empty(),
+            true,
+        ));
+    }
+
+    #[test]
+    fn history_prompt_dropdown_flips_above_when_cursor_is_near_bottom() {
+        let terminal_bounds =
+            Bounds::new(Point::new(px(12.0), px(12.0)), size(px(800.0), px(280.0)));
+        let line_height = px(20.0);
+        let cursor_line = 11;
+        let cursor_top = terminal_bounds.origin.y + line_height * cursor_line as f32;
+
+        let origin = history_prompt_dropdown_origin(
+            terminal_bounds,
+            px(8.0),
+            line_height,
+            cursor_line,
+            24,
+            6,
+            false,
+        );
+
+        assert!(origin.y < cursor_top);
+        assert!(origin.y >= terminal_bounds.origin.y);
+    }
+
+    #[test]
+    fn history_prompt_overlay_bounds_reset_origin_for_local_overlay_positioning() {
+        let terminal_bounds =
+            Bounds::new(Point::new(px(96.0), px(144.0)), size(px(800.0), px(280.0)));
+
+        let overlay_bounds = history_prompt_overlay_bounds(terminal_bounds);
+
+        assert_eq!(overlay_bounds.origin, Point::new(px(0.0), px(0.0)));
+        assert_eq!(overlay_bounds.size, terminal_bounds.size);
+    }
+
+    #[test]
+    fn history_prompt_accepts_selected_suggestion_suffix() {
+        let mut state = HistoryPromptState::from_input("git st");
+        state.set_matches(vec!["git status".to_string()]);
+
+        let accepted = state.accept_selected_suggestion();
+
+        assert_eq!(
+            accepted,
+            Some(HistoryPromptAccept::AppendSuffix("atus".to_string()))
+        );
+        assert_eq!(state.input(), "git status");
+    }
+
+    #[test]
+    fn history_prompt_navigation_restores_original_input() {
+        let mut state = HistoryPromptState::from_input("git");
+        state.set_matches(vec![
+            "git status".to_string(),
+            "git stash".to_string(),
+            "git switch".to_string(),
+        ]);
+
+        assert_eq!(state.navigate_previous().as_deref(), Some("git status"));
+        assert_eq!(state.navigate_previous().as_deref(), Some("git stash"));
+        assert_eq!(state.navigate_next().as_deref(), Some("git status"));
+        assert_eq!(state.navigate_next().as_deref(), Some("git"));
+    }
+
+    #[test]
+    fn history_prompt_keeps_query_prefix_while_browsing_matches() {
+        let mut state = HistoryPromptState::from_input("git s");
+        state.set_matches(vec![
+            "git status".to_string(),
+            "git stash".to_string(),
+            "git switch".to_string(),
+        ]);
+
+        assert_eq!(state.query_input(), "git s");
+        assert_eq!(state.navigate_previous().as_deref(), Some("git status"));
+        assert_eq!(state.query_input(), "git s");
+        assert_eq!(state.navigate_previous().as_deref(), Some("git stash"));
+        assert_eq!(state.query_input(), "git s");
+    }
+
+    #[test]
+    fn history_prompt_invalidates_multiline_paste() {
+        let mut state = HistoryPromptState::from_input("git");
+
+        state.apply_paste("status\nlog");
+
+        assert!(!state.is_valid());
+        assert_eq!(state.input(), "");
+
+        state.append_text("c");
+
+        assert_eq!(state.input(), "c");
+        assert!(state.matches().is_empty());
+    }
+
+    #[test]
+    fn history_prompt_dismiss_keeps_current_input() {
+        let mut state = HistoryPromptState::from_input("git s");
+        state.set_matches(vec!["git status".to_string(), "git stash".to_string()]);
+
+        state.dismiss_matches();
+
+        assert_eq!(state.input(), "git s");
+        assert_eq!(state.query_input(), "git s");
+        assert!(state.matches().is_empty());
+    }
+
+    #[test]
+    fn history_prompt_dismisses_on_non_linear_inline_keys() {
+        assert!(should_dismiss_history_prompt_for_keystroke(
+            &Keystroke::parse("left").unwrap()
+        ));
+        assert!(should_dismiss_history_prompt_for_keystroke(
+            &Keystroke::parse("ctrl-a").unwrap()
+        ));
+        assert!(should_dismiss_history_prompt_for_keystroke(
+            &Keystroke::parse("ctrl-e").unwrap()
+        ));
+        assert!(should_dismiss_history_prompt_for_keystroke(
+            &Keystroke::parse("alt-backspace").unwrap()
+        ));
+    }
+
+    #[test]
+    fn history_prompt_keeps_tracking_for_linear_typing_keys() {
+        assert!(!should_dismiss_history_prompt_for_keystroke(
+            &Keystroke::parse("a").unwrap()
+        ));
+        assert!(!should_dismiss_history_prompt_for_keystroke(
+            &Keystroke::parse("space").unwrap()
+        ));
+        assert!(!should_dismiss_history_prompt_for_keystroke(
+            &Keystroke::parse("backspace").unwrap()
+        ));
+        assert!(!should_dismiss_history_prompt_for_keystroke(
+            &Keystroke::parse("down").unwrap()
+        ));
+    }
+
+    #[test]
+    fn printable_inline_input_is_deferred_to_text_system() {
+        assert!(should_defer_inline_history_prompt_input_to_text_system(
+            &Keystroke::parse("a").unwrap()
+        ));
+        assert!(should_defer_inline_history_prompt_input_to_text_system(
+            &Keystroke::parse("shift-a").unwrap()
+        ));
+        assert!(should_defer_inline_history_prompt_input_to_text_system(
+            &Keystroke::parse("space").unwrap()
+        ));
+    }
+
+    #[test]
+    fn special_keys_still_bypass_text_system_defer() {
+        assert!(!should_defer_inline_history_prompt_input_to_text_system(
+            &Keystroke::parse("backspace").unwrap()
+        ));
+        assert!(!should_defer_inline_history_prompt_input_to_text_system(
+            &Keystroke::parse("left").unwrap()
+        ));
+        assert!(!should_defer_inline_history_prompt_input_to_text_system(
+            &Keystroke::parse("ctrl-a").unwrap()
+        ));
+    }
+
+    #[test]
+    fn history_prompt_dismisses_on_mouse_interaction() {
+        assert!(should_dismiss_history_prompt_for_mouse(MouseButton::Left));
+        assert!(should_dismiss_history_prompt_for_mouse(MouseButton::Middle));
+        assert!(should_dismiss_history_prompt_for_mouse(MouseButton::Right));
+    }
+
+    #[test]
+    fn history_prompt_dismisses_on_scroll_navigation() {
+        assert!(should_dismiss_history_prompt_for_scroll(1));
+        assert!(should_dismiss_history_prompt_for_scroll(-2));
+        assert!(!should_dismiss_history_prompt_for_scroll(0));
+    }
+
+    #[test]
+    fn history_prompt_resets_on_shell_input_start_event() {
+        assert!(should_reset_history_prompt_for_terminal_event(
+            &TerminalModelEvent::InputStart
+        ));
+        assert!(should_reset_history_prompt_for_terminal_event(
+            &TerminalModelEvent::PromptStart
+        ));
+        assert!(should_reset_history_prompt_for_terminal_event(
+            &TerminalModelEvent::CommandStart
+        ));
+        assert!(!should_reset_history_prompt_for_terminal_event(
+            &TerminalModelEvent::Wakeup
+        ));
+    }
+
+    #[test]
+    fn user_input_scroll_clears_pending_offset_even_when_already_at_bottom() {
+        let pending_display_offset = StdCell::new(Some(12));
+
+        assert!(!should_scroll_to_bottom_on_user_input(
+            0,
+            &pending_display_offset
+        ));
+        assert_eq!(pending_display_offset.take(), None);
+    }
+
+    #[test]
+    fn user_input_scroll_requests_bottom_when_terminal_is_scrolled_up() {
+        let pending_display_offset = StdCell::new(Some(12));
+
+        assert!(should_scroll_to_bottom_on_user_input(
+            5,
+            &pending_display_offset
+        ));
+        assert_eq!(pending_display_offset.take(), None);
+    }
+}

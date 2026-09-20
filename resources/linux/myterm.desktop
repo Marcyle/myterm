@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=MyTerm
+Comment=MyTerm - SSH, SFTP, Terminal, JumpServer
+Exec=myterm
+Icon=myterm
+Type=Application
+Categories=Development;Utility;
+Terminal=false
+StartupWMClass=myterm
+MimeType=
+Keywords=database;ssh;sftp;terminal;

@@ -1,0 +1,550 @@
+use alacritty_terminal::event::{Event as AlacTermEvent, EventListener, WindowSize};
+use alacritty_terminal::event_loop::{EventLoop, EventLoopSender, Msg};
+use alacritty_terminal::sync::FairMutex;
+use alacritty_terminal::term::{ClipboardType, Term};
+use alacritty_terminal::tty::{self, Options as PtyOptions};
+use alacritty_terminal::vte::ansi::{NamedColor, Rgb};
+use std::borrow::Cow;
+use std::collections::HashMap;
+#[cfg(target_os = "windows")]
+use std::ffi::OsString;
+#[cfg(target_os = "windows")]
+use std::os::windows::ffi::OsStringExt;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, mpsc as std_mpsc};
+use std::thread;
+use std::thread::JoinHandle;
+use tokio::sync::mpsc::UnboundedSender;
+
+use crate::{TerminalBackend, TerminalSize};
+
+fn insert_environment_variable(env: &mut HashMap<String, String>, name: String, value: String) {
+    if let Some(existing_name) = env
+        .keys()
+        .find(|existing_name| existing_name.eq_ignore_ascii_case(&name))
+        .cloned()
+    {
+        env.remove(&existing_name);
+    }
+    env.insert(name, value);
+}
+
+#[cfg(target_os = "windows")]
+fn reload_windows_environment(env: &mut HashMap<String, String>) {
+    use windows::Win32::System::Environment::ExpandEnvironmentStringsW;
+    use windows::core::PCWSTR;
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+
+    let explicit = std::mem::take(env);
+    // Registry stores system and user Path separately. Keep process-only values
+    // as a fallback, then replace persistent values with their refreshed forms.
+    let mut refreshed: HashMap<String, String> = std::env::vars().collect();
+    let mut machine_path = None;
+    let mut user_path = None;
+    let paths = [
+        (
+            RegKey::predef(HKEY_LOCAL_MACHINE),
+            "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
+        ),
+        (RegKey::predef(HKEY_CURRENT_USER), "Environment"),
+    ];
+
+    for (index, (root, path)) in paths.into_iter().enumerate() {
+        let is_machine = index == 0;
+        let Ok(key) = root.open_subkey(path) else {
+            continue;
+        };
+        for item in key.enum_values().flatten() {
+            let (name, value) = item;
+            if value.vtype != winreg::enums::RegType::REG_SZ
+                && value.vtype != winreg::enums::RegType::REG_EXPAND_SZ
+            {
+                continue;
+            }
+            let utf16: Vec<u16> = value
+                .bytes
+                .chunks_exact(2)
+                .map(|bytes| u16::from_ne_bytes([bytes[0], bytes[1]]))
+                .take_while(|&ch| ch != 0)
+                .collect();
+            let value = if value.vtype == winreg::enums::RegType::REG_EXPAND_SZ {
+                let mut expanded = vec![0u16; 32768];
+                let len = unsafe {
+                    ExpandEnvironmentStringsW(PCWSTR(utf16.as_ptr()), Some(&mut expanded))
+                };
+                if len == 0 {
+                    continue;
+                }
+                expanded.truncate(len.saturating_sub(1) as usize);
+                OsString::from_wide(&expanded)
+                    .to_string_lossy()
+                    .into_owned()
+            } else {
+                OsString::from_wide(&utf16).to_string_lossy().into_owned()
+            };
+            if name.eq_ignore_ascii_case("Path") {
+                if is_machine {
+                    machine_path = Some(value);
+                } else {
+                    user_path = Some(value);
+                }
+            } else {
+                insert_environment_variable(&mut refreshed, name, value);
+            }
+        }
+    }
+
+    if machine_path.is_some() || user_path.is_some() {
+        let path = [
+            machine_path.unwrap_or_default(),
+            user_path.unwrap_or_default(),
+        ]
+        .into_iter()
+        .filter(|path| !path.is_empty())
+        .collect::<Vec<_>>()
+        .join(";");
+        insert_environment_variable(&mut refreshed, "Path".to_string(), path);
+    }
+
+    for (name, value) in refreshed {
+        insert_environment_variable(env, name, value);
+    }
+    for (name, value) in explicit {
+        insert_environment_variable(env, name, value);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn reload_windows_environment(_: &mut HashMap<String, String>) {}
+
+/// 终端事件类型
+#[derive(Debug, Clone)]
+pub enum TerminalEvent {
+    /// 终端内容已更新，需要重新渲染
+    Wakeup,
+    /// SSH keyboard-interactive/MFA 请求状态变化
+    SshMfaChanged,
+    /// shell 开始渲染新的 prompt（OSC 133;A）
+    PromptStart,
+    /// shell prompt 已渲染完成，进入可输入状态（OSC 133;B）
+    InputStart,
+    /// shell 命令开始执行（OSC 133;C）
+    CommandStart,
+    /// 终端标题已更改
+    TitleChanged(String),
+    /// 终端响铃
+    Bell,
+    /// 子进程已退出
+    ChildExit(i32),
+    /// 终端程序请求存储到剪贴板
+    ClipboardStore(ClipboardType, String),
+    /// 终端程序请求从剪贴板加载
+    ClipboardLoad(ClipboardType),
+    /// 远程工作目录变更（OSC 7）
+    WorkingDirChanged(String),
+    /// 命令执行完毕（OSC 133;D）
+    CommandFinished { exit_code: i32 },
+    /// 记录 shell 实际执行过的命令
+    CommandRecorded(String),
+}
+
+/// Commands from UI layer to PTY backend
+pub enum PtyCommand {
+    Write(Vec<u8>),
+    Resize(TerminalSize),
+    Shutdown,
+}
+
+/// 用于将数据写回 PTY/SSH 通道的回写通道
+///
+/// 当 alacritty_terminal 处理 DA 查询等序列时，会生成 PtyWrite 事件，
+/// 需要通过此通道将响应写回终端。
+#[derive(Clone)]
+enum PtyWriteBack {
+    /// 本地 PTY：通过 EventLoopSender 写回
+    Local(EventLoopSender),
+    /// SSH：通过 UnboundedSender 写回
+    Ssh(UnboundedSender<Vec<u8>>),
+}
+
+impl PtyWriteBack {
+    fn write(&self, data: Vec<u8>) {
+        match self {
+            PtyWriteBack::Local(sender) => {
+                let _ = sender.send(Msg::Input(Cow::Owned(data)));
+            }
+            PtyWriteBack::Ssh(sender) => {
+                let _ = sender.send(data);
+            }
+        }
+    }
+}
+
+/// Local PTY backend using alacritty_terminal's EventLoop
+///
+/// EventLoop runs in background thread:
+/// 1. Reads data from local PTY
+/// 2. Parses ANSI sequences and updates Term grid
+/// 3. Sends Wakeup event via EventListener
+pub struct LocalPtyBackend {
+    event_loop_sender: EventLoopSender,
+    event_proxy: GpuiEventProxy,
+    _event_loop_handle: JoinHandle<()>,
+}
+
+impl LocalPtyBackend {
+    pub fn new(
+        term: Arc<FairMutex<Term<GpuiEventProxy>>>,
+        event_proxy: GpuiEventProxy,
+        mut pty_options: PtyOptions,
+    ) -> anyhow::Result<Self> {
+        let window_size = WindowSize {
+            num_lines: 24,
+            num_cols: 80,
+            cell_width: 8,
+            cell_height: 18,
+        };
+
+        tracing::debug!(
+            "LocalPtyBackend::new: 初始尺寸 {}x{}, cell={}x{}",
+            window_size.num_cols,
+            window_size.num_lines,
+            window_size.cell_width,
+            window_size.cell_height
+        );
+
+        // Windows 上 CreateProcessW 启动 WindowsApps 应用（如 PowerShell 7）时，
+        // 可能同步派发 Windows 消息并触发 GPUI 窗口过程重入。若在 UI 事件处理中
+        // 直接调用 tty::new，重入的 frame callback 会尝试再次借用 AppCell，导致
+        // `RefCell already borrowed` panic。因此把 PTY/EventLoop 创建移到独立线程。
+        let (tx, rx) = std_mpsc::channel::<anyhow::Result<EventLoop<_, _>>>();
+        let event_proxy_for_thread = event_proxy.clone();
+        thread::spawn(move || {
+            let result = (|| -> anyhow::Result<_> {
+                #[cfg(target_os = "windows")]
+                reload_windows_environment(&mut pty_options.env);
+                let pty = tty::new(&pty_options, window_size, 0)?;
+                let event_loop = EventLoop::new(term, event_proxy_for_thread, pty, true, false)?;
+                Ok(event_loop)
+            })();
+            let _ = tx.send(result);
+        });
+
+        let event_loop = rx
+            .recv()
+            .map_err(|_| anyhow::anyhow!("PTY 创建线程异常退出"))??;
+        let event_loop_sender = event_loop.channel();
+
+        // 设置 PtyWrite 回写通道，使 DA 等终端响应能写回 PTY
+        event_proxy.set_write_back(PtyWriteBack::Local(event_loop_sender.clone()));
+        event_proxy.set_window_size(window_size);
+
+        let handle = thread::spawn(move || {
+            let _ = event_loop.spawn().join();
+        });
+
+        Ok(Self {
+            event_loop_sender,
+            event_proxy,
+            _event_loop_handle: handle,
+        })
+    }
+
+    pub fn write(&self, data: Vec<u8>) {
+        let _ = self.event_loop_sender.send(Msg::Input(Cow::Owned(data)));
+    }
+
+    pub fn resize(&self, size: TerminalSize) {
+        let window_size = WindowSize {
+            num_lines: size.rows,
+            num_cols: size.cols,
+            cell_width: if size.cols > 0 {
+                size.pixel_width / size.cols
+            } else {
+                8
+            },
+            cell_height: if size.rows > 0 {
+                size.pixel_height / size.rows
+            } else {
+                18
+            },
+        };
+        tracing::debug!(
+            "LocalPtyBackend::resize: {}x{}, cell={}x{}, pixel={}x{}",
+            window_size.num_cols,
+            window_size.num_lines,
+            window_size.cell_width,
+            window_size.cell_height,
+            size.pixel_width,
+            size.pixel_height
+        );
+        self.event_proxy.set_window_size(window_size);
+        let _ = self.event_loop_sender.send(Msg::Resize(window_size));
+    }
+
+    pub fn shutdown(&self) {
+        let _ = self.event_loop_sender.send(Msg::Shutdown);
+    }
+}
+
+impl TerminalBackend for LocalPtyBackend {
+    fn write(&self, data: Vec<u8>) {
+        let _ = self.event_loop_sender.send(Msg::Input(Cow::Owned(data)));
+    }
+
+    fn resize(&self, size: TerminalSize) {
+        LocalPtyBackend::resize(self, size);
+    }
+
+    fn shutdown(&self) {
+        LocalPtyBackend::shutdown(self);
+    }
+}
+
+/// GPUI Event proxy for alacritty_terminal
+/// 将 alacritty 事件转换为 TerminalEvent 并发送，
+/// 同时处理 PtyWrite 等需要回写 PTY 的事件
+#[derive(Clone)]
+pub struct GpuiEventProxy {
+    event_tx: UnboundedSender<TerminalEvent>,
+    /// PtyWrite 回写通道（在后端创建后设置）
+    write_back: Arc<Mutex<Option<PtyWriteBack>>>,
+    /// 共享窗口尺寸，供 TextAreaSizeRequest 真实回复使用
+    window_size: Arc<Mutex<WindowSize>>,
+    /// Wakeup 去重标记：true 表示已有未消费的 Wakeup 在事件队列里
+    wakeup_pending: Arc<AtomicBool>,
+}
+
+impl GpuiEventProxy {
+    pub fn new(event_tx: UnboundedSender<TerminalEvent>) -> Self {
+        Self {
+            event_tx,
+            write_back: Arc::new(Mutex::new(None)),
+            window_size: Arc::new(Mutex::new(WindowSize {
+                num_lines: 24,
+                num_cols: 80,
+                cell_width: 8,
+                cell_height: 18,
+            })),
+            wakeup_pending: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// 设置回写通道
+    fn set_write_back(&self, wb: PtyWriteBack) {
+        *self.write_back.lock().unwrap() = Some(wb);
+    }
+
+    /// 设置 SSH 回写通道
+    pub(crate) fn set_ssh_write_back(&self, sender: UnboundedSender<Vec<u8>>) {
+        self.set_write_back(PtyWriteBack::Ssh(sender));
+    }
+
+    /// 同步当前真实窗口尺寸（含 cell 像素），后续 TextAreaSizeRequest 将以此回复
+    pub(crate) fn set_window_size(&self, size: WindowSize) {
+        *self.window_size.lock().unwrap() = size;
+    }
+
+    /// 当 UI 已经消费 Wakeup 后调用，允许下一次 Wakeup 入队
+    pub fn reset_wakeup_pending(&self) {
+        self.wakeup_pending.store(false, Ordering::Release);
+    }
+
+    /// 返回 Wakeup 去重标记的句柄，便于事件聚合任务在转发 Wakeup 后立即 reset，
+    /// 让下一次 PTY 输出能继续触发 Wakeup
+    pub fn wakeup_pending_handle(&self) -> Arc<AtomicBool> {
+        self.wakeup_pending.clone()
+    }
+
+    fn current_window_size(&self) -> WindowSize {
+        *self.window_size.lock().unwrap()
+    }
+
+    fn write_back(&self, data: Vec<u8>) {
+        if let Some(wb) = self.write_back.lock().unwrap().as_ref() {
+            wb.write(data);
+        }
+    }
+}
+
+impl EventListener for GpuiEventProxy {
+    fn send_event(&self, event: AlacTermEvent) {
+        let terminal_event = match event {
+            AlacTermEvent::PtyWrite(text) => {
+                self.write_back(text.into_bytes());
+                return;
+            }
+            AlacTermEvent::ColorRequest(index, format_fn) => {
+                let text = format_fn(default_color_for_index(index));
+                self.write_back(text.into_bytes());
+                return;
+            }
+            AlacTermEvent::TextAreaSizeRequest(format_fn) => {
+                let text = format_fn(self.current_window_size());
+                self.write_back(text.into_bytes());
+                return;
+            }
+            AlacTermEvent::Wakeup => {
+                // 去重：已有未消费 Wakeup 时直接丢弃，避免高速输出下事件堆积
+                if self.wakeup_pending.swap(true, Ordering::AcqRel) {
+                    return;
+                }
+                TerminalEvent::Wakeup
+            }
+            AlacTermEvent::Title(title) => TerminalEvent::TitleChanged(title),
+            AlacTermEvent::Bell => TerminalEvent::Bell,
+            AlacTermEvent::ClipboardStore(ty, data) => TerminalEvent::ClipboardStore(ty, data),
+            AlacTermEvent::ClipboardLoad(ty, _) => TerminalEvent::ClipboardLoad(ty),
+            AlacTermEvent::Exit => TerminalEvent::ChildExit(0),
+            _ => return,
+        };
+        let _ = self.event_tx.send(terminal_event);
+    }
+}
+
+/// 为 OSC 4/10/11 等颜色查询提供合理的默认回复，避免一律返回黑色
+fn default_color_for_index(index: usize) -> Rgb {
+    match index {
+        // OSC 10：默认前景色 -> 接近白色
+        idx if idx == NamedColor::Foreground as usize => Rgb {
+            r: 0xE4,
+            g: 0xE4,
+            b: 0xE4,
+        },
+        // OSC 11：默认背景色 -> 接近深灰
+        idx if idx == NamedColor::Background as usize => Rgb {
+            r: 0x1E,
+            g: 0x1E,
+            b: 0x1E,
+        },
+        // OSC 12：光标颜色
+        idx if idx == NamedColor::Cursor as usize => Rgb {
+            r: 0xFF,
+            g: 0xFF,
+            b: 0xFF,
+        },
+        _ => Rgb { r: 0, g: 0, b: 0 },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    #[test]
+    fn wakeup_dedup_collapses_repeated_wakeups_until_reset() {
+        let (tx, mut rx) = unbounded_channel::<TerminalEvent>();
+        let proxy = GpuiEventProxy::new(tx);
+
+        proxy.send_event(AlacTermEvent::Wakeup);
+        proxy.send_event(AlacTermEvent::Wakeup);
+        proxy.send_event(AlacTermEvent::Wakeup);
+
+        // 多次 Wakeup 只入队一次
+        let first = rx.try_recv();
+        assert!(matches!(first, Ok(TerminalEvent::Wakeup)));
+        assert!(rx.try_recv().is_err());
+
+        // reset 后允许新一轮 Wakeup 入队
+        proxy.reset_wakeup_pending();
+        proxy.send_event(AlacTermEvent::Wakeup);
+        let next = rx.try_recv();
+        assert!(matches!(next, Ok(TerminalEvent::Wakeup)));
+    }
+
+    #[test]
+    fn non_wakeup_events_are_not_swallowed_by_dedup() {
+        let (tx, mut rx) = unbounded_channel::<TerminalEvent>();
+        let proxy = GpuiEventProxy::new(tx);
+
+        // 先压一个 Wakeup 进去拉起去重标记
+        proxy.send_event(AlacTermEvent::Wakeup);
+        // 期间发生 Title/Bell/Exit 等事件，不应被去重逻辑吞掉
+        proxy.send_event(AlacTermEvent::Title("shell".to_string()));
+        proxy.send_event(AlacTermEvent::Bell);
+        proxy.send_event(AlacTermEvent::Exit);
+
+        let mut got = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            got.push(ev);
+        }
+        assert_eq!(got.len(), 4);
+        assert!(matches!(got[0], TerminalEvent::Wakeup));
+        assert!(matches!(&got[1], TerminalEvent::TitleChanged(t) if t == "shell"));
+        assert!(matches!(got[2], TerminalEvent::Bell));
+        assert!(matches!(got[3], TerminalEvent::ChildExit(0)));
+    }
+
+    #[test]
+    fn text_area_size_request_uses_current_window_size() {
+        let (tx, _rx) = unbounded_channel::<TerminalEvent>();
+        let proxy = GpuiEventProxy::new(tx);
+
+        // 注入一个回写通道收集 reply 字节
+        let captured: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let (write_tx, mut write_rx) = unbounded_channel::<Vec<u8>>();
+        proxy.set_ssh_write_back(write_tx);
+
+        proxy.set_window_size(WindowSize {
+            num_lines: 40,
+            num_cols: 132,
+            cell_width: 9,
+            cell_height: 20,
+        });
+
+        proxy.send_event(AlacTermEvent::TextAreaSizeRequest(std::sync::Arc::new(
+            |size| format!("{}x{}", size.num_cols, size.num_lines),
+        )));
+
+        if let Ok(bytes) = write_rx.try_recv() {
+            captured.lock().unwrap().extend_from_slice(&bytes);
+        }
+        let reply = String::from_utf8(captured.lock().unwrap().clone()).unwrap();
+        assert_eq!(reply, "132x40");
+    }
+
+    #[test]
+    fn color_request_returns_named_defaults_instead_of_black() {
+        let fg = default_color_for_index(NamedColor::Foreground as usize);
+        let bg = default_color_for_index(NamedColor::Background as usize);
+        let cursor = default_color_for_index(NamedColor::Cursor as usize);
+        let other = default_color_for_index(NamedColor::Red as usize);
+
+        assert_ne!((fg.r, fg.g, fg.b), (0, 0, 0));
+        assert_ne!((bg.r, bg.g, bg.b), (0, 0, 0));
+        assert_eq!((cursor.r, cursor.g, cursor.b), (0xFF, 0xFF, 0xFF));
+        assert_eq!((other.r, other.g, other.b), (0, 0, 0));
+    }
+
+    #[test]
+    fn environment_variables_merge_case_insensitively_with_explicit_values_first() {
+        let mut env = HashMap::from([(String::from("PATH"), String::from("explicit"))]);
+
+        insert_environment_variable(&mut env, String::from("Path"), String::from("refreshed"));
+        insert_environment_variable(&mut env, String::from("NVM_HOME"), String::from("nvm"));
+
+        assert_eq!(env.len(), 2);
+        assert_eq!(env.get("Path"), Some(&String::from("refreshed")));
+        assert!(!env.contains_key("PATH"));
+
+        insert_environment_variable(&mut env, String::from("path"), String::from("explicit"));
+        assert_eq!(env.len(), 2);
+        assert_eq!(env.get("path"), Some(&String::from("explicit")));
+        assert!(!env.contains_key("Path"));
+    }
+
+    #[test]
+    fn refreshed_path_keeps_system_and_user_entries() {
+        let machine_path = r"C:\Windows\System32;C:\Windows";
+        let user_path = r"C:\Users\test\AppData\Local\nvm;C:\nvm4w\nodejs";
+        let path = [machine_path, user_path].join(";");
+
+        assert!(path.starts_with(machine_path));
+        assert!(path.contains(user_path));
+        assert!(path.contains(r"C:\Windows\System32"));
+        assert!(path.contains(r"C:\nvm4w\nodejs"));
+    }
+}
