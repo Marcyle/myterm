@@ -156,6 +156,13 @@ jobs:
           cargo build --release -p main --target ${{ matrix.target }}
 
 
+      - name: Fetch modern ConPTY (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_ARCH -eq 'X86') { $arch = 'x86' } elseif ($env:RUNNER_ARCH -eq 'ARM64') { $arch = 'arm64' } else { $arch = 'x64' }
+          powershell -ExecutionPolicy Bypass -File script/fetch-conpty.ps1 -Arch $arch -OutDir "target/${{ matrix.target }}/release"
+
       - name: Clean build artifacts (macOS)
         if: runner.os == 'macOS'
         run: |
@@ -190,6 +197,9 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force package | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" "package/${{ matrix.binary }}"
+          # 现代 ConPTY：修复内置 ConPTY 破坏 OSC 颜色/DA 查询回包的问题（见 script/fetch-conpty.ps1）
+          Copy-Item "target/${{ matrix.target }}/release/conpty.dll" "package/conpty.dll"
+          Copy-Item "target/${{ matrix.target }}/release/OpenConsole.exe" "package/OpenConsole.exe"
           Compress-Archive -Path "package/*" -DestinationPath "${{ matrix.archive }}"
 
       - name: Upload artifact
