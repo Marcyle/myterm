@@ -28,6 +28,9 @@ impl Default for LocalConfig {
                 ("COLORTERM".to_string(), "truecolor".to_string()),
                 ("CLICOLOR".to_string(), "1".to_string()),
                 ("CLICOLOR_FORCE".to_string(), "1".to_string()),
+                // 禁用 PowerShell 7 更新检查通知，避免非英语（如中文）环境下因上游横幅宽度计算 Bug（totalWidth -17）导致启动崩溃
+                #[cfg(target_os = "windows")]
+                ("POWERSHELL_UPDATECHECK".to_string(), "Off".to_string()),
             ],
         }
     }

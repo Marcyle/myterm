@@ -113,6 +113,14 @@ fn reload_windows_environment(env: &mut HashMap<String, String>) {
     for (name, value) in explicit {
         insert_environment_variable(env, name, value);
     }
+
+    // 禁用 PowerShell 7 更新检查通知，避免非英语（如中文）环境下因上游横幅宽度计算 Bug（totalWidth -17）导致启动崩溃
+    if !env
+        .keys()
+        .any(|k| k.eq_ignore_ascii_case("POWERSHELL_UPDATECHECK"))
+    {
+        insert_environment_variable(env, "POWERSHELL_UPDATECHECK".to_string(), "Off".to_string());
+    }
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -546,5 +554,30 @@ mod tests {
         assert!(path.contains(user_path));
         assert!(path.contains(r"C:\Windows\System32"));
         assert!(path.contains(r"C:\nvm4w\nodejs"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn powershell_updatecheck_is_disabled_by_default() {
+        let mut env = HashMap::new();
+        reload_windows_environment(&mut env);
+        let updatecheck = env
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("POWERSHELL_UPDATECHECK"))
+            .map(|(_, v)| v.as_str());
+        assert_eq!(updatecheck, Some("Off"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn powershell_updatecheck_explicit_value_is_preserved() {
+        let mut env =
+            HashMap::from([("POWERSHELL_UPDATECHECK".to_string(), "Default".to_string())]);
+        reload_windows_environment(&mut env);
+        let updatecheck = env
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("POWERSHELL_UPDATECHECK"))
+            .map(|(_, v)| v.as_str());
+        assert_eq!(updatecheck, Some("Default"));
     }
 }
