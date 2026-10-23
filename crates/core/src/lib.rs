@@ -10,9 +10,9 @@ pub mod key_storage;
 pub mod keybindings;
 pub mod layout;
 pub mod popup_window;
+pub mod settings;
 pub mod storage;
 pub mod tab_container;
-pub mod settings;
 pub mod themes;
 pub mod utils;
 

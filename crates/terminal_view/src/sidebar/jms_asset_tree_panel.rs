@@ -78,8 +78,11 @@ impl JmsAssetTreePanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let search_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("搜索资产").clean_on_escape());
+        let search_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("搜索资产")
+                .clean_on_escape()
+        });
 
         // 订阅搜索输入变化,触发服务端搜索
         let input_entity = search_input.clone();
@@ -386,9 +389,7 @@ impl JmsAssetTreePanel {
                                     params_fallback,
                                 ));
                             } else {
-                                cx.emit(JmsAssetTreePanelEvent::OpenNewTerminal(
-                                    params_fallback,
-                                ));
+                                cx.emit(JmsAssetTreePanelEvent::OpenNewTerminal(params_fallback));
                             }
                             cx.notify();
                         });
@@ -869,7 +870,12 @@ impl Render for JmsAssetTreePanel {
                     .py_2()
                     .border_b_1()
                     .border_color(cx.theme().border)
-                    .child(Input::new(&self.search_input).w_full().small().cleanable(true)),
+                    .child(
+                        Input::new(&self.search_input)
+                            .w_full()
+                            .small()
+                            .cleanable(true),
+                    ),
             )
             // 错误提示
             .when_some(self.error_message.clone(), |this, msg| {

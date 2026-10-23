@@ -4523,6 +4523,7 @@ name = "main"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "chrono",
  "global-hotkey",
  "gpui",
  "gpui-component",

@@ -4,7 +4,8 @@ use gpui::{App, Context, Entity, Window};
 use gpui::{AppContext, AsyncApp};
 use gpui_component::WindowExt;
 use gpui_component::notification::Notification;
-use one_core::storage::{StoredConnection, Workspace};
+use one_core::storage::traits::Repository as _;
+use one_core::storage::{ConnectionRepository, GlobalStorageState, StoredConnection, Workspace};
 use one_core::tab_container::TabItem;
 use sftp_view::{SftpView, SftpViewEvent};
 use terminal::LocalConfig;
@@ -587,6 +588,95 @@ impl HomePage {
 
     pub(crate) fn add_terminal_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.add_terminal_tab_with_config(LocalConfig::default(), window, cx);
+    }
+
+    /// JMS 会话过期后的重登入口：优先用已保存连接预填，否则用 url/用户名预填
+    pub(crate) fn open_jms_relogin(
+        &mut self,
+        saved_connection_id: Option<i64>,
+        base_url: String,
+        username: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(conn_id) = saved_connection_id {
+            let storage = cx.global::<GlobalStorageState>().storage.clone();
+            if let Some(repo) = storage.get::<ConnectionRepository>() {
+                if let Ok(Some(conn)) = repo.get(conn_id) {
+                    self.open_jms_connection_prefilled(conn, window, cx);
+                    return;
+                }
+            }
+        }
+
+        // 无已保存连接：用 url/用户名预填打开 JMS 登录窗口（密码留空）
+        let params = one_core::storage::JmsParams {
+            url: base_url,
+            username,
+            password: String::new(),
+            use_local_proxy: true,
+        };
+        use crate::jms_connection_window::JmsConnectionWindow;
+        use one_core::popup_window::{PopupWindowOptions, open_popup_window};
+        let parent = cx.entity();
+        open_popup_window(
+            PopupWindowOptions::new("JMS 连接".to_string()).size(800.0, 600.0),
+            move |window, cx| {
+                cx.new(|cx| {
+                    JmsConnectionWindow::new_with_prefill(
+                        parent.clone(),
+                        Some((None, params)),
+                        window,
+                        cx,
+                    )
+                })
+            },
+            cx,
+        );
+    }
+
+    /// 从全局设置计算 Koko 代理配置（供徽标复用会话时构造侧栏上下文）
+    /// 徽标点击：复用全局会话打开/激活 JMS 资产树标签页（稳定 tab id，免登录）
+    pub(crate) fn open_or_activate_jms_placeholder(
+        &mut self,
+        jms_context: terminal_view::JmsSidebarContext,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        const TAB_ID: &str = "jms-placeholder";
+        let exists = self
+            .tab_container
+            .read(cx)
+            .tabs()
+            .iter()
+            .any(|t| t.id() == TAB_ID);
+        tracing::info!("JMS badge: open_or_activate exists={exists}");
+
+        if exists {
+            // 已有占位标签 → 激活即可
+            self.tab_container.update(cx, |tc, cx| {
+                if let Some(index) = tc.tabs().iter().position(|t| t.id() == TAB_ID) {
+                    tc.set_active_index(index, window, cx);
+                }
+            });
+            return;
+        }
+
+        let home = cx.entity().clone();
+        let pane_area = cx.new(|cx| {
+            TerminalPaneArea::new_jms_koko_placeholder(Some(jms_context), None, window, cx)
+                .on_request_split(move |request, window, cx, pane_area| {
+                    let _ = home.update(cx, |this, cx| {
+                        this.handle_split_pane_request_with_pane(pane_area, &request, window, cx);
+                    });
+                })
+        });
+
+        self.subscribe_pane_area_events(TAB_ID, &pane_area, window, cx);
+
+        self.tab_container.update(cx, |tc, cx| {
+            tc.add_and_activate_tab_with_focus(TabItem::new(TAB_ID, "ssh", pane_area), window, cx);
+        });
     }
 
     pub(crate) fn add_terminal_tab_with_config(

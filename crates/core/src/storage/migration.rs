@@ -26,6 +26,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "20260823000001",
         include_str!("../../migrations/20260823000001_remove_unused_tables.sql"),
     ),
+    (
+        "20260901000001",
+        include_str!("../../migrations/20260901000001_connection_env_tags_favorite.sql"),
+    ),
 ];
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {

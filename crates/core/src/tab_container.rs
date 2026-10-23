@@ -731,6 +731,8 @@ pub struct TabContainer {
     pinned_tab: Option<TabItem>,
     /// Whether the pinned tab is currently active (showing its content)
     pinned_tab_active: bool,
+    /// 标签栏尾部自定义视图（如 JMS 会话徽标），位于标签列表按钮左侧
+    trailing_view: Option<AnyView>,
 }
 
 impl EventEmitter<TabContainerEvent> for TabContainer {}
@@ -762,6 +764,7 @@ impl TabContainer {
             on_split_vertical: None,
             pinned_tab: None,
             pinned_tab_active: false,
+            trailing_view: None,
         }
     }
 
@@ -832,6 +835,13 @@ impl TabContainer {
     pub fn set_pinned_tab(&mut self, tab: TabItem, cx: &mut Context<Self>) {
         self.pinned_tab = Some(tab);
         self.pinned_tab_active = self.tabs.is_empty();
+        cx.notify();
+    }
+
+    /// 设置标签栏尾部自定义视图（位于标签列表按钮左侧、窗口控件之前）。
+    /// 用于挂载如 JMS 会话徽标等全局状态指示器。
+    pub fn set_trailing_view(&mut self, view: Option<AnyView>, cx: &mut Context<Self>) {
+        self.trailing_view = view;
         cx.notify();
     }
 
@@ -1931,6 +1941,7 @@ impl TabContainer {
                             })
                     })),
             )
+            .when_some(self.trailing_view.clone(), |el, view| el.child(view))
             .child(
                 Popover::new("tab-list-popover")
                     .anchor(Corner::TopRight)

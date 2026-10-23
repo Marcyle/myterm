@@ -3,8 +3,20 @@
 use gpui::http_client::{self, HttpClient, http};
 use serde_json::Value;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::models::*;
+
+/// 共享的会话状态（跨 `JmsClient::clone` 共享，避免多副本 cookie 分叉）
+#[derive(Default, Clone)]
+struct SessionState {
+    /// 已认证的 jms_sessionid
+    session_cookie: Option<String>,
+    /// CSRF token(jms_csrftoken)，写操作必须携带 X-CSRFToken 头
+    csrf_token: Option<String>,
+    /// 组织 ID
+    org_id: String,
+}
 
 /// JMS API 客户端
 ///
@@ -12,18 +24,19 @@ use crate::models::*;
 /// `jms_sessionid`,后续资产树、账号列表、connect-token、Koko 全部复用同一 session
 /// + `X-CSRFToken`。不再使用 API Bearer token(其返回的是匿名 session,Koko 不认)。
 ///
-/// 字段全部 cheaply-cloneable,可 Clone 后交给终端侧栏长期持有(只读资产树/账号)。
+/// 会话 cookie/csrf/org 存放在 `Arc<Mutex<..>>` 中，所有 clone 共享同一登录态:
+/// 任一副本刷新 cookie，其它副本立即可见;任一副本收到 401，全体标记过期。
 #[derive(Clone)]
 pub struct JmsClient {
     client: Arc<dyn HttpClient>,
     base_url: String,
-    /// 已认证的 jms_sessionid
-    session_cookie: Option<String>,
-    /// 组织 ID
-    org_id: String,
-    /// CSRF token(jms_csrftoken),写操作必须携带 X-CSRFToken 头
-    csrf_token: Option<String>,
-    /// 登录页 RSA 公钥(base64 PEM),用于加密密码
+    /// 共享会话状态
+    session: Arc<std::sync::Mutex<SessionState>>,
+    /// 服务端返回 401 时置位，供外部（徽标等）感知会话失效
+    expired: Arc<AtomicBool>,
+    /// expired 首次置位时触发的回调（用于唤醒 UI 徽标刷新）
+    on_expired: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// 登录页 RSA 公钥(base64 PEM),用于加密密码（仅登录流程使用，不随会话共享）
     public_key: Option<String>,
     /// 最近一次验证码的 key(captcha_0),提交时回填
     last_captcha_key: Option<String>,
@@ -35,12 +48,44 @@ impl JmsClient {
         Self {
             client,
             base_url: base_url.trim_end_matches('/').to_string(),
-            session_cookie: None,
-            org_id: "00000000-0000-0000-0000-000000000002".to_string(),
-            csrf_token: None,
+            session: Arc::new(std::sync::Mutex::new(SessionState {
+                org_id: "00000000-0000-0000-0000-000000000002".to_string(),
+                ..Default::default()
+            })),
+            expired: Arc::new(AtomicBool::new(false)),
+            on_expired: None,
             public_key: None,
             last_captcha_key: None,
         }
+    }
+
+    /// 锁定共享会话状态
+    fn lock_session(&self) -> std::sync::MutexGuard<'_, SessionState> {
+        self.session.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// 克隆一份当前会话快照（避免跨 await 持锁）
+    fn session_snapshot(&self) -> SessionState {
+        self.lock_session().clone()
+    }
+
+    /// 标记会话失效（首次置位时触发回调）
+    fn mark_expired(&self) {
+        if !self.expired.swap(true, Ordering::Relaxed) {
+            if let Some(cb) = &self.on_expired {
+                cb();
+            }
+        }
+    }
+
+    /// 会话是否已失效（服务端返回过 401）
+    pub fn is_expired(&self) -> bool {
+        self.expired.load(Ordering::Relaxed)
+    }
+
+    /// 注册会话失效回调（线程安全，在后台请求线程中触发）
+    pub fn set_on_expired(&mut self, cb: Arc<dyn Fn() + Send + Sync>) {
+        self.on_expired = Some(cb);
     }
 
     /// 发送 HTTP 请求，自动处理 Cookie 和会话管理
@@ -50,23 +95,25 @@ impl JmsClient {
         url: &str,
         body: Option<&Value>,
     ) -> Result<(u16, String), JmsError> {
+        let snapshot = self.session_snapshot();
         let mut builder = http::Request::builder()
             .method(method)
             .uri(url)
             .header("Accept", "application/json");
 
         // 添加组织 ID
-        builder = builder.header("X-JMS-ORG", &self.org_id);
+        builder = builder.header("X-JMS-ORG", &snapshot.org_id);
 
         // 纯 Web Session 认证:携带已认证的 jms_sessionid + csrf cookie
-        if let Some(cookie) = &self.session_cookie {
-            let cookie_value = self.build_cookie_header(cookie, self.csrf_token.as_deref());
+        if let Some(cookie) = &snapshot.session_cookie {
+            let cookie_value =
+                Self::build_cookie_header(&snapshot.org_id, cookie, snapshot.csrf_token.as_deref());
             builder = builder.header("Cookie", &cookie_value);
         }
 
         // 写操作必须携带 X-CSRFToken,否则 Django 返回 403 CSRF Failed
         if method != "GET" {
-            if let Some(ref csrf) = self.csrf_token {
+            if let Some(ref csrf) = snapshot.csrf_token {
                 builder = builder.header("X-CSRFToken", csrf);
                 builder = builder.header("Referer", &self.base_url);
             }
@@ -96,6 +143,11 @@ impl JmsClient {
 
         let status = response.status().as_u16();
 
+        // 401 → 会话已失效，置位过期标记（供徽标变灰）
+        if status == 401 {
+            self.mark_expired();
+        }
+
         let mut body = response.into_body();
         let mut bytes = Vec::new();
         use futures::AsyncReadExt;
@@ -111,11 +163,11 @@ impl JmsClient {
     ///
     /// JumpServer 的 Django 会话以 `sessionid`/`jms_sessionid` 双写跟踪同一登录态，
     /// 只携带其中一个会被服务端判定为另一会话，因此所有请求路径统一双写。
-    fn build_cookie_header(&self, sid: &str, csrf: Option<&str>) -> String {
+    fn build_cookie_header(org_id: &str, sid: &str, csrf: Option<&str>) -> String {
         let mut cookie = format!(
             "jms_sessionid={sid}; sessionid={sid}; X-JMS-ORG={org}; django_language=zh-hans",
             sid = sid,
-            org = self.org_id
+            org = org_id
         );
         if let Some(csrf) = csrf {
             cookie.push_str(&format!("; jms_csrftoken={csrf}; csrftoken={csrf}"));
@@ -125,18 +177,19 @@ impl JmsClient {
 
     /// 从解析出的 Cookie 表中回填 session/csrf（`jms_sessionid` 优先，回退 `sessionid`）。
     fn absorb_session_cookies(&mut self, cookies: &std::collections::HashMap<String, String>) {
+        let mut state = self.lock_session();
         if let Some(sid) = cookies
             .get("jms_sessionid")
             .or_else(|| cookies.get("sessionid"))
         {
-            self.session_cookie = Some(sid.clone());
+            state.session_cookie = Some(sid.clone());
         }
         if let Some(csrf) = cookies
             .get("jms_csrftoken")
             .or_else(|| cookies.get("csrftoken"))
             .filter(|s| !s.is_empty())
         {
-            self.csrf_token = Some(csrf.clone());
+            state.csrf_token = Some(csrf.clone());
         }
     }
 
@@ -189,12 +242,12 @@ impl JmsClient {
 
     /// 设置 session cookie（从认证响应中获取）
     pub fn set_session_cookie(&mut self, cookie: String) {
-        self.session_cookie = Some(cookie);
+        self.lock_session().session_cookie = Some(cookie);
     }
 
     /// 获取 session cookie
-    pub fn session_cookie(&self) -> Option<&str> {
-        self.session_cookie.as_deref()
+    pub fn session_cookie(&self) -> Option<String> {
+        self.lock_session().session_cookie.clone()
     }
 
     /// 获取资产树
@@ -389,11 +442,11 @@ impl JmsClient {
             }
 
             self.absorb_session_cookies(&cookies);
-            if self.csrf_token.is_none() {
+            if self.session_snapshot().csrf_token.is_none() {
                 // Cookie 中没有 csrf 时从登录页 HTML 中提取
                 let csrf = Self::extract_csrf_from_html(&text);
                 if !csrf.is_empty() {
-                    self.csrf_token = Some(csrf);
+                    self.lock_session().csrf_token = Some(csrf);
                 }
             }
             if let Some(pk) = cookies.get("jms_public_key") {
@@ -416,9 +469,10 @@ impl JmsClient {
             }
         }
 
-        let csrf_token = self.csrf_token.clone().unwrap_or_default();
+        let snapshot = self.session_snapshot();
+        let csrf_token = snapshot.csrf_token.unwrap_or_default();
         let public_key = self.public_key.clone().unwrap_or_default();
-        let login_session_id = self.session_cookie.clone().unwrap_or_default();
+        let login_session_id = snapshot.session_cookie.unwrap_or_default();
 
         // 2. 加密密码(RSA+AES 混合,与浏览器 encryptPassword 一致)
         // 浏览器只有在没有公钥时才回退明文。公钥存在但解析失败时继续提交明文，
@@ -479,10 +533,8 @@ impl JmsClient {
         let mut location = first_location.to_string();
         for _ in 0..6 {
             if location.contains("/luna") || location.contains("/ui") {
-                if let Some(ref sid) = self.session_cookie {
-                    return Ok(WebLoginResult::Success {
-                        session_id: sid.clone(),
-                    });
+                if let Some(sid) = self.session_snapshot().session_cookie {
+                    return Ok(WebLoginResult::Success { session_id: sid });
                 }
             }
             let next_url = Self::absolute_url(&self.base_url, &location);
@@ -493,10 +545,8 @@ impl JmsClient {
             if (300..400).contains(&status) {
                 if let Some(loc) = cookies.get("location") {
                     if loc.contains("/luna") || loc.contains("/ui") {
-                        if let Some(ref sid) = self.session_cookie {
-                            return Ok(WebLoginResult::Success {
-                                session_id: sid.clone(),
-                            });
+                        if let Some(sid) = self.session_snapshot().session_cookie {
+                            return Ok(WebLoginResult::Success { session_id: sid });
                         }
                     }
                     location = loc.clone();
@@ -506,10 +556,8 @@ impl JmsClient {
 
             // 200:已到实页面(MFA 页 / 登录页),按内容判定
             if next_url.contains("/luna") || next_url.contains("/ui") {
-                if let Some(ref sid) = self.session_cookie {
-                    return Ok(WebLoginResult::Success {
-                        session_id: sid.clone(),
-                    });
+                if let Some(sid) = self.session_snapshot().session_cookie {
+                    return Ok(WebLoginResult::Success { session_id: sid });
                 }
             }
             return Box::pin(self.classify_login_page(&body, otp_code)).await;
@@ -539,10 +587,8 @@ impl JmsClient {
 
         // 既不是登录页也不是 MFA 页 → 已认证成功
         if !still_login_page && !needs_mfa {
-            if let Some(ref sid) = self.session_cookie {
-                return Ok(WebLoginResult::Success {
-                    session_id: sid.clone(),
-                });
+            if let Some(sid) = self.session_snapshot().session_cookie {
+                return Ok(WebLoginResult::Success { session_id: sid });
             }
         }
 
@@ -603,9 +649,9 @@ impl JmsClient {
         let csrf = {
             let from_page = Self::extract_csrf_from_html(mfa_page_html);
             if from_page.is_empty() {
-                self.csrf_token.clone().unwrap_or_default()
+                self.session_snapshot().csrf_token.unwrap_or_default()
             } else {
-                self.csrf_token = Some(from_page.clone());
+                self.lock_session().csrf_token = Some(from_page.clone());
                 from_page
             }
         };
@@ -619,7 +665,8 @@ impl JmsClient {
         form_map.insert("code".to_string(), Value::String(code.to_string()));
         let form = Value::Object(form_map);
 
-        let session_id = self.session_cookie.clone().unwrap_or_default();
+        let session_snapshot = self.session_snapshot();
+        let session_id = session_snapshot.session_cookie.unwrap_or_default();
         let headers = self.build_web_headers(&mfa_url, &session_id, &csrf);
 
         let (status, text, cookies) = self.raw_post_form(&mfa_url, &form, headers).await?;
@@ -636,7 +683,10 @@ impl JmsClient {
 
     /// 刷新验证码,返回新的验证码图片信息
     pub async fn refresh_captcha(&mut self) -> Result<CaptchaInfo, JmsError> {
-        let refresh_url = format!("{}/core/auth/captcha/refresh/", self.base_url.trim_end_matches('/'));
+        let refresh_url = format!(
+            "{}/core/auth/captcha/refresh/",
+            self.base_url.trim_end_matches('/')
+        );
         let login_url = format!("{}/core/auth/login/", self.base_url.trim_end_matches('/'));
 
         // 优先通过标准 AJAX 刷新端点获取验证码
@@ -651,11 +701,13 @@ impl JmsClient {
             )
             .header("Referer", &login_url);
 
-        if let Some(csrf) = &self.csrf_token {
+        let snapshot = self.session_snapshot();
+        if let Some(csrf) = &snapshot.csrf_token {
             builder = builder.header("X-CSRFToken", csrf);
         }
-        if let Some(sid) = &self.session_cookie {
-            let cookie = self.build_cookie_header(sid, self.csrf_token.as_deref());
+        if let Some(sid) = &snapshot.session_cookie {
+            let cookie =
+                Self::build_cookie_header(&snapshot.org_id, sid, snapshot.csrf_token.as_deref());
             builder = builder.header("Cookie", cookie);
         }
         builder = builder.extension(http_client::RedirectPolicy::NoFollow);
@@ -798,7 +850,8 @@ impl JmsClient {
         csrf_token: &str,
     ) -> std::collections::HashMap<String, String> {
         let mut headers = std::collections::HashMap::new();
-        let cookie_header = self.build_cookie_header(session_id, Some(csrf_token));
+        let org_id = self.lock_session().org_id.clone();
+        let cookie_header = Self::build_cookie_header(&org_id, session_id, Some(csrf_token));
         headers.insert("Cookie".to_string(), cookie_header);
         headers.insert("Referer".to_string(), login_url.to_string());
         headers.insert("X-CSRFToken".to_string(), csrf_token.to_string());
@@ -844,8 +897,10 @@ impl JmsClient {
             );
 
         // 携带当前会话 cookie,否则 guard/MFA 等中间页会判定未认证并打回登录
-        if let Some(sid) = &self.session_cookie {
-            let cookie = self.build_cookie_header(sid, self.csrf_token.as_deref());
+        let snapshot = self.session_snapshot();
+        if let Some(sid) = &snapshot.session_cookie {
+            let cookie =
+                Self::build_cookie_header(&snapshot.org_id, sid, snapshot.csrf_token.as_deref());
             builder = builder.header("Cookie", cookie);
         }
         // 中间跳转页同样不自动跟随,便于逐跳读取 Set-Cookie
@@ -890,8 +945,10 @@ impl JmsClient {
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             )
             .header("Referer", &login_url);
-        if let Some(sid) = &self.session_cookie {
-            let cookie = self.build_cookie_header(sid, self.csrf_token.as_deref());
+        let snapshot = self.session_snapshot();
+        if let Some(sid) = &snapshot.session_cookie {
+            let cookie =
+                Self::build_cookie_header(&snapshot.org_id, sid, snapshot.csrf_token.as_deref());
             builder = builder.header("Cookie", cookie);
         }
         let request = builder
@@ -906,7 +963,10 @@ impl JmsClient {
 
         let status = response.status().as_u16();
         if status != 200 {
-            return Err(JmsError::ApiError(format!("下载图片失败: status={}", status)));
+            return Err(JmsError::ApiError(format!(
+                "下载图片失败: status={}",
+                status
+            )));
         }
 
         let mime = response
@@ -1142,8 +1202,8 @@ impl JmsClient {
     }
 
     /// 获取组织 ID
-    pub fn org_id(&self) -> &str {
-        &self.org_id
+    pub fn org_id(&self) -> String {
+        self.lock_session().org_id.clone()
     }
 }
 
@@ -1217,17 +1277,28 @@ mod tests {
         let html_std = r#"<input type="hidden" name="captcha_0" value="key_123"><img src="/core/auth/captcha/image/key_123/" class="captcha">"#;
         let info = JmsClient::parse_captcha_from_html(html_std, "https://jms.example.com").unwrap();
         assert_eq!(info.key, "key_123");
-        assert_eq!(info.image_url, "https://jms.example.com/core/auth/captcha/image/key_123/");
+        assert_eq!(
+            info.image_url,
+            "https://jms.example.com/core/auth/captcha/image/key_123/"
+        );
 
         let html_rev = r#"<input type="hidden" value="key_456" name="captcha_0"><img class="captcha" src="/captcha/image/key_456/">"#;
-        let info_rev = JmsClient::parse_captcha_from_html(html_rev, "https://jms.example.com").unwrap();
+        let info_rev =
+            JmsClient::parse_captcha_from_html(html_rev, "https://jms.example.com").unwrap();
         assert_eq!(info_rev.key, "key_456");
-        assert_eq!(info_rev.image_url, "https://jms.example.com/captcha/image/key_456/");
+        assert_eq!(
+            info_rev.image_url,
+            "https://jms.example.com/captcha/image/key_456/"
+        );
 
         let html_no_img = r#"<input type="hidden" name="captcha_0" value="key_789">"#;
-        let info_no_img = JmsClient::parse_captcha_from_html(html_no_img, "https://jms.example.com").unwrap();
+        let info_no_img =
+            JmsClient::parse_captcha_from_html(html_no_img, "https://jms.example.com").unwrap();
         assert_eq!(info_no_img.key, "key_789");
-        assert_eq!(info_no_img.image_url, "https://jms.example.com/core/auth/captcha/image/key_789/");
+        assert_eq!(
+            info_no_img.image_url,
+            "https://jms.example.com/core/auth/captcha/image/key_789/"
+        );
     }
 
     #[test]

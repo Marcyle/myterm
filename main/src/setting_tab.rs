@@ -348,10 +348,12 @@ impl SettingsPanel {
                                             }
                                         },
                                     )
-                                    .default_value(SharedString::from(format!(
-                                        "{:.0}",
-                                        default_settings.terminal_font_weight
-                                    ))),
+                                    .default_value(
+                                        SharedString::from(format!(
+                                            "{:.0}",
+                                            default_settings.terminal_font_weight
+                                        )),
+                                    ),
                                 )
                                 .description(
                                     t!("Settings.General.Terminal.font_weight_desc").to_string(),
@@ -1303,8 +1305,6 @@ const TERMINAL_SHORTCUTS: &[ShortcutEntry] = &[
         system_hotkey: false,
     },
 ];
-
-
 
 const SHORTCUT_GROUPS: &[ShortcutGroup] = &[
     ShortcutGroup {

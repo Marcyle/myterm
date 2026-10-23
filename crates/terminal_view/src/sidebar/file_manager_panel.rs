@@ -3041,7 +3041,6 @@ impl FileManagerPanel {
         .detach();
     }
 
-
     // ── 渲染方法 ──────────────────────────────────────────────
 
     /// 渲染工具栏
@@ -3805,17 +3804,16 @@ impl FileManagerPanel {
             menu = menu.item(
                 PopupMenuItem::new(t!("FileManager.extract"))
                     .icon(IconName::Unarchive)
-                    .on_click(window.listener_for(
-                        &view_extract,
-                        move |this, _, window, cx| {
+                    .on_click(
+                        window.listener_for(&view_extract, move |this, _, window, cx| {
                             this.extract_archive(
                                 name_for_extract.clone(),
                                 path_for_extract.clone(),
                                 window,
                                 cx,
                             );
-                        },
-                    )),
+                        }),
+                    ),
             );
         }
 

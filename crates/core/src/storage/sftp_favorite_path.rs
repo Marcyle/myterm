@@ -301,6 +301,9 @@ mod tests {
             updated_at: None,
             team_id: None,
             owner_id: None,
+            env: None,
+            tags: None,
+            is_favorite: false,
         };
 
         assert_eq!("name:prod", sftp_favorite_connection_key(&conn));

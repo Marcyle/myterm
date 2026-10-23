@@ -278,6 +278,17 @@ impl JmsConnectionWindow {
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let mut client = JmsClient::new(&url, http_client);
 
+            // 会话失效（401）时唤醒标签栏徽标变灰
+            let signal_tx = cx.update(|cx| {
+                cx.try_global::<crate::jms_session::GlobalJmsSignal>()
+                    .map(|s| s.tx.clone())
+            });
+            if let Some(sig) = signal_tx {
+                client.set_on_expired(Arc::new(move || {
+                    let _ = sig.try_send(());
+                }));
+            }
+
             // 纯 Web 表单登录,首次登录刷新登录页
             let (client, result) = smol::spawn(async move {
                 let r = client
@@ -369,7 +380,8 @@ impl JmsConnectionWindow {
 
         self.state = ConnectionState::Verifying;
         self.error_message = None;
-        self.captcha_input.update(cx, |input, cx| input.set_value("", window, cx));
+        self.captcha_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
         cx.notify();
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
@@ -437,7 +449,10 @@ impl JmsConnectionWindow {
             .map(|d| d.as_millis())
             .unwrap_or(0);
         let mut path = std::env::temp_dir();
-        path.push(format!("myterm_jms_captcha_{}_{}.{}", info.key, timestamp, ext));
+        path.push(format!(
+            "myterm_jms_captcha_{}_{}.{}",
+            info.key, timestamp, ext
+        ));
         match std::fs::write(&path, bytes) {
             Ok(_) => Some(path),
             Err(e) => {
@@ -497,9 +512,25 @@ impl JmsConnectionWindow {
                     this.client = Some(client.clone());
 
                     let proxy = this.compute_koko_proxy(cx);
+                    let tree_roots = Arc::new(tree);
+                    let username = this.username_input.read(cx).text().to_string();
+
+                    // ★ 写入全局会话（标签栏徽标数据源）：会话生命周期独立于标签页
+                    crate::jms_session::store_session(
+                        cx,
+                        crate::jms_session::JmsSessionInfo {
+                            client: client.clone(),
+                            tree_roots: tree_roots.clone(),
+                            proxy: proxy.clone(),
+                            username,
+                            base_url: client.base_url().to_string(),
+                            saved_connection_id: this.saved_connection_id,
+                        },
+                    );
+
                     let ctx = terminal_view::JmsSidebarContext {
                         client,
-                        tree_roots: Arc::new(tree),
+                        tree_roots,
                         proxy,
                         is_placeholder: true,
                     };

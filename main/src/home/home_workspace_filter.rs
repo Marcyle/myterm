@@ -75,6 +75,7 @@ pub(crate) fn show_workspace_dialog(
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct WorkspaceFilterItem {
     id: i64,
     name: String,
@@ -82,12 +83,14 @@ struct WorkspaceFilterItem {
     checked: bool,
 }
 
+#[allow(dead_code)]
 pub(crate) struct WorkspaceFilterDelegate {
     parent: Entity<HomePage>,
     items: Vec<WorkspaceFilterItem>,
     search_query: String,
 }
 
+#[allow(dead_code)]
 impl WorkspaceFilterDelegate {
     pub(crate) fn new(parent: Entity<HomePage>) -> Self {
         Self {

@@ -2864,7 +2864,6 @@ impl TerminalView {
         &self.font_family
     }
 
-
     /// 设置字体粗细
     pub fn set_font_weight(&mut self, weight: f32, cx: &mut Context<Self>) {
         self.font_weight = FontWeight(weight);
@@ -3049,15 +3048,6 @@ impl TerminalView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        tracing::info!(
-            "TerminalView handle_key_event: key={}, ctrl={}, shift={}, alt={}, platform={}",
-            event.keystroke.key,
-            event.keystroke.modifiers.control,
-            event.keystroke.modifiers.shift,
-            event.keystroke.modifiers.alt,
-            event.keystroke.modifiers.platform,
-        );
-
         // 输入时暂停闪烁
         if self.cursor_blink_enabled {
             self.blink_manager.update(cx, BlinkCursor::pause);
@@ -4380,14 +4370,7 @@ impl TerminalView {
         if self.terminal.read(cx).mode().contains(TermMode::ALT_SCREEN) {
             return false;
         }
-        if self
-            .terminal
-            .read(cx)
-            .term()
-            .lock()
-            .selection
-            .is_none()
-        {
+        if self.terminal.read(cx).term().lock().selection.is_none() {
             return false;
         }
         self.terminal.update(cx, |terminal, _| {
@@ -5421,7 +5404,11 @@ impl EntityInputHandler for TerminalView {
             self.terminal_bounds.origin.y + self.line_height * screen_line as f32,
         );
 
-        let width = if is_wide { self.cell_width * 2.0 } else { self.cell_width };
+        let width = if is_wide {
+            self.cell_width * 2.0
+        } else {
+            self.cell_width
+        };
         Some(Bounds::new(origin, size(width, self.line_height)))
     }
 
@@ -5530,8 +5517,8 @@ mod tests {
         encode_bracketed_paste, encode_mouse_modifiers, has_multiline_shell_structure,
         has_unterminated_shell_quote, high_risk_command_matches, history_prompt_available,
         history_prompt_dropdown_origin, history_prompt_overlay_bounds, mouse_button_code,
-        normalize_paste_text, sgr_mouse_button_report, sgr_mouse_mode_enabled,
-        sgr_mouse_wheel_report, selection_drag_autoscroll_delta, should_advance_command_queue,
+        normalize_paste_text, selection_drag_autoscroll_delta, sgr_mouse_button_report,
+        sgr_mouse_mode_enabled, sgr_mouse_wheel_report, should_advance_command_queue,
         should_confirm_local_terminal_close,
         should_defer_inline_history_prompt_input_to_text_system, should_defer_sgr_left_press,
         should_dismiss_history_prompt_for_keystroke, should_dismiss_history_prompt_for_mouse,
@@ -5903,36 +5890,20 @@ mod tests {
             2
         );
         assert_eq!(
-            selection_drag_autoscroll_delta(
-                Point::new(px(10.0), px(-1000.0)),
-                bounds,
-                line_height
-            ),
+            selection_drag_autoscroll_delta(Point::new(px(10.0), px(-1000.0)), bounds, line_height),
             5
         );
         assert_eq!(
-            selection_drag_autoscroll_delta(
-                Point::new(px(10.0), px(540.0)),
-                bounds,
-                line_height
-            ),
+            selection_drag_autoscroll_delta(Point::new(px(10.0), px(540.0)), bounds, line_height),
             -3
         );
         assert_eq!(
-            selection_drag_autoscroll_delta(
-                Point::new(px(10.0), px(10000.0)),
-                bounds,
-                line_height
-            ),
+            selection_drag_autoscroll_delta(Point::new(px(10.0), px(10000.0)), bounds, line_height),
             -5
         );
         // 非法行高不触发
         assert_eq!(
-            selection_drag_autoscroll_delta(
-                Point::new(px(10.0), px(10000.0)),
-                bounds,
-                px(0.0)
-            ),
+            selection_drag_autoscroll_delta(Point::new(px(10.0), px(10000.0)), bounds, px(0.0)),
             0
         );
     }

@@ -92,7 +92,6 @@ impl ConnectionType {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SshParams {
     pub host: String,
@@ -165,7 +164,6 @@ pub enum SshAuthMethod {
     Agent,
     AutoPublicKey,
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PortForwardingKind {
@@ -311,6 +309,15 @@ pub struct StoredConnection {
     /// 连接创建者 ID（用户 UUID，用于权限判断）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_id: Option<String>,
+    /// 环境（如 dev, test, prod）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env: Option<String>,
+    /// 自定义标签列表
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    /// 是否收藏星标
+    #[serde(default)]
+    pub is_favorite: bool,
 }
 
 fn default_sync_enabled() -> bool {
@@ -351,6 +358,9 @@ impl StoredConnection {
             updated_at: None,
             team_id: None,
             owner_id: None,
+            env: None,
+            tags: None,
+            is_favorite: false,
         }
     }
 
@@ -379,6 +389,9 @@ impl StoredConnection {
             updated_at: None,
             team_id: None,
             owner_id: None,
+            env: None,
+            tags: None,
+            is_favorite: false,
         }
     }
 
@@ -403,6 +416,9 @@ impl StoredConnection {
             updated_at: None,
             team_id: None,
             owner_id: None,
+            env: None,
+            tags: None,
+            is_favorite: false,
         }
     }
 
@@ -439,6 +455,34 @@ impl StoredConnection {
         let mut cloned = self.clone();
         cloned.params = cloned.decrypt_params();
         cloned
+    }
+
+    /// 标签列表
+    pub fn tags_vec(&self) -> Vec<String> {
+        self.tags.clone().unwrap_or_default()
+    }
+
+    /// 提取展示用 endpoint: (user, host, port)
+    pub fn endpoint_display(&self) -> (String, String, u16) {
+        match self.connection_type {
+            ConnectionType::SshSftp => {
+                if let Ok(params) = self.to_ssh_params() {
+                    return (params.username, params.host, params.port);
+                }
+            }
+            ConnectionType::PortForwarding => {
+                if let Ok(params) = self.to_port_forwarding_params() {
+                    return ("-".to_string(), params.bind_host, params.bind_port);
+                }
+            }
+            ConnectionType::Jms => {
+                if let Ok(params) = self.to_jms_params() {
+                    return (params.username, params.url, 22);
+                }
+            }
+            _ => {}
+        }
+        (String::new(), String::new(), 0)
     }
 }
 

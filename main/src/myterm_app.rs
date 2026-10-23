@@ -145,7 +145,7 @@ pub(crate) fn configured_log_file_path(value: &str) -> anyhow::Result<PathBuf> {
     }
 }
 
-fn default_log_file_path() -> anyhow::Result<PathBuf> {
+pub(crate) fn default_log_file_path() -> anyhow::Result<PathBuf> {
     Ok(get_config_dir()?.join("logs").join("myterm.log"))
 }
 
@@ -497,6 +497,11 @@ impl MyApp {
                 cx.set_global(GlobalHomePage {
                     home_page: home_page.clone(),
                 });
+                // JMS 会话徽标：挂在标签栏尾部（登录成功后出现，绿/灰状态指示会话有效性）
+                let badge = cx.new(|cx| {
+                    crate::jms_session_badge::JmsSessionBadge::new(home_page.downgrade(), cx)
+                });
+                tc.set_trailing_view(Some(badge.into()), cx);
                 let home_tab = TabItem::new("home", "app", home_page);
                 tc.set_pinned_tab(home_tab, cx);
                 tc.activate_pinned_tab(window, cx);

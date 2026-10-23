@@ -671,7 +671,6 @@ impl FileListPanel {
                     })),
             );
 
-
             if !is_dir && crate::archive_kind_for_name(name).is_some() {
                 let view_extract = view_ref.clone();
                 menu = menu.item(

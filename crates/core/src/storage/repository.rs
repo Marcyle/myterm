@@ -26,7 +26,12 @@ struct ConnectionRow {
     updated_at: i64,
     team_id: Option<String>,
     owner_id: Option<String>,
+    env: Option<String>,
+    tags: Option<String>,
+    is_favorite: bool,
 }
+
+const CONNECTION_SELECT_FIELDS: &str = "id, name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, last_used_at, created_at, updated_at, team_id, owner_id, env, tags, is_favorite";
 
 impl FromSqliteRow for ConnectionRow {
     fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
@@ -49,6 +54,12 @@ impl FromSqliteRow for ConnectionRow {
             updated_at: row.get("updated_at")?,
             team_id: row.get("team_id").unwrap_or(None),
             owner_id: row.get("owner_id").unwrap_or(None),
+            env: row.get("env").unwrap_or(None),
+            tags: row.get("tags").unwrap_or(None),
+            is_favorite: row
+                .get::<_, i64>("is_favorite")
+                .map(|v| v != 0)
+                .unwrap_or(false),
         })
     }
 }
@@ -71,6 +82,11 @@ impl From<ConnectionRow> for StoredConnection {
             updated_at: Some(row.updated_at),
             team_id: row.team_id,
             owner_id: row.owner_id,
+            env: row.env,
+            tags: row
+                .tags
+                .and_then(|t| serde_json::from_str::<Vec<String>>(&t).ok()),
+            is_favorite: row.is_favorite,
         };
         // 从数据库读取后自动解密敏感字段
         conn.params = conn.decrypt_params();
@@ -146,13 +162,19 @@ impl Repository for ConnectionRepository {
         let last_synced_at = item.last_synced_at;
         let team_id = item.team_id.clone();
         let owner_id = item.owner_id.clone();
+        let env = item.env.clone();
+        let tags = item
+            .tags
+            .as_ref()
+            .map(|t| serde_json::to_string(t).unwrap_or_default());
+        let is_favorite = if item.is_favorite { 1i64 } else { 0i64 };
         let ts = now();
 
         let id = self.conn.with_connection(|conn| {
             conn.execute(
-                "INSERT INTO connections (name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-                params![name, connection_type, params_str, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, ts, ts],
+                "INSERT INTO connections (name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, env, tags, is_favorite, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                params![name, connection_type, params_str, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, env, tags, is_favorite, ts, ts],
             )?;
             Ok(conn.last_insert_rowid())
         })?;
@@ -179,12 +201,18 @@ impl Repository for ConnectionRepository {
         let last_synced_at = item.last_synced_at;
         let team_id = item.team_id.clone();
         let owner_id = item.owner_id.clone();
+        let env = item.env.clone();
+        let tags = item
+            .tags
+            .as_ref()
+            .map(|t| serde_json::to_string(t).unwrap_or_default());
+        let is_favorite = if item.is_favorite { 1i64 } else { 0i64 };
         let ts = now();
 
         self.conn.with_connection(|conn| {
             conn.execute(
-                "UPDATE connections SET name = ?1, connection_type = ?2, params = ?3, workspace_id = ?4, selected_databases = ?5, remark = ?6, sync_enabled = ?7, cloud_id = ?8, last_synced_at = ?9, team_id = ?10, owner_id = ?11, updated_at = ?12 WHERE id = ?13",
-                params![name, connection_type, params_str, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, ts, id],
+                "UPDATE connections SET name = ?1, connection_type = ?2, params = ?3, workspace_id = ?4, selected_databases = ?5, remark = ?6, sync_enabled = ?7, cloud_id = ?8, last_synced_at = ?9, team_id = ?10, owner_id = ?11, env = ?12, tags = ?13, is_favorite = ?14, updated_at = ?15 WHERE id = ?16",
+                params![name, connection_type, params_str, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, team_id, owner_id, env, tags, is_favorite, ts, id],
             )?;
             Ok(())
         })
@@ -199,9 +227,8 @@ impl Repository for ConnectionRepository {
 
     fn get(&self, id: i64) -> Result<Option<Self::Entity>> {
         self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, last_used_at, created_at, updated_at, team_id, owner_id FROM connections WHERE id = ?1",
-            )?;
+            let sql = format!("SELECT {CONNECTION_SELECT_FIELDS} FROM connections WHERE id = ?1");
+            let mut stmt = conn.prepare(&sql)?;
             let mut rows = stmt.query(params![id])?;
             if let Some(row) = rows.next()? {
                 Ok(Some(ConnectionRow::from_row(row)?.into()))
@@ -213,9 +240,8 @@ impl Repository for ConnectionRepository {
 
     fn list(&self) -> Result<Vec<Self::Entity>> {
         self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, last_used_at, created_at, updated_at, team_id, owner_id FROM connections ORDER BY COALESCE(last_used_at, updated_at, created_at) DESC, id DESC",
-            )?;
+            let sql = format!("SELECT {CONNECTION_SELECT_FIELDS} FROM connections ORDER BY COALESCE(last_used_at, updated_at, created_at) DESC, id DESC");
+            let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map([], |row| ConnectionRow::from_row(row))?;
             let mut results = Vec::new();
             for row in rows {
@@ -249,11 +275,11 @@ impl ConnectionRepository {
     pub fn list_by_workspace(&self, workspace_id: Option<i64>) -> Result<Vec<StoredConnection>> {
         self.conn.with_connection(|conn| {
             let sql = if workspace_id.is_some() {
-                "SELECT id, name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, last_used_at, created_at, updated_at, team_id, owner_id FROM connections WHERE workspace_id = ?1 ORDER BY COALESCE(last_used_at, updated_at, created_at) DESC, id DESC"
+                format!("SELECT {CONNECTION_SELECT_FIELDS} FROM connections WHERE workspace_id = ?1 ORDER BY COALESCE(last_used_at, updated_at, created_at) DESC, id DESC")
             } else {
-                "SELECT id, name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, last_used_at, created_at, updated_at, team_id, owner_id FROM connections WHERE workspace_id IS NULL ORDER BY COALESCE(last_used_at, updated_at, created_at) DESC, id DESC"
+                format!("SELECT {CONNECTION_SELECT_FIELDS} FROM connections WHERE workspace_id IS NULL ORDER BY COALESCE(last_used_at, updated_at, created_at) DESC, id DESC")
             };
-            let mut stmt = conn.prepare(sql)?;
+            let mut stmt = conn.prepare(&sql)?;
 
             let mut results = Vec::new();
             if let Some(wid) = workspace_id {
@@ -286,9 +312,8 @@ impl ConnectionRepository {
     /// 按团队 ID 查询连接
     pub fn list_by_team(&self, team_id: &str) -> Result<Vec<StoredConnection>> {
         self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, last_used_at, created_at, updated_at, team_id, owner_id FROM connections WHERE team_id = ?1 ORDER BY COALESCE(last_used_at, updated_at, created_at) DESC, id DESC",
-            )?;
+            let sql = format!("SELECT {CONNECTION_SELECT_FIELDS} FROM connections WHERE team_id = ?1 ORDER BY COALESCE(last_used_at, updated_at, created_at) DESC, id DESC");
+            let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map(params![team_id], |row| ConnectionRow::from_row(row))?;
             let mut results = Vec::new();
             for row in rows {
@@ -301,15 +326,31 @@ impl ConnectionRepository {
     /// 查询个人连接（team_id 为 NULL）
     pub fn list_personal(&self) -> Result<Vec<StoredConnection>> {
         self.conn.with_connection(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, name, connection_type, params, workspace_id, selected_databases, remark, sync_enabled, cloud_id, last_synced_at, last_used_at, created_at, updated_at, team_id, owner_id FROM connections WHERE team_id IS NULL ORDER BY COALESCE(last_used_at, updated_at, created_at) DESC, id DESC",
-            )?;
+            let sql = format!("SELECT {CONNECTION_SELECT_FIELDS} FROM connections WHERE team_id IS NULL ORDER BY COALESCE(last_used_at, updated_at, created_at) DESC, id DESC");
+            let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map([], |row| ConnectionRow::from_row(row))?;
             let mut results = Vec::new();
             for row in rows {
                 results.push(row?.into());
             }
             Ok(results)
+        })
+    }
+
+    /// 切换收藏状态
+    pub fn toggle_favorite(&self, id: i64) -> Result<bool> {
+        self.conn.with_connection(|conn| {
+            let current: i64 = conn.query_row(
+                "SELECT is_favorite FROM connections WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )?;
+            let next = if current == 0 { 1i64 } else { 0i64 };
+            conn.execute(
+                "UPDATE connections SET is_favorite = ?1 WHERE id = ?2",
+                params![next, id],
+            )?;
+            Ok(next == 1)
         })
     }
 }

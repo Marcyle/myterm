@@ -391,7 +391,6 @@ impl AppSettings {
         Self::update_auto_save_config(self.enable_sql_auto_save, self.sql_auto_save_interval, cx);
     }
 
-
     /// 更新自动保存配置（静态方法，避免借用冲突）
     pub fn update_auto_save_config(enabled: bool, interval_seconds: f64, cx: &mut App) {
         if let Some(config) = cx.try_global::<AutoSaveConfig>() {

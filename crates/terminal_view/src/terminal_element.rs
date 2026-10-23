@@ -1198,7 +1198,11 @@ impl Element for TerminalElementImpl {
         _cx: &mut App,
     ) -> Self::PrepaintState {
         // 预创建所有字体变体，避免在 paint 中逐次创建
-        let fonts = FontVariants::new(self.font_family.clone(), self.font_weight, self.font_fallbacks.clone());
+        let fonts = FontVariants::new(
+            self.font_family.clone(),
+            self.font_weight,
+            self.font_fallbacks.clone(),
+        );
 
         let line_height = self.font_size * self.line_height_scale;
         // 使用由 view.rs 传入的 cell_width，确保与 resize 使用完全相同的值
@@ -1364,14 +1368,7 @@ impl Element for TerminalElementImpl {
                     tb.cell_origin(line_idx, run.start_col)
                 };
 
-                let _ = shaped.paint(
-                    origin,
-                    tb.cell_height,
-                    TextAlign::Left,
-                    None,
-                    window,
-                    cx,
-                );
+                let _ = shaped.paint(origin, tb.cell_height, TextAlign::Left, None, window, cx);
             }
         }
 
@@ -1503,10 +1500,8 @@ impl Element for TerminalElementImpl {
                             None,
                         );
 
-                        let ime_bounds = Bounds::new(
-                            ime_origin,
-                            size(shaped.width + px(4.0), tb.cell_height),
-                        );
+                        let ime_bounds =
+                            Bounds::new(ime_origin, size(shaped.width + px(4.0), tb.cell_height));
                         window.paint_quad(fill(ime_bounds, self.custom_background));
                         let _ = shaped.paint(
                             Point::new(ime_origin.x + px(2.0), ime_origin.y),
@@ -1877,7 +1872,10 @@ mod tests {
         assert_eq!(line.text_runs.len(), 1);
         assert!(super::hsla_eq(line.text_runs[0].color, expected_run_color));
         assert_eq!(line.background_rects.len(), 1);
-        assert!(super::hsla_eq(line.background_rects[0].2, expected_bg_color));
+        assert!(super::hsla_eq(
+            line.background_rects[0].2,
+            expected_bg_color
+        ));
     }
 
     #[test]
@@ -1920,7 +1918,10 @@ mod tests {
         // 空格不产生文本 run，但反色后的背景块必须被绘制
         assert!(line.text_runs.is_empty());
         assert_eq!(line.background_rects.len(), 1);
-        assert!(super::hsla_eq(line.background_rects[0].2, expected_bg_color));
+        assert!(super::hsla_eq(
+            line.background_rects[0].2,
+            expected_bg_color
+        ));
     }
 
     #[test]
@@ -2119,7 +2120,8 @@ mod tests {
         assert_eq!(fonts_light.bold_italic.weight, FontWeight(400.0));
 
         // Regular weight (400) should derive Bold (700)
-        let fonts_normal = FontVariants::new("JetBrains Mono".into(), FontWeight(400.0), Vec::new());
+        let fonts_normal =
+            FontVariants::new("JetBrains Mono".into(), FontWeight(400.0), Vec::new());
         assert_eq!(fonts_normal.normal.weight, FontWeight(400.0));
         assert_eq!(fonts_normal.bold.weight, FontWeight(700.0));
     }
