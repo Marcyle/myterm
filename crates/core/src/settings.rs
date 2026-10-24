@@ -128,6 +128,9 @@ pub struct AppSettings {
     pub terminal_font_family: String,
     #[serde(default = "default_terminal_font_weight")]
     pub terminal_font_weight: f64,
+    /// 终端回滚行数上限（scrollback）。降低此值可显著减少多终端场景的内存占用。
+    #[serde(default = "default_terminal_scrollback_lines")]
+    pub terminal_scrollback_lines: u32,
     #[serde(default = "default_true")]
     pub terminal_auto_copy: bool,
     #[serde(default = "default_true")]
@@ -194,6 +197,10 @@ fn default_terminal_font_weight() -> f64 {
     400.0
 }
 
+fn default_terminal_scrollback_lines() -> u32 {
+    5_000
+}
+
 fn default_terminal_theme() -> String {
     "ocean".to_string()
 }
@@ -249,6 +256,7 @@ impl Default for AppSettings {
             terminal_font_size: default_terminal_font_size(),
             terminal_font_family: default_terminal_font_family(),
             terminal_font_weight: default_terminal_font_weight(),
+            terminal_scrollback_lines: default_terminal_scrollback_lines(),
             terminal_auto_copy: default_true(),
             terminal_enable_autocomplete: default_true(),
             terminal_middle_click_paste: default_true(),

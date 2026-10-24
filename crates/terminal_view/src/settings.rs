@@ -37,6 +37,9 @@ pub struct TerminalSettings {
     pub font_family: String,
     #[serde(default = "default_terminal_font_weight_f32")]
     pub font_weight: f32,
+    /// 终端回滚行数上限（影响每个终端的内存上限）
+    #[serde(default = "default_terminal_scrollback_lines_usize")]
+    pub scrollback_lines: usize,
     pub auto_copy: bool,
     pub enable_autocomplete: bool,
     pub middle_click_paste: bool,
@@ -62,6 +65,10 @@ fn default_terminal_font_weight_f32() -> f32 {
     400.0
 }
 
+fn default_terminal_scrollback_lines_usize() -> usize {
+    5_000
+}
+
 impl Default for TerminalSettings {
     fn default() -> Self {
         Self::from_parts(&AppSettings::default(), &TerminalLocalSettings::default())
@@ -74,6 +81,7 @@ impl TerminalSettings {
             font_size: app_settings.terminal_font_size as f32,
             font_family: app_settings.terminal_font_family.clone(),
             font_weight: app_settings.terminal_font_weight as f32,
+            scrollback_lines: app_settings.terminal_scrollback_lines as usize,
             auto_copy: app_settings.terminal_auto_copy,
             enable_autocomplete: app_settings.terminal_enable_autocomplete,
             middle_click_paste: app_settings.terminal_middle_click_paste,
@@ -301,6 +309,7 @@ fn update_app_settings<T>(
         settings.terminal_font_size = next.font_size as f64;
         settings.terminal_font_family = next.font_family.clone();
         settings.terminal_font_weight = next.font_weight as f64;
+        settings.terminal_scrollback_lines = next.scrollback_lines as u32;
         settings.terminal_auto_copy = next.auto_copy;
         settings.terminal_sync_path_with_terminal = next.sync_path_with_terminal;
         settings.terminal_theme = next.theme.clone();
@@ -313,6 +322,7 @@ fn terminal_app_fields_equal(left: &TerminalSettings, right: &TerminalSettings) 
     left.font_size == right.font_size
         && left.font_family == right.font_family
         && left.font_weight == right.font_weight
+        && left.scrollback_lines == right.scrollback_lines
         && left.auto_copy == right.auto_copy
         && left.middle_click_paste == right.middle_click_paste
         && left.sync_path_with_terminal == right.sync_path_with_terminal

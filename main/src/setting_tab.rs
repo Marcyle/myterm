@@ -359,6 +359,41 @@ impl SettingsPanel {
                                     t!("Settings.General.Terminal.font_weight_desc").to_string(),
                                 ),
                                 SettingItem::new(
+                                    t!("Settings.General.Terminal.scrollback"),
+                                    SettingField::dropdown(
+                                        vec![
+                                            ("1000".into(), "1000 行（最省内存）".into()),
+                                            ("2000".into(), "2000 行".into()),
+                                            ("5000".into(), "5000 行（默认）".into()),
+                                            ("10000".into(), "10000 行".into()),
+                                            ("20000".into(), "20000 行".into()),
+                                            ("50000".into(), "50000 行".into()),
+                                        ],
+                                        |cx: &App| {
+                                            SharedString::from(
+                                                AppSettings::global(cx)
+                                                    .terminal_scrollback_lines
+                                                    .to_string(),
+                                            )
+                                        },
+                                        |val: SharedString, cx: &mut App| {
+                                            if let Ok(lines) = val.parse::<u32>() {
+                                                AppSettings::update_and_save(cx, |settings| {
+                                                    settings.terminal_scrollback_lines = lines;
+                                                });
+                                            }
+                                        },
+                                    )
+                                    .default_value(
+                                        SharedString::from(
+                                            default_settings.terminal_scrollback_lines.to_string(),
+                                        ),
+                                    ),
+                                )
+                                .description(
+                                    t!("Settings.General.Terminal.scrollback_desc").to_string(),
+                                ),
+                                SettingItem::new(
                                     t!("Settings.General.Terminal.cursor_blink"),
                                     SettingField::switch(
                                         |cx: &App| AppSettings::global(cx).terminal_cursor_blink,

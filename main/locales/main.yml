@@ -812,6 +812,14 @@ Settings:
         en: Adjust font weight / thickness for the terminal
         zh-CN: 调整终端文字粗细（细/正常/中等/粗）
         zh-HK: 調整終端文字粗細（細/正常/中等/粗）
+      scrollback:
+        en: Terminal Scrollback Lines
+        zh-CN: 终端回滚行数
+        zh-HK: 終端回滚行数
+      scrollback_desc:
+        en: Max scrollback lines per terminal. Lower values reduce memory usage (applies to new terminals).
+        zh-CN: 每个终端保留的最大回滚行数。调低可显著降低多终端场景的内存占用（对新建终端生效）。
+        zh-HK: 每個終端保留的最大回滚行数。調低可顯著降低多終端場景的記憶體佔用（對新建終端生效）。
       auto_copy:
         en: Auto copy on select
         zh-CN: 选中自动复制

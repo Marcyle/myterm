@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use gpui::*;
 use one_core::gpui_tokio::Tokio;
+use one_core::settings::AppSettings;
 use one_core::storage::models::{ActiveConnections, SshAuthMethod, StoredConnection};
 use std::collections::VecDeque;
 use std::fs;
@@ -312,6 +313,26 @@ const DEFAULT_ROWS: usize = 24;
 /// Hard cap for terminal scrollback.  Keeping this bounded is important when
 /// several panes receive high-volume output concurrently.
 pub const TERMINAL_SCROLLBACK_LIMIT: usize = 10_000;
+
+/// scrollback 允许的最小/最大值（防止误配导致不可用或内存失控）
+const SCROLLBACK_MIN: u32 = 1_000;
+const SCROLLBACK_MAX: u32 = 100_000;
+
+/// 从全局设置读取 scrollback 上限；设置缺失时回退编译期默认。
+fn configured_scrollback(cx: &gpui::App) -> usize {
+    cx.try_global::<AppSettings>()
+        .map(|s| {
+            s.terminal_scrollback_lines
+                .clamp(SCROLLBACK_MIN, SCROLLBACK_MAX) as usize
+        })
+        .unwrap_or(TERMINAL_SCROLLBACK_LIMIT)
+}
+
+/// 本地 shell 历史全局缓存：同进程内所有本地终端共享同一份归一化历史，
+/// 避免每个终端都读文件 + 克隆 1 万条命令（省内存也省启动 CPU）
+#[derive(Default)]
+struct LocalShellHistoryCache(Option<Arc<Vec<String>>>);
+impl gpui::Global for LocalShellHistoryCache {}
 
 /// 将路径安全地转为 POSIX shell 单参数，避免命令注入。
 pub(crate) fn shell_escape_arg(arg: &str) -> String {
@@ -656,6 +677,8 @@ pub struct Terminal {
     /// 终端尺寸
     cols: usize,
     rows: usize,
+    /// 本终端的 scrollback 行数上限（来自设置，重建 surface 时复用）
+    scrollback_history: usize,
     /// 最近一次同步给 PTY 的像素尺寸,用于 nudge_resize 重发 SIGWINCH
     pixel_width: u16,
     pixel_height: u16,
@@ -679,7 +702,8 @@ pub struct Terminal {
     /// 当前 OnetCli 会话内记录的命令历史（富条目，含 frecency 元数据）
     session_history: VecDeque<HistoryEntry>,
     /// 从 shell 历史文件加载的持久化历史
-    persisted_history: Vec<String>,
+    /// 本终端的 shell 历史持久化副本（跨终端共享，避免每个终端克隆一份）
+    persisted_history: Arc<Vec<String>>,
     /// 当前连接尝试代次，用于忽略过期的异步回调
     connection_generation: u64,
     /// 取消尚未完成的 Koko 握手任务。
@@ -754,8 +778,13 @@ impl TerminalScrollProxy {
 impl Terminal {
     fn new_local_disconnected(error: String, cx: &mut Context<Self>) -> Self {
         let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
-        let (term, event_proxy, _colors) =
-            Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
+        let scrollback_history = configured_scrollback(cx);
+        let (term, event_proxy, _colors) = Self::create_term(
+            DEFAULT_COLS,
+            DEFAULT_ROWS,
+            event_tx.clone(),
+            scrollback_history,
+        );
 
         Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
 
@@ -768,6 +797,7 @@ impl Terminal {
             connection_state: ConnectionState::Disconnected { error: Some(error) },
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
+            scrollback_history,
             pixel_width: 0,
             pixel_height: 0,
             ssh_config: None,
@@ -779,7 +809,7 @@ impl Terminal {
             connection_name: None,
             init_commands: None,
             session_history: VecDeque::new(),
-            persisted_history: Vec::new(),
+            persisted_history: Arc::new(Vec::new()),
             connection_generation: 0,
             koko_connect_cancel: None,
             connection_kind: TerminalConnectionKind::Local,
@@ -805,8 +835,13 @@ impl Terminal {
     /// 创建本地终端
     pub fn new_local(config: LocalConfig, cx: &mut Context<Self>) -> Result<Self> {
         let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
-        let (term, event_proxy, _colors) =
-            Self::create_term(DEFAULT_COLS, DEFAULT_ROWS, event_tx.clone());
+        let scrollback_history = configured_scrollback(cx);
+        let (term, event_proxy, _colors) = Self::create_term(
+            DEFAULT_COLS,
+            DEFAULT_ROWS,
+            event_tx.clone(),
+            scrollback_history,
+        );
         let LocalConfig {
             shell,
             working_dir,
@@ -844,6 +879,7 @@ impl Terminal {
             connection_state: ConnectionState::Connected,
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
+            scrollback_history,
             pixel_width: 0,
             pixel_height: 0,
             ssh_config: None,
@@ -855,7 +891,7 @@ impl Terminal {
             connection_name: None,
             init_commands: None,
             session_history: VecDeque::new(),
-            persisted_history: Vec::new(),
+            persisted_history: Arc::new(Vec::new()),
             connection_generation: 0,
             koko_connect_cancel: None,
             connection_kind: TerminalConnectionKind::Local,
@@ -920,7 +956,9 @@ impl Terminal {
         let cols = config.pty_config.width as usize;
         let rows = config.pty_config.height as usize;
 
-        let (term, event_proxy, _colors) = Self::create_term(cols, rows, event_tx.clone());
+        let scrollback_history = configured_scrollback(cx);
+        let (term, event_proxy, _colors) =
+            Self::create_term(cols, rows, event_tx.clone(), scrollback_history);
         let (disconnect_tx, disconnect_rx) = oneshot::channel::<()>();
         let connection_generation = 1;
 
@@ -949,6 +987,7 @@ impl Terminal {
             connection_state: ConnectionState::Connecting,
             cols,
             rows,
+            scrollback_history,
             pixel_width: 0,
             pixel_height: 0,
             ssh_config: Some(config),
@@ -960,7 +999,7 @@ impl Terminal {
             connection_name: Some(conn.name),
             init_commands,
             session_history: VecDeque::new(),
-            persisted_history: Vec::new(),
+            persisted_history: Arc::new(Vec::new()),
             connection_generation,
             koko_connect_cancel: None,
             connection_kind: TerminalConnectionKind::Ssh,
@@ -979,7 +1018,9 @@ impl Terminal {
 
         let cols = 80usize;
         let rows = 24usize;
-        let (term, event_proxy, _colors) = Self::create_term(cols, rows, event_tx.clone());
+        let scrollback_history = configured_scrollback(cx);
+        let (term, event_proxy, _colors) =
+            Self::create_term(cols, rows, event_tx.clone(), scrollback_history);
         let (disconnect_tx, disconnect_rx) = oneshot::channel::<()>();
         let connection_generation = 1;
 
@@ -1006,6 +1047,7 @@ impl Terminal {
             connection_state: ConnectionState::Connecting,
             cols,
             rows,
+            scrollback_history,
             pixel_width: 0,
             pixel_height: 0,
             ssh_config: None,
@@ -1017,7 +1059,7 @@ impl Terminal {
             connection_name: None,
             init_commands: None,
             session_history: VecDeque::new(),
-            persisted_history: Vec::new(),
+            persisted_history: Arc::new(Vec::new()),
             connection_generation,
             koko_connect_cancel: Some(koko_connect_cancel),
             connection_kind: TerminalConnectionKind::JmsKoko,
@@ -1032,7 +1074,9 @@ impl Terminal {
         let (event_tx, event_rx) = unbounded_channel::<TerminalEvent>();
         let cols = 80usize;
         let rows = 24usize;
-        let (term, event_proxy, _colors) = Self::create_term(cols, rows, event_tx.clone());
+        let scrollback_history = configured_scrollback(cx);
+        let (term, event_proxy, _colors) =
+            Self::create_term(cols, rows, event_tx.clone(), scrollback_history);
 
         Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
 
@@ -1045,6 +1089,7 @@ impl Terminal {
             connection_state: ConnectionState::Disconnected { error: None },
             cols,
             rows,
+            scrollback_history,
             pixel_width: 0,
             pixel_height: 0,
             ssh_config: None,
@@ -1056,7 +1101,7 @@ impl Terminal {
             connection_name: None,
             init_commands: None,
             session_history: VecDeque::new(),
-            persisted_history: Vec::new(),
+            persisted_history: Arc::new(Vec::new()),
             connection_generation: 0,
             koko_connect_cancel: None,
             connection_kind: TerminalConnectionKind::JmsKoko,
@@ -1229,13 +1274,14 @@ impl Terminal {
         cols: usize,
         rows: usize,
         event_tx: UnboundedSender<TerminalEvent>,
+        scrollback_history: usize,
     ) -> (
         Arc<FairMutex<Term<GpuiEventProxy>>>,
         GpuiEventProxy,
         alacritty_terminal::term::color::Colors,
     ) {
         let term_config = TermConfig {
-            scrolling_history: TERMINAL_SCROLLBACK_LIMIT,
+            scrolling_history: scrollback_history,
             ..Default::default()
         };
         let event_proxy = GpuiEventProxy::new(event_tx);
@@ -1249,11 +1295,30 @@ impl Terminal {
     }
 
     fn spawn_local_history_loader(preferred_shell: Option<&str>, cx: &mut Context<Self>) {
+        // 命中缓存 → 直接共享，不再读文件
+        if let Some(cached) = cx
+            .try_global::<LocalShellHistoryCache>()
+            .and_then(|c| c.0.clone())
+        {
+            cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                let _ = this.update(cx, |terminal, cx| {
+                    terminal.set_persisted_history_shared(cached, cx);
+                });
+            })
+            .detach();
+            return;
+        }
+
         let preferred_shell = preferred_shell.map(str::to_string);
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let history = load_local_history(preferred_shell.as_deref());
+            let shared = Arc::new(Self::normalize_history_list(history));
+
+            let _ = cx.update(|cx| {
+                cx.set_global(LocalShellHistoryCache(Some(shared.clone())));
+            });
             let _ = this.update(cx, |terminal, cx| {
-                terminal.set_persisted_history(history, cx);
+                terminal.set_persisted_history_shared(shared, cx);
             });
         })
         .detach();
@@ -1267,7 +1332,10 @@ impl Terminal {
                 return;
             };
             let _ = this.update(cx, |terminal, cx| {
-                terminal.set_persisted_history(history, cx);
+                terminal.set_persisted_history_shared(
+                    Arc::new(Self::normalize_history_list(history)),
+                    cx,
+                );
             });
         })
         .detach();
@@ -1517,8 +1585,9 @@ impl Terminal {
         }
     }
 
-    fn set_persisted_history(&mut self, history: Vec<String>, cx: &mut Context<Self>) {
-        let history = history
+    /// 归一化历史列表（去空白、去重限长），供本地/SSH 历史加载共用
+    fn normalize_history_list(history: Vec<String>) -> Vec<String> {
+        history
             .into_iter()
             .filter_map(|command| crate::history::normalize_history_command(&command))
             .rev()
@@ -1526,9 +1595,12 @@ impl Terminal {
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
-            .collect::<Vec<_>>();
+            .collect::<Vec<_>>()
+    }
 
-        if self.persisted_history != history {
+    /// 共享版本：多个终端可传入同一份 Arc 历史而无克隆开销
+    fn set_persisted_history_shared(&mut self, history: Arc<Vec<String>>, cx: &mut Context<Self>) {
+        if self.persisted_history.as_ref() != history.as_ref() {
             self.persisted_history = history;
             cx.emit(TerminalModelEvent::Wakeup);
         }
@@ -1856,7 +1928,7 @@ impl Terminal {
             .clone()
             .unwrap_or_else(|| GpuiEventProxy::new(event_tx.clone()));
         let term_config = TermConfig {
-            scrolling_history: TERMINAL_SCROLLBACK_LIMIT,
+            scrolling_history: self.scrollback_history,
             ..Default::default()
         };
         let new_term = Term::new(
@@ -1915,7 +1987,7 @@ impl Terminal {
         self.ssh_config.take();
         self.init_commands.take();
         self.session_history.clear();
-        self.persisted_history.clear();
+        self.persisted_history = Arc::new(Vec::new());
         self.release_terminal_surface();
     }
 
@@ -2011,11 +2083,11 @@ impl EventEmitter<TerminalModelEvent> for Terminal {}
 #[cfg(test)]
 mod tests {
     use super::{
-        ConnectionState, Terminal, TerminalConnectionKind, TerminalMfaPrompt, TerminalMfaRequest,
-        TerminalMfaResponder, build_cd_command, build_ssh_base_init_commands,
-        build_ssh_init_commands, clear_screen_remote_redraw_bytes, format_connection_error,
-        keyboard_interactive_answers_for_terminal, resolve_default_windows_shell_from_env,
-        resolve_local_working_dir, shell_escape_arg,
+        ConnectionState, TERMINAL_SCROLLBACK_LIMIT, Terminal, TerminalConnectionKind,
+        TerminalMfaPrompt, TerminalMfaRequest, TerminalMfaResponder, build_cd_command,
+        build_ssh_base_init_commands, build_ssh_init_commands, clear_screen_remote_redraw_bytes,
+        format_connection_error, keyboard_interactive_answers_for_terminal,
+        resolve_default_windows_shell_from_env, resolve_local_working_dir, shell_escape_arg,
     };
     use crate::TerminalEvent;
     use crate::history::{
@@ -2378,7 +2450,8 @@ mod tests {
     #[test]
     fn reset_terminal_surface_clears_buffer_and_stale_connection_metadata() {
         let (event_tx, _event_rx) = unbounded_channel();
-        let (term, event_proxy, _colors) = Terminal::create_term(80, 24, event_tx.clone());
+        let (term, event_proxy, _colors) =
+            Terminal::create_term(80, 24, event_tx.clone(), TERMINAL_SCROLLBACK_LIMIT);
         let mut terminal = Terminal {
             term,
             backend: None,
@@ -2388,6 +2461,7 @@ mod tests {
             connection_state: ConnectionState::Connected,
             cols: 80,
             rows: 24,
+            scrollback_history: TERMINAL_SCROLLBACK_LIMIT,
             pixel_width: 0,
             pixel_height: 0,
             ssh_config: None,
@@ -2399,7 +2473,7 @@ mod tests {
             connection_name: Some("SSH".to_string()),
             init_commands: None,
             session_history: VecDeque::new(),
-            persisted_history: Vec::new(),
+            persisted_history: std::sync::Arc::new(Vec::new()),
             connection_generation: 1,
             koko_connect_cancel: None,
             connection_kind: TerminalConnectionKind::Ssh,
