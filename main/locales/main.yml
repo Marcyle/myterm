@@ -424,10 +424,6 @@ Encryption:
     en: "The master key encrypts all locally stored sensitive data such as database passwords, SSH keys, etc., preventing data leakage even if local files are compromised."
     zh-CN: "主密钥会对本地存储的所有敏感数据（如数据库密码、SSH 密钥等）进行加密，即使本地文件被窃取也无法获取明文信息。"
     zh-HK: "主密鑰會對本地存儲的所有敏感數據（如數據庫密碼、SSH 密鑰等）進行加密，即使本地文件被竊取也無法獲取明文信息。"
-  remember_password_detail_cloud:
-    en: "All data is encrypted locally before being pushed to the cloud. The cloud server only stores encrypted strings and cannot decrypt the content. If the master key is forgotten, the cloud data cannot be recovered."
-    zh-CN: "所有数据在本地加密后才会推送到云端，云端服务器仅存储密文，无法解密内容。主密钥一旦遗忘，云端数据将无法恢复。"
-    zh-HK: "所有數據在本地加密後才會推送到雲端，雲端服務器僅存儲密文，無法解密內容。主密鑰一旦遺忘，雲端數據將無法恢復。"
   key_empty:
     en: "Master key cannot be empty"
     zh-CN: "主密钥不能为空"

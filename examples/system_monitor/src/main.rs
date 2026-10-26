@@ -59,7 +59,6 @@ struct ProcessInfo {
 /// Disk info for display
 #[derive(Clone)]
 struct DiskInfo {
-    name: String,
     total: u64,
     used: u64,
 }
@@ -67,7 +66,6 @@ struct DiskInfo {
 /// Battery info for display
 #[derive(Clone)]
 struct BatteryInfo {
-    model: String,
     icon: IconName,
     percentage: f32,
 }
@@ -356,7 +354,6 @@ impl SystemMonitor {
             .disks
             .iter()
             .map(|disk| DiskInfo {
-                name: disk.name().to_string_lossy().to_string(),
                 total: disk.total_space(),
                 used: disk.total_space() - disk.available_space(),
             })
@@ -382,10 +379,6 @@ impl SystemMonitor {
                 };
 
                 self.battery_info.push(BatteryInfo {
-                    model: battery
-                        .model()
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| "Battery".to_string()),
                     icon,
                     percentage: battery.state_of_charge().value * 100.0,
                 });

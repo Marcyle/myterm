@@ -768,7 +768,7 @@ impl HomePage {
         }
     }
 
-    /// 按索引重连标签页中的活动终端。
+    /// 按索引重连标签页中的所有终端 pane。
     pub(crate) fn reconnect_tab_by_index(
         &mut self,
         idx: usize,
@@ -784,7 +784,8 @@ impl HomePage {
         if tab.content().content_key(cx) == "TerminalPaneArea" {
             let view = tab.content().view();
             if let Ok(pane_area) = view.downcast::<TerminalPaneArea>() {
-                if let Some(terminal_view) = pane_area.read(cx).active_terminal_view(cx) {
+                let terminal_views = pane_area.read(cx).collect_terminal_views(cx);
+                for terminal_view in terminal_views {
                     terminal_view.update(cx, |terminal_view, cx| {
                         terminal_view.reconnect(window, cx);
                     });

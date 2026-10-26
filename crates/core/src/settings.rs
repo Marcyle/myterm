@@ -202,7 +202,7 @@ fn default_terminal_scrollback_lines() -> u32 {
 }
 
 fn default_terminal_theme() -> String {
-    "ocean".to_string()
+    "ink".to_string()
 }
 
 fn default_true() -> bool {
@@ -419,5 +419,14 @@ mod tests {
 
         let deserialized: AppSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(deserialized.theme_mode, "dark");
+    }
+
+    #[test]
+    fn default_terminal_theme_is_ink() {
+        let settings = AppSettings::default();
+        assert_eq!(settings.terminal_theme, "ink");
+
+        let deserialized: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(deserialized.terminal_theme, "ink");
     }
 }

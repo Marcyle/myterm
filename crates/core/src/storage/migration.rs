@@ -30,6 +30,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "20260901000001",
         include_str!("../../migrations/20260901000001_connection_env_tags_favorite.sql"),
     ),
+    (
+        "20260902000001",
+        include_str!("../../migrations/20260902000001_remove_unused_cloud_sync.sql"),
+    ),
 ];
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {
@@ -104,8 +108,6 @@ mod tests {
             "workspaces",
             "connections",
             "quick_commands",
-            "pending_cloud_deletions",
-            "team_key_cache",
             "sftp_favorite_paths",
         ] {
             let exists: bool = conn
@@ -118,6 +120,39 @@ mod tests {
                 )
                 .expect("query retained table existence");
             assert!(exists, "runtime table should remain: {table}");
+        }
+
+        for table in ["pending_cloud_deletions", "team_key_cache"] {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1
+                    )",
+                    [table],
+                    |row| row.get(0),
+                )
+                .expect("query removed unused table");
+            assert!(!exists, "unused table should be absent: {table}");
+        }
+
+        for (table, column) in [
+            ("workspaces", "cloud_id"),
+            ("connections", "sync_enabled"),
+            ("connections", "last_synced_at"),
+        ] {
+            let column_exists: bool = conn
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2
+                    )",
+                    rusqlite::params![table, column],
+                    |row| row.get(0),
+                )
+                .expect("query removed cloud sync column");
+            assert!(
+                !column_exists,
+                "cloud sync column should be absent: {table}.{column}"
+            );
         }
     }
 }

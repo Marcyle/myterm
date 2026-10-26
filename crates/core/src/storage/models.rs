@@ -237,9 +237,6 @@ pub struct Workspace {
     pub created_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
-    /// 云端 ID（用于同步）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cloud_id: Option<String>,
 }
 
 impl Entity for Workspace {
@@ -267,7 +264,6 @@ impl Workspace {
             icon: None,
             created_at: None,
             updated_at: None,
-            cloud_id: None,
         }
     }
 }
@@ -287,16 +283,10 @@ pub struct StoredConnection {
     pub selected_databases: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remark: Option<String>,
-    /// 是否启用云同步（默认 true）
-    #[serde(default = "default_sync_enabled")]
-    pub sync_enabled: bool,
-    /// 云端记录 ID（同步成功后获得）
+    /// 云端 ID，仅用于兼容已有连接关联的 SFTP 常用目录。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cloud_id: Option<String>,
-    /// 最后同步时间戳
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_synced_at: Option<i64>,
-    /// 最近使用时间戳，仅用于本地列表排序，不参与云同步。
+    /// 最近使用时间戳，用于本地列表排序。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_used_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -318,10 +308,6 @@ pub struct StoredConnection {
     /// 是否收藏星标
     #[serde(default)]
     pub is_favorite: bool,
-}
-
-fn default_sync_enabled() -> bool {
-    true
 }
 
 impl Entity for StoredConnection {
@@ -350,9 +336,7 @@ impl StoredConnection {
             workspace_id,
             selected_databases: None,
             remark: None,
-            sync_enabled: true,
             cloud_id: None,
-            last_synced_at: None,
             last_used_at: None,
             created_at: None,
             updated_at: None,
@@ -381,9 +365,7 @@ impl StoredConnection {
             workspace_id,
             selected_databases: None,
             remark: None,
-            sync_enabled: true,
             cloud_id: None,
-            last_synced_at: None,
             last_used_at: None,
             created_at: None,
             updated_at: None,
@@ -408,9 +390,7 @@ impl StoredConnection {
             workspace_id,
             selected_databases: None,
             remark: None,
-            sync_enabled: true,
             cloud_id: None,
-            last_synced_at: None,
             last_used_at: None,
             created_at: None,
             updated_at: None,

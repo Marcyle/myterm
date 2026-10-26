@@ -1430,7 +1430,7 @@ impl TerminalView {
 
         // 创建默认主题（需要在创建侧边栏之前）
         let initial_settings = current_settings(cx);
-        let default_theme = TerminalTheme::ocean();
+        let default_theme = TerminalTheme::ink();
         let default_font_size = px(TERMINAL_RESET_FONT_SIZE);
         let default_font_family: SharedString = initial_settings.font_family.clone().into();
         let default_font_fallbacks = default_font_fallbacks();

@@ -466,7 +466,7 @@ impl HomePage {
                 // 生成新的唯一名称
                 let new_name = generate_duplicate_name(&conn.name, &existing_names);
 
-                // 克隆连接，清除 id 和云同步相关字段
+                // 克隆连接并重置本地 ID 和创建者关联
                 let mut new_conn = conn.clone();
                 new_conn.id = None;
                 new_conn.name = new_name;
@@ -1781,9 +1781,6 @@ impl HomePage {
                                 )
                                 .child(div().text_sm().child(
                                     t!("Encryption.remember_password_detail_local").to_string(),
-                                ))
-                                .child(div().text_sm().text_color(cx.theme().warning).child(
-                                    t!("Encryption.remember_password_detail_cloud").to_string(),
                                 )),
                         )
                         .when_some(error_msg_for_render.read(cx).clone(), |this, msg| {
@@ -1862,7 +1859,7 @@ impl HomePage {
                         h_flex()
                             .w_full()
                             .items_center()
-                            .gap_2()
+                            .gap_4()
                             .child(IconName::Apps.mono().with_size(px(15.0)))
                             .child(div().text_sm().child("全部连接"))
                             .child(
@@ -1889,7 +1886,7 @@ impl HomePage {
                         h_flex()
                             .w_full()
                             .items_center()
-                            .gap_2()
+                            .gap_4()
                             .child(IconName::Star.mono().with_size(px(15.0)))
                             .child(div().text_sm().child("收藏"))
                             .child(
@@ -1916,7 +1913,7 @@ impl HomePage {
                         h_flex()
                             .w_full()
                             .items_center()
-                            .gap_2()
+                            .gap_4()
                             .child(IconName::Undo.mono().with_size(px(15.0)))
                             .child(div().text_sm().child("最近使用"))
                             .child(
@@ -2004,7 +2001,7 @@ impl HomePage {
                                     h_flex()
                                         .w_full()
                                         .items_center()
-                                        .gap_2()
+                                        .gap_4()
                                         .child(
                                             IconName::Folder
                                                 .mono()

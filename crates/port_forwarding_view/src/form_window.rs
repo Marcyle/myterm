@@ -21,7 +21,6 @@ pub struct PortForwardingFormWindow {
     pub(super) is_editing: bool,
     pub(super) editing_id: Option<i64>,
     pub(super) editing_cloud_id: Option<String>,
-    pub(super) editing_last_synced_at: Option<i64>,
     pub(super) name_input: Entity<InputState>,
     pub(super) bind_host_input: Entity<InputState>,
     pub(super) bind_port_input: Entity<InputState>,
@@ -95,10 +94,6 @@ impl PortForwardingFormWindow {
                 .editing_connection
                 .as_ref()
                 .and_then(|c| c.cloud_id.clone()),
-            editing_last_synced_at: config
-                .editing_connection
-                .as_ref()
-                .and_then(|c| c.last_synced_at),
             name_input,
             bind_host_input,
             bind_port_input,
@@ -224,7 +219,6 @@ impl PortForwardingFormWindow {
         if self.is_editing {
             conn.id = self.editing_id;
             conn.cloud_id = self.editing_cloud_id.clone();
-            conn.last_synced_at = self.editing_last_synced_at;
         }
         save_connection(conn, self.is_editing, cx);
         window.remove_window();

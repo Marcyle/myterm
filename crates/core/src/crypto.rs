@@ -4,9 +4,7 @@
 //! 用户需要设置一个主密钥，该密钥用于派生加密密钥。
 //! 如果主密钥丢失，所有加密的密码将无法恢复。
 //!
-//! 支持两种使用方式：
-//! 1. 全局密钥模式：通过 set_master_key 设置全局密钥，使用 encrypt_password/decrypt_password
-//! 2. 指定密钥模式：使用 encrypt_with_key/decrypt_with_key 直接传入密钥
+//! 通过 set_master_key 设置全局密钥，使用 encrypt_password/decrypt_password。
 //!
 //! 密钥持久化：
 //! - 使用本地文件存储，主密钥会以固定 key 加密后落盘
@@ -76,7 +74,7 @@ const KEY_VERIFICATION_FILE: &str = "key_verification";
 /// 全局加密密钥存储（派生后的密钥）
 static ENCRYPTION_KEY: RwLock<Option<[u8; 32]>> = RwLock::new(None);
 
-/// 全局原始主密钥存储（用于云同步等需要原始密钥的场景）
+/// 全局原始主密钥存储（用于主密钥确认和修改等界面流程）
 static RAW_MASTER_KEY: RwLock<Option<String>> = RwLock::new(None);
 
 /// 获取数据目录路径
@@ -190,7 +188,7 @@ pub fn set_master_key(master_key: &str) {
         *guard = Some(key);
     }
 
-    // 同时保存原始主密钥（用于云同步等场景）
+    // 同时保存原始主密钥，供界面确认和修改流程使用
     if let Ok(mut guard) = RAW_MASTER_KEY.write() {
         *guard = Some(master_key.to_string());
     }
@@ -250,7 +248,7 @@ pub fn has_master_key() -> bool {
 
 /// 获取原始主密钥
 ///
-/// 返回设置的原始主密钥字符串，用于云同步等需要原始密钥的场景。
+/// 返回设置的原始主密钥字符串，用于界面确认和修改流程。
 /// 如果未设置主密钥，返回 None。
 pub fn get_raw_master_key() -> Option<String> {
     RAW_MASTER_KEY.read().ok().and_then(|guard| guard.clone())
@@ -345,77 +343,6 @@ pub fn decrypt_password(encrypted: &str) -> String {
 /// 检查密码是否已加密
 pub fn is_encrypted(password: &str) -> bool {
     password.starts_with(ENCRYPTED_PREFIX)
-}
-
-// ============================================================================
-// 指定密钥模式的加解密函数（用于云同步和密钥迁移）
-// ============================================================================
-
-/// 使用指定密钥加密密码
-///
-/// 不依赖全局密钥状态，直接使用传入的主密钥进行加密。
-/// 适用于云同步场景和密钥迁移场景。
-pub fn encrypt_with_key(plaintext: &str, master_key: &str) -> String {
-    if plaintext.is_empty() {
-        return plaintext.to_string();
-    }
-
-    // 如果已经是加密的，直接返回
-    if plaintext.starts_with(ENCRYPTED_PREFIX) {
-        return plaintext.to_string();
-    }
-
-    let key = derive_key(master_key);
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
-
-    let mut nonce_bytes = [0u8; 12];
-    rand::thread_rng().fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
-
-    match cipher.encrypt(nonce, plaintext.as_bytes()) {
-        Ok(ciphertext) => {
-            let mut combined = Vec::with_capacity(12 + ciphertext.len());
-            combined.extend_from_slice(&nonce_bytes);
-            combined.extend_from_slice(&ciphertext);
-            format!("{}{}", ENCRYPTED_PREFIX, BASE64.encode(&combined))
-        }
-        Err(_) => plaintext.to_string(),
-    }
-}
-
-/// 使用指定密钥解密密码
-///
-/// 不依赖全局密钥状态，直接使用传入的主密钥进行解密。
-/// 适用于云同步场景和密钥迁移场景。
-pub fn decrypt_with_key(encrypted: &str, master_key: &str) -> Result<String, CryptoError> {
-    if encrypted.is_empty() {
-        return Ok(encrypted.to_string());
-    }
-
-    // 如果不是加密的，直接返回
-    if !encrypted.starts_with(ENCRYPTED_PREFIX) {
-        return Ok(encrypted.to_string());
-    }
-
-    let key = derive_key(master_key);
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
-
-    let encoded = &encrypted[ENCRYPTED_PREFIX.len()..];
-    let combined = BASE64
-        .decode(encoded)
-        .map_err(|_| CryptoError::EncodingFailed)?;
-
-    if combined.len() < 12 {
-        return Err(CryptoError::InvalidDataFormat);
-    }
-
-    let nonce = Nonce::from_slice(&combined[..12]);
-    let ciphertext = &combined[12..];
-
-    match cipher.decrypt(nonce, ciphertext) {
-        Ok(plaintext) => String::from_utf8(plaintext).map_err(|_| CryptoError::EncodingFailed),
-        Err(_) => Err(CryptoError::DecryptionFailed),
-    }
 }
 
 // ============================================================================

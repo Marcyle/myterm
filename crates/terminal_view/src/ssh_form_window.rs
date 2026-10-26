@@ -80,7 +80,6 @@ pub struct SshFormWindow {
     is_editing: bool,
     editing_id: Option<i64>,
     editing_cloud_id: Option<String>,
-    editing_last_synced_at: Option<i64>,
 
     // 当前活动标签页索引
     active_tab: usize,
@@ -198,10 +197,6 @@ impl SshFormWindow {
             .editing_connection
             .as_ref()
             .and_then(|c| c.cloud_id.clone());
-        let editing_last_synced_at = config
-            .editing_connection
-            .as_ref()
-            .and_then(|c| c.last_synced_at);
 
         let title: SharedString = if is_editing {
             t!("SSH.edit").to_string()
@@ -453,7 +448,6 @@ impl SshFormWindow {
             is_editing,
             editing_id,
             editing_cloud_id,
-            editing_last_synced_at,
             active_tab: 0,
             name_input,
             host_input,
@@ -880,7 +874,6 @@ impl SshFormWindow {
         if self.is_editing {
             conn.id = self.editing_id;
             conn.cloud_id = self.editing_cloud_id.clone();
-            conn.last_synced_at = self.editing_last_synced_at;
         }
 
         // 保存备注
