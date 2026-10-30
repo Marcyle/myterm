@@ -652,6 +652,14 @@ ContextMenu:
     en: "Paste (%{shortcut})"
     zh-CN: "粘贴（%{shortcut}）"
     zh-HK: "貼上（%{shortcut}）"
+  image_paste_failed:
+    en: "Failed to paste image: %{error}"
+    zh-CN: "粘贴图片失败：%{error}"
+    zh-HK: "貼上圖片失敗：%{error}"
+  image_paste_unsupported:
+    en: Image paste is not supported in this session
+    zh-CN: 当前会话不支持粘贴图片
+    zh-HK: 目前工作階段不支援貼上圖片
   select_all:
     en: Select All
     zh-CN: 全选

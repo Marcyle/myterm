@@ -3366,8 +3366,108 @@ impl TerminalView {
 
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(clipboard) = cx.read_from_clipboard() {
-            if let Some(text) = clipboard.text() {
+            if let Some(text) = clipboard.text().filter(|text| !text.is_empty()) {
                 self.paste_text(&text, window, cx);
+                return;
+            }
+
+            match crate::image_paste::from_clipboard(&clipboard) {
+                Some(Ok(image)) => self.paste_image(image, window, cx),
+                Some(Err(error)) => {
+                    tracing::warn!(%error, "failed to read clipboard image");
+                    window.push_notification(
+                        Notification::error(t!(
+                            "TerminalView.image_paste_failed",
+                            error = error.to_string()
+                        )),
+                        cx,
+                    );
+                }
+                None => {}
+            }
+        }
+    }
+
+    /// Paste a clipboard image as a temporary file path.
+    ///
+    /// Local terminals write under the OS temp directory. SSH terminals upload
+    /// the PNG over SFTP and paste the remote path, because the agent runs on
+    /// the remote host and cannot read a local path.
+    fn paste_image(
+        &mut self,
+        image: crate::image_paste::ClipboardImage,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match self.connection_kind(cx) {
+            TerminalConnectionKind::Local => match crate::image_paste::save_local(&image) {
+                Ok(path) => {
+                    let text = crate::image_paste::format_path(&path);
+                    self.paste_text(&text, window, cx);
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "failed to save clipboard image");
+                    window.push_notification(
+                        Notification::error(t!(
+                            "TerminalView.image_paste_failed",
+                            error = error.to_string()
+                        )),
+                        cx,
+                    );
+                }
+            },
+            TerminalConnectionKind::Ssh => {
+                let Some(session_manager) = self.terminal.read(cx).ssh_session_manager().cloned()
+                else {
+                    window.push_notification(
+                        Notification::error(t!("TerminalView.image_paste_unsupported")),
+                        cx,
+                    );
+                    return;
+                };
+
+                let file_name = image.file_name;
+                let png = image.png;
+                let task = Tokio::spawn(cx, async move {
+                    let client = session_manager.client().await?;
+                    let mut sftp = RusshSftpClient::connect_with_client(client).await?;
+                    let _ = sftp.mkdir(crate::image_paste::REMOTE_DIR).await;
+                    let remote_path = format!("{}/{}", crate::image_paste::REMOTE_DIR, file_name);
+                    sftp.write_file(&remote_path, &png).await?;
+                    anyhow::Ok(remote_path)
+                });
+
+                cx.spawn(async move |this, cx| {
+                    let result = match task.await {
+                        Ok(result) => result,
+                        Err(error) => Err(anyhow::anyhow!(error)),
+                    };
+                    match result {
+                        Ok(remote_path) => {
+                            let text = crate::image_paste::format_remote_path(&remote_path);
+                            let _ = this.update(cx, |this, cx| {
+                                let mode = this.terminal.read(cx).mode();
+                                let data = if mode.contains(TermMode::BRACKETED_PASTE) {
+                                    encode_bracketed_paste(&text)
+                                } else {
+                                    text.into_bytes()
+                                };
+                                this.write_to_pty(data, cx);
+                                cx.notify();
+                            });
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, "failed to upload clipboard image");
+                        }
+                    }
+                })
+                .detach();
+            }
+            TerminalConnectionKind::JmsKoko => {
+                window.push_notification(
+                    Notification::error(t!("TerminalView.image_paste_unsupported")),
+                    cx,
+                );
             }
         }
     }

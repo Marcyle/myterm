@@ -5,6 +5,7 @@ pub mod cd_completion;
 mod dialog_helper;
 pub mod highlight_presets;
 pub mod history_prompt;
+mod image_paste;
 pub mod keys;
 pub mod pane_area;
 pub mod settings;
