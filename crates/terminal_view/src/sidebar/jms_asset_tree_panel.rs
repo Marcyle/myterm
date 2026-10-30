@@ -196,6 +196,7 @@ impl JmsAssetTreePanel {
         let client = self.client.clone();
         cx.notify();
         let node_id_for_update = node_id.clone();
+        let load_key_for_update = load_key.clone();
         cx.spawn(async move |this, cx: &mut AsyncApp| {
             let mut client = client;
             let result = cx
@@ -209,15 +210,11 @@ impl JmsAssetTreePanel {
 
             match result {
                 Ok(nodes) => {
-                    let children: Vec<jms::JmsAssetTreeNode> = nodes
-                        .into_iter()
-                        .filter(|n| n.id != node_id_for_update)
-                        .map(|n| jms::JmsAssetTreeNode {
-                            node: n,
-                            children: Vec::new(),
-                            loaded: false,
-                        })
-                        .collect();
+                    let children = jms::build_asset_tree_for_children(
+                        &node_id_for_update,
+                        &load_key_for_update,
+                        nodes,
+                    );
                     let _ = this.update(cx, |this, cx| {
                         this.set_node_children(&node_id_for_update, children);
                         cx.notify();
@@ -243,7 +240,7 @@ impl JmsAssetTreePanel {
             children: &mut Option<Vec<jms::JmsAssetTreeNode>>,
         ) -> bool {
             for n in nodes.iter_mut() {
-                if n.node.id == node_id {
+                if n.node.id == node_id || n.load_key() == node_id {
                     n.children = children.take().unwrap_or_default();
                     n.loaded = true;
                     return true;

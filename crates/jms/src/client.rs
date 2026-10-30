@@ -252,8 +252,25 @@ impl JmsClient {
 
     /// 获取资产树
     pub async fn get_asset_tree(&mut self) -> Result<Vec<JmsAssetNode>, JmsError> {
+        // 优先使用同步全量资产树端点 (/nodes/all-with-assets/tree/)，
+        // 一次性获取所有层级节点和资产，保证层级关系与资产完整展示。
+        let full_tree_url = format!(
+            "{}/api/v1/perms/users/self/nodes/all-with-assets/tree/",
+            self.base_url
+        );
+        if let Ok((status, text)) = self.get_json(&full_tree_url).await {
+            if (200..300).contains(&status) {
+                if let Ok(nodes) = serde_json::from_str::<Vec<JmsAssetNode>>(&text) {
+                    if !nodes.is_empty() {
+                        return Ok(nodes);
+                    }
+                }
+            }
+        }
+
+        // 回退方案：异步树端点，必须显式携带 assets=1&include_assets=1，否则服务端默认不返回任何资产
         let url = format!(
-            "{}/api/v1/perms/users/self/nodes/children-with-assets/tree/",
+            "{}/api/v1/perms/users/self/nodes/children-with-assets/tree/?assets=1&include_assets=1&assets_limit=1000",
             self.base_url
         );
         let (status, text) = self.get_json(&url).await?;
@@ -270,12 +287,13 @@ impl JmsClient {
     /// 懒加载：获取指定节点 key 下的子节点（含资产）
     ///
     /// JumpServer 树是懒加载的，点击节点时通过 `?key=<node_key>` 获取该节点的直接子节点。
+    /// 必须携带 `assets=1&include_assets=1`，否则服务端默认过滤掉资产。
     pub async fn get_node_children(
         &mut self,
         node_key: &str,
     ) -> Result<Vec<JmsAssetNode>, JmsError> {
         let url = format!(
-            "{}/api/v1/perms/users/self/nodes/children-with-assets/tree/?key={}",
+            "{}/api/v1/perms/users/self/nodes/children-with-assets/tree/?key={}&assets=1&include_assets=1&assets_limit=1000",
             self.base_url, node_key
         );
         let (status, text) = self.get_json(&url).await?;
