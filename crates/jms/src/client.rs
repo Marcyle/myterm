@@ -329,6 +329,14 @@ impl JmsClient {
         // 不同 JumpServer 版本的账号接口路径不同;单个 404 不能中断后续探测。
         let candidates = [
             format!(
+                "{}/api/v1/perms/users/self/assets/{}/",
+                self.base_url, asset_id
+            ),
+            format!(
+                "{}/api/v1/assets/assets/{}/",
+                self.base_url, asset_id
+            ),
+            format!(
                 "{}/api/v1/assets/accounts/?asset={}",
                 self.base_url, asset_id
             ),
@@ -351,15 +359,23 @@ impl JmsClient {
             match self.get_json(url).await {
                 Ok((status, text)) => {
                     if (200..300).contains(&status) {
-                        match serde_json::from_str::<Vec<JmsAssetAccount>>(&text) {
-                            Ok(accounts) if !accounts.is_empty() => return Ok(accounts),
-                            Ok(_) => {
-                                last_error = Some("接口返回空账号列表".to_string());
-                            }
-                            Err(e) => {
-                                last_error = Some(format!("解析账号列表失败: {e}"));
+                        // 1. 尝试直接作为数组解析: [ { ... }, ... ]
+                        if let Ok(accounts) = serde_json::from_str::<Vec<JmsAssetAccount>>(&text) {
+                            if !accounts.is_empty() {
+                                return Ok(accounts);
                             }
                         }
+                        // 2. 尝试从对象字段解析: { "permed_accounts": [ ... ] } 或 { "accounts": [ ... ] }
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
+                            if let Some(arr) = val.get("permed_accounts").or_else(|| val.get("accounts")) {
+                                if let Ok(accounts) = serde_json::from_value::<Vec<JmsAssetAccount>>(arr.clone()) {
+                                    if !accounts.is_empty() {
+                                        return Ok(accounts);
+                                    }
+                                }
+                            }
+                        }
+                        last_error = Some("接口未包含有效账号".to_string());
                     } else {
                         last_error = Some(format!("status={status}"));
                     }

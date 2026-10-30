@@ -613,7 +613,7 @@ impl JmsAssetTreePanel {
         let rows: Vec<AnyElement> = self
             .search_results
             .iter()
-            .map(|node| self.render_tree_row(node, 0, true, false, false, cx))
+            .map(|node| self.render_tree_row(node, 0, true, false, cx))
             .collect();
         v_flex()
             .flex_1()
@@ -642,9 +642,8 @@ impl JmsAssetTreePanel {
     ) {
         for node in nodes {
             let is_asset = node.is_asset();
-            let has_children = node.node.is_parent;
             let is_expanded = self.expanded_ids.contains(&node.node.id);
-            rows.push(self.render_tree_row(node, depth, is_asset, has_children, is_expanded, cx));
+            rows.push(self.render_tree_row(node, depth, is_asset, is_expanded, cx));
             if is_expanded {
                 self.collect_rows(&node.children, depth + 1, rows, cx);
             }
@@ -656,7 +655,6 @@ impl JmsAssetTreePanel {
         node: &jms::JmsAssetTreeNode,
         depth: usize,
         is_asset: bool,
-        has_children: bool,
         is_expanded: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -696,7 +694,7 @@ impl JmsAssetTreePanel {
             .cursor_pointer()
             .rounded(px(4.0))
             .hover(|style| style.bg(cx.theme().list_hover))
-            .child(if has_children {
+            .child(if !is_asset {
                 Icon::new(if is_expanded {
                     IconName::ChevronDown
                 } else {
@@ -737,7 +735,12 @@ impl JmsAssetTreePanel {
                     })
                     .child(title),
             )
-            .when(has_children, |this| {
+            .when(is_asset, |this| {
+                this.on_click(cx.listener(move |this, _, _window, cx| {
+                    this.handle_asset_click(real_asset_id.clone(), cx);
+                }))
+            })
+            .when(!is_asset, |this| {
                 this.on_click(cx.listener(move |this, _, _window, cx| {
                     this.handle_node_toggle(
                         node_id_for_toggle.clone(),
@@ -745,11 +748,6 @@ impl JmsAssetTreePanel {
                         loaded,
                         cx,
                     );
-                }))
-            })
-            .when(!has_children, |this| {
-                this.on_click(cx.listener(move |this, _, _window, cx| {
-                    this.handle_asset_click(real_asset_id.clone(), cx);
                 }))
             })
             .into_any_element()
