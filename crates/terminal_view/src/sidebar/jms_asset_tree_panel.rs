@@ -312,11 +312,11 @@ impl JmsAssetTreePanel {
     /// 选择账号 → 创建 connect-token → 发事件打开新终端
     fn handle_account_selected(
         &mut self,
-        account_name: String,
+        account: jms::JmsAssetAccount,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let mut client = self.client.clone();
+        let client = self.client.clone();
         let asset_id = self.pending_asset_id.clone();
         let asset_name = self.pending_asset_name.clone();
         let proxy = self.proxy.clone();
@@ -327,17 +327,36 @@ impl JmsAssetTreePanel {
         cx.notify();
 
         cx.spawn(async move |this, cx: &mut AsyncApp| {
-            let account_for_title = account_name.clone();
+            let account_display = if !account.username.is_empty() {
+                account.username.clone()
+            } else {
+                account.name.clone()
+            };
+            let account_for_title = account_display.clone();
             let asset_id_for_params = asset_id.clone();
-            let account_name_for_params = account_name.clone();
+            let account_name_for_params = account_display.clone();
+            let account_id_for_params = account.id.clone();
+            // JumpServer v4/v5 要求使用 account.id (UUID)，若无 ID 则使用 username/name
+            let account_token_param = if !account.id.is_empty() {
+                account.id.clone()
+            } else {
+                account_display.clone()
+            };
+
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let r = client.create_connect_token(&asset_id, &account_name).await;
-                    (client, r)
+                    let mut client = client;
+                    let r = client.create_connect_token(&asset_id, &account_token_param).await;
+                    let ticket = if let Ok(ref token) = r {
+                        client.create_koko_ticket(&token.id).await
+                    } else {
+                        None
+                    };
+                    (client, r, ticket)
                 })
                 .await;
-            let (client, connect_result) = result;
+            let (client, connect_result, ticket) = result;
 
             match connect_result {
                 Ok(token) => {
@@ -350,6 +369,8 @@ impl JmsAssetTreePanel {
                         title: format!("[JMS] {} ({})", asset_name, account_for_title),
                         asset_id: Some(asset_id_for_params),
                         account_name: Some(account_name_for_params),
+                        account_id: Some(account_id_for_params),
+                        ticket,
                     };
                     let params_fallback = params.clone();
                     let updated = cx
@@ -773,9 +794,9 @@ impl JmsAssetTreePanel {
                     .px_2()
                     .gap_1()
                     .children(self.pending_accounts.iter().map(|account| {
+                        let account_for_click = account.clone();
                         let name = account.name.clone();
                         let username = account.username.clone();
-                        let name_for_click = name.clone();
                         let is_privileged = account.privileged;
                         div()
                             .id(gpui::SharedString::from(format!("jms-acct-{}", account.id)))
@@ -788,7 +809,7 @@ impl JmsAssetTreePanel {
                             .cursor_pointer()
                             .hover(|style| style.bg(cx.theme().list_hover))
                             .on_click(cx.listener(move |this, _, window, cx| {
-                                this.handle_account_selected(name_for_click.clone(), window, cx);
+                                this.handle_account_selected(account_for_click.clone(), window, cx);
                             }))
                             .child(
                                 h_flex()

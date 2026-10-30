@@ -377,12 +377,12 @@ impl JmsClient {
     }
 
     /// 创建 Koko 连接 token（用于 WebSocket 终端）
-    pub async fn create_connect_token(
+    async fn raw_create_connect_token(
         &mut self,
         asset_id: &str,
         account: &str,
     ) -> Result<JmsConnectToken, JmsError> {
-        // JumpServer v4: POST /api/v1/authentication/connection-token/
+        // JumpServer v4/v5: POST /api/v1/authentication/connection-token/
         let url = format!("{}/api/v1/authentication/connection-token/", self.base_url);
 
         let body = serde_json::json!({
@@ -412,6 +412,97 @@ impl JmsClient {
         }
     }
 
+    /// 创建 Koko 连接 token（用于 WebSocket 终端）
+    ///
+    /// `account` 可以是账号 ID（UUID）或账号名称。若直接使用 `account` 请求遇到
+    /// `perm_account_invalid`（例如 JumpServer v4/v5 强要求账号 ID，或旧版强要求账号名），
+    /// 会自动查询资产绑定的账号列表并在名称和 ID 之间转换重试。
+    pub async fn create_connect_token(
+        &mut self,
+        asset_id: &str,
+        account: &str,
+    ) -> Result<JmsConnectToken, JmsError> {
+        let is_uuid = uuid::Uuid::parse_str(account).is_ok();
+
+        match self.raw_create_connect_token(asset_id, account).await {
+            Ok(token) => Ok(token),
+            Err(e) => {
+                let is_account_invalid = match &e {
+                    JmsError::ApiError(msg) => msg.contains("perm_account_invalid"),
+                    _ => false,
+                };
+                if is_account_invalid {
+                    if let Ok(accounts) = self.list_asset_accounts(asset_id).await {
+                        let target_alias = if !is_uuid {
+                            // 传入的是账号名 -> 寻找其对应的 UUID
+                            accounts
+                                .iter()
+                                .find(|a| a.name == account || a.username == account)
+                                .map(|a| a.id.as_str())
+                        } else {
+                            // 传入的是 UUID -> 寻找其对应的 username / name
+                            accounts.iter().find(|a| a.id == account).map(|a| {
+                                if !a.username.is_empty() {
+                                    a.username.as_str()
+                                } else {
+                                    a.name.as_str()
+                                }
+                            })
+                        };
+
+                        if let Some(target) = target_alias {
+                            if target != account {
+                                tracing::info!(
+                                    "使用账号别名 '{}' 重试创建连接 token (原参数: '{}')",
+                                    target,
+                                    account
+                                );
+                                return self.raw_create_connect_token(asset_id, target).await;
+                            }
+                        }
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// 请求 Koko connect-ticket 临时连接凭证（JumpServer v5 使用）
+    pub async fn create_koko_ticket(&mut self, token_id: &str) -> Option<String> {
+        let url = format!("{}/koko/api/connect-ticket/", self.base_url.trim_end_matches('/'));
+        let org_id = self.org_id();
+        let body = serde_json::json!({
+            "token_id": token_id,
+            "org_id": org_id,
+        });
+        match self.post_json(&url, &body).await {
+            Ok((status, text)) if (200..300).contains(&status) => {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if let Some(ticket) = val.get("ticket").and_then(|v| v.as_str()) {
+                        tracing::info!("获取 Koko connect-ticket 成功");
+                        return Some(ticket.to_string());
+                    }
+                }
+                None
+            }
+            Ok((status, text)) => {
+                tracing::info!(
+                    "Koko connect-ticket 接口返回 status={} ({})，将尝试直接连接",
+                    status,
+                    text
+                );
+                None
+            }
+            Err(e) => {
+                tracing::info!(
+                    "请求 Koko connect-ticket 接口失败: {}，将尝试直接连接",
+                    e
+                );
+                None
+            }
+        }
+    }
+
     /// 通过 JumpServer Web 表单登录获取**已认证**的会话 cookie
     ///
     /// 完整复刻浏览器登录流程:
@@ -432,7 +523,8 @@ impl JmsClient {
 
         // 1. GET 登录页,获取 csrf token、public key、匿名 session
         //    首次登录或显式刷新时执行;带验证码/MFA 重试时复用已有 csrf/session
-        if refresh_page || self.public_key.is_none() {
+        let need_page_fetch = refresh_page || self.session_snapshot().session_cookie.is_none();
+        if need_page_fetch {
             let (status, text, cookies) = self.raw_get(&login_url).await?;
             if status != 200 {
                 return Err(JmsError::ApiError(format!(
@@ -457,13 +549,17 @@ impl JmsClient {
             if captcha_value.is_none() {
                 let needs_captcha = text.contains("captcha_0")
                     || text.contains("captcha-field")
-                    || text.contains("captcha-challenge")
+                    || (text.contains("captcha-challenge")
+                        && !text.contains("no-captcha-challenge"))
                     || text.contains("name=\"captcha\"");
                 if needs_captcha {
                     if let Some(info) = Self::parse_captcha_from_html(&text, &self.base_url) {
                         self.last_captcha_key = Some(info.key.clone());
                         let info = self.fill_captcha_image(info).await;
-                        return Ok(WebLoginResult::CaptchaRequired(info));
+                        return Ok(WebLoginResult::CaptchaRequired {
+                            info,
+                            error: None,
+                        });
                     }
                 }
             }
@@ -521,7 +617,8 @@ impl JmsClient {
         }
 
         // 200:仍在登录/MFA 页,按响应体判定
-        self.classify_login_page(&text, otp_code).await
+        let captcha_submitted = captcha_value.is_some();
+        self.classify_login_page(&text, otp_code, captcha_submitted).await
     }
 
     /// 跟随登录重定向链(最多若干跳),落到 luna/ui 即成功,落到 MFA/登录页则判定
@@ -560,7 +657,7 @@ impl JmsClient {
                     return Ok(WebLoginResult::Success { session_id: sid });
                 }
             }
-            return Box::pin(self.classify_login_page(&body, otp_code)).await;
+            return Box::pin(self.classify_login_page(&body, otp_code, false)).await;
         }
         Err(JmsError::AuthError("登录重定向次数过多".to_string()))
     }
@@ -570,11 +667,12 @@ impl JmsClient {
         &mut self,
         text: &str,
         otp_code: Option<&str>,
+        captcha_submitted: bool,
     ) -> Result<WebLoginResult, JmsError> {
         let still_login_page = text.contains("login-form") || text.contains("id=\"login-form\"");
         let needs_captcha = text.contains("captcha_0")
             || text.contains("captcha-field")
-            || text.contains("captcha-challenge")
+            || (text.contains("captcha-challenge") && !text.contains("no-captcha-challenge"))
             || text.contains("name=\"captcha\"");
         let needs_mfa = text.contains("name=\"otp_code\"")
             || text.contains("mfa-form")
@@ -592,32 +690,53 @@ impl JmsClient {
             }
         }
 
-        // 验证码优先:无论是否同时需要 MFA,先让用户过验证码
-        if needs_captcha && err_msg.is_some() {
-            // 仅当有错误(验证码错误)时才回退到验证码;首次成功提交不应再要验证码
-            if let Some(info) = Self::parse_captcha_from_html(text, &self.base_url) {
-                self.last_captcha_key = Some(info.key.clone());
-                let info = self.fill_captcha_image(info).await;
-                return Ok(WebLoginResult::CaptchaRequired(info));
-            } else if let Ok(info) = self.refresh_captcha().await {
-                return Ok(WebLoginResult::CaptchaRequired(info));
-            }
-        }
-        if needs_captcha && !needs_mfa {
-            if let Some(info) = Self::parse_captcha_from_html(text, &self.base_url) {
-                self.last_captcha_key = Some(info.key.clone());
-                let info = self.fill_captcha_image(info).await;
-                return Ok(WebLoginResult::CaptchaRequired(info));
-            } else if let Ok(info) = self.refresh_captcha().await {
-                return Ok(WebLoginResult::CaptchaRequired(info));
-            }
-        }
+        // MFA 优先（若在 MFA 页）
         if needs_mfa {
-            // 已提供 OTP → 直接提交 MFA 表单
             if let Some(code) = otp_code.filter(|s| !s.is_empty()) {
                 return Box::pin(self.submit_mfa(text, code)).await;
-            };
+            }
             return Ok(WebLoginResult::MfaRequired);
+        }
+
+        // 检查是否有错误信息
+        if let Some(ref err) = err_msg {
+            let err_lower = err.to_lowercase();
+            let is_captcha_error = err_lower.contains("验证码")
+                || err_lower.contains("captcha")
+                || err_lower.contains("verification code")
+                || err_lower.contains("security code");
+
+            // 如果是凭据错误（如用户名或密码错误、账户被锁定等），直接返回认证失败，
+            // 避免掩盖真实错误导致无限要求用户输入验证码
+            if !is_captcha_error {
+                return Err(JmsError::AuthError(err.clone()));
+            }
+
+            // 如果是验证码错误，解析新验证码并携带错误提示返回
+            if needs_captcha {
+                if let Some(info) = Self::parse_captcha_from_html(text, &self.base_url) {
+                    self.last_captcha_key = Some(info.key.clone());
+                    let info = self.fill_captcha_image(info).await;
+                    return Ok(WebLoginResult::CaptchaRequired {
+                        info,
+                        error: Some(err.clone()),
+                    });
+                }
+            }
+        }
+
+        // 需要验证码（如首次需要验证码，或者提交验证码后服务端未明确给出文本错误但重新给出了验证码）
+        if needs_captcha {
+            if let Some(info) = Self::parse_captcha_from_html(text, &self.base_url) {
+                self.last_captcha_key = Some(info.key.clone());
+                let info = self.fill_captcha_image(info).await;
+                let error = if captcha_submitted {
+                    Some(err_msg.unwrap_or_else(|| "验证码无效或已过期，请重新输入".to_string()))
+                } else {
+                    None
+                };
+                return Ok(WebLoginResult::CaptchaRequired { info, error });
+            }
         }
 
         Err(JmsError::AuthError(
@@ -634,7 +753,7 @@ impl JmsClient {
         self.absorb_session_cookies(&cookies);
         // 若已被打回登录页/已认证,交给通用判定
         if !page.contains("mfa_type") && !page.contains("mfa-select") {
-            return self.classify_login_page(&page, Some(code)).await;
+            return self.classify_login_page(&page, Some(code), false).await;
         }
         self.submit_mfa(&page, code).await
     }
@@ -678,7 +797,7 @@ impl JmsClient {
             return Box::pin(self.follow_login_redirects(&location, None)).await;
         }
         // 200:可能 OTP 错误,仍在 MFA 页
-        Box::pin(self.classify_login_page(&text, None)).await
+        Box::pin(self.classify_login_page(&text, None, false)).await
     }
 
     /// 刷新验证码,返回新的验证码图片信息
@@ -1082,17 +1201,36 @@ impl JmsClient {
 
     /// 从登录页 HTML 中提取错误提示文本
     fn extract_login_error(html: &str) -> Option<String> {
-        let re = regex::Regex::new(r#"<div[^>]*class\s*=\s*['"]alert[^'"]*['"][^>]*>(.*?)</div>"#)
-            .ok()?;
-        re.captures(html)
-            .and_then(|c| c.get(1))
-            .map(|m| {
-                let s = m.as_str();
-                // 去掉 HTML 标签并清理空白
-                let s = regex::Regex::new(r"<[^>]+>").unwrap().replace_all(s, "");
-                s.trim().to_string()
-            })
-            .filter(|s| !s.is_empty())
+        let patterns = [
+            r#"<div[^>]*class\s*=\s*['"][^'"]*alert[^'"]*['"][^>]*>(.*?)</div>"#,
+            r#"<ul[^>]*class\s*=\s*['"][^'"]*errorlist[^'"]*['"][^>]*>(.*?)</ul>"#,
+            r#"<(?:span|div|p)[^>]*class\s*=\s*['"][^'"]*(?:help-block|invalid-feedback|text-danger|error-message)[^'"]*['"][^>]*>(.*?)</(?:span|div|p)>"#,
+        ];
+
+        for pattern in patterns {
+            if let Ok(re) = regex::Regex::new(pattern) {
+                if let Some(caps) = re.captures(html) {
+                    if let Some(m) = caps.get(1) {
+                        let s = m.as_str();
+                        let s = regex::Regex::new(r"<[^>]+>").unwrap().replace_all(s, " ");
+                        let s = s
+                            .replace("&times;", "")
+                            .replace("&nbsp;", " ")
+                            .replace("&quot;", "\"")
+                            .replace("&apos;", "'")
+                            .replace("&lt;", "<")
+                            .replace("&gt;", ">")
+                            .replace("&amp;", "&");
+                        let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+                        let trimmed = s.trim().to_string();
+                        if !trimmed.is_empty() {
+                            return Some(trimmed);
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// 使用 jms_public_key（PEM RSA 公钥）加密密码
@@ -1146,7 +1284,7 @@ impl JmsClient {
             .map_err(|e| anyhow::anyhow!("AES 加密密码失败: {e}"))?;
 
         Ok(format!(
-            "{}:{}",
+            "{}::encrypted::{}",
             base64::engine::general_purpose::STANDARD.encode(encrypted_key),
             base64::engine::general_purpose::STANDARD.encode(encrypted_password)
         ))
@@ -1213,7 +1351,10 @@ pub enum WebLoginResult {
     /// 登录成功,获得已认证 session
     Success { session_id: String },
     /// 需要输入图片验证码
-    CaptchaRequired(CaptchaInfo),
+    CaptchaRequired {
+        info: CaptchaInfo,
+        error: Option<String>,
+    },
     /// 需要输入 MFA 验证码
     MfaRequired,
 }
@@ -1310,6 +1451,27 @@ mod tests {
         assert_eq!(
             JmsClient::parse_session_id("sessionid=xyz98765; Path=/"),
             Some("xyz98765".to_string())
+        );
+    }
+
+    #[test]
+    fn extracts_login_errors_from_various_formats() {
+        let alert_html = r#"<div class="alert alert-danger">用户名或密码错误</div>"#;
+        assert_eq!(
+            JmsClient::extract_login_error(alert_html),
+            Some("用户名或密码错误".to_string())
+        );
+
+        let help_block_html = r#"<div class="form-group has-error"><span class="help-block">Verification code is invalid.</span></div>"#;
+        assert_eq!(
+            JmsClient::extract_login_error(help_block_html),
+            Some("Verification code is invalid.".to_string())
+        );
+
+        let errorlist_html = r#"<ul class="errorlist"><li>验证码错误</li></ul>"#;
+        assert_eq!(
+            JmsClient::extract_login_error(errorlist_html),
+            Some("验证码错误".to_string())
         );
     }
 }

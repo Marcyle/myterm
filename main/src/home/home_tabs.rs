@@ -273,11 +273,16 @@ impl HomePage {
                     return;
                 };
 
-                let account_name = koko_params.account_name.clone().unwrap_or_default();
+                let account_param = koko_params
+                    .account_id
+                    .clone()
+                    .or_else(|| koko_params.account_name.clone())
+                    .unwrap_or_default();
                 let client = jms_context.client.clone();
                 let jms_context_clone = jms_context.clone();
                 let asset_id_for_new_params = asset_id.clone();
-                let account_name_for_new_params = account_name.clone();
+                let account_name_for_new_params = koko_params.account_name.clone();
+                let account_id_for_new_params = koko_params.account_id.clone();
                 let source = request.source.clone();
                 let placement = request.placement;
                 let pane_index = request.pane_index;
@@ -288,16 +293,24 @@ impl HomePage {
                         .background_executor()
                         .spawn(async move {
                             let mut client = client;
-                            client.create_connect_token(&asset_id, &account_name).await
+                            let r = client.create_connect_token(&asset_id, &account_param).await;
+                            let ticket = if let Ok(ref token) = r {
+                                client.create_koko_ticket(&token.id).await
+                            } else {
+                                None
+                            };
+                            (r, ticket)
                         })
                         .await;
 
                     match result {
-                        Ok(token) => {
+                        (Ok(token), ticket) => {
                             let new_params = jms::KokoConnectParams {
                                 token_id: token.id,
+                                ticket,
                                 asset_id: Some(asset_id_for_new_params),
-                                account_name: Some(account_name_for_new_params),
+                                account_name: account_name_for_new_params,
+                                account_id: account_id_for_new_params,
                                 ..koko_params
                             };
                             let mut jms_context_clone = jms_context_clone;
@@ -337,7 +350,7 @@ impl HomePage {
                                 }
                             });
                         }
-                        Err(e) => {
+                        (Err(e), _) => {
                             tracing::warn!("JMS 分屏失败: {}", e);
                             let _ = cx.update(|cx| {
                                 if let Some(window_id) = cx.active_window() {
@@ -863,9 +876,14 @@ impl HomePage {
                     return;
                 };
 
-                let account_name = koko_params.account_name.clone().unwrap_or_default();
+                let account_param = koko_params
+                    .account_id
+                    .clone()
+                    .or_else(|| koko_params.account_name.clone())
+                    .unwrap_or_default();
                 let asset_id_for_new_params = asset_id.clone();
-                let account_name_for_new_params = account_name.clone();
+                let account_name_for_new_params = koko_params.account_name.clone();
+                let account_id_for_new_params = koko_params.account_id.clone();
                 let client = jms_context.client.clone();
                 let jms_context_clone = jms_context.clone();
 
@@ -874,16 +892,24 @@ impl HomePage {
                         .background_executor()
                         .spawn(async move {
                             let mut client = client;
-                            client.create_connect_token(&asset_id, &account_name).await
+                            let r = client.create_connect_token(&asset_id, &account_param).await;
+                            let ticket = if let Ok(ref token) = r {
+                                client.create_koko_ticket(&token.id).await
+                            } else {
+                                None
+                            };
+                            (r, ticket)
                         })
                         .await;
 
                     match result {
-                        Ok(token) => {
+                        (Ok(token), ticket) => {
                             let new_params = jms::KokoConnectParams {
                                 token_id: token.id,
+                                ticket,
                                 asset_id: Some(asset_id_for_new_params),
-                                account_name: Some(account_name_for_new_params),
+                                account_name: account_name_for_new_params,
+                                account_id: account_id_for_new_params,
                                 ..koko_params
                             };
                             // 复制出的标签页已经是连接状态，不能再是占位终端，
@@ -906,7 +932,7 @@ impl HomePage {
                                 }
                             });
                         }
-                        Err(e) => {
+                        (Err(e), _) => {
                             tracing::warn!("复制 JMS Koko 终端失败: {}", e);
                             let _ = cx.update(|cx| {
                                 if let Some(window_id) = cx.active_window() {

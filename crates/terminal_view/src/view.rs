@@ -2950,7 +2950,11 @@ impl TerminalView {
         let Some(asset_id) = old_params.asset_id.clone() else {
             return;
         };
-        let account_name = old_params.account_name.clone().unwrap_or_default();
+        let account_param = old_params
+            .account_id
+            .clone()
+            .or_else(|| old_params.account_name.clone())
+            .unwrap_or_default();
 
         self.jms_reconnect_in_flight = true;
         cx.notify();
@@ -2961,16 +2965,23 @@ impl TerminalView {
                 .background_executor()
                 .spawn(async move {
                     let mut client = client;
-                    client.create_connect_token(&asset_id, &account_name).await
+                    let r = client.create_connect_token(&asset_id, &account_param).await;
+                    let ticket = if let Ok(ref token) = r {
+                        client.create_koko_ticket(&token.id).await
+                    } else {
+                        None
+                    };
+                    (r, ticket)
                 })
                 .await;
 
             let _ = this.update(cx, |this, cx| {
                 this.jms_reconnect_in_flight = false;
                 match result {
-                    Ok(token) => {
+                    (Ok(token), ticket) => {
                         let new_params = jms::KokoConnectParams {
                             token_id: token.id,
+                            ticket,
                             ..old_params
                         };
                         this.koko_params = Some(new_params.clone());
@@ -2978,7 +2989,7 @@ impl TerminalView {
                             terminal.connect_jms_koko(new_params, cx);
                         });
                     }
-                    Err(error) => {
+                    (Err(error), _) => {
                         tracing::warn!("JMS 重连失败: {}", error);
                     }
                 }

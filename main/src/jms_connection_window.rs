@@ -323,13 +323,13 @@ impl JmsConnectionWindow {
                 });
                 Self::start_load_asset_tree(this, cx).await;
             }
-            Ok(jms::WebLoginResult::CaptchaRequired(info)) => {
+            Ok(jms::WebLoginResult::CaptchaRequired { info, error }) => {
                 let _ = this.update(cx, |this, cx| {
                     this.client = Some(client);
                     this.captcha_image_path = Self::persist_captcha_image(&info);
                     this.captcha_info = Some(info);
                     this.state = ConnectionState::CaptchaInput;
-                    this.error_message = None;
+                    this.error_message = error;
                     cx.notify();
                 });
             }
@@ -343,21 +343,11 @@ impl JmsConnectionWindow {
             }
             Err(e) => {
                 let _ = this.update(cx, |this, cx| {
-                    let was_captcha = this.state == ConnectionState::CaptchaInput;
                     this.client = Some(client);
-                    // 回退:验证码/MFA 状态保持,否则回到输入
-                    this.state = match this.state {
-                        ConnectionState::CaptchaInput => ConnectionState::CaptchaInput,
-                        ConnectionState::MfaInput => ConnectionState::MfaInput,
-                        _ => ConnectionState::Input,
-                    };
+                    // 认证错误（如用户名或密码错误），回退到凭据输入表单，方便用户检查修改
+                    this.state = ConnectionState::Input;
                     this.error_message = Some(e.to_string());
                     cx.notify();
-
-                    // 提交验证码失败后，原验证码已在服务端失效，自动触发一次刷新保证界面展示有效验证码
-                    if was_captcha {
-                        this.handle_refresh_captcha(cx);
-                    }
                 });
             }
         }
@@ -365,7 +355,7 @@ impl JmsConnectionWindow {
 
     /// 提交图片验证码继续登录
     fn handle_captcha_submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let captcha = self.captcha_input.read(cx).text().to_string();
+        let captcha = self.captcha_input.read(cx).text().to_string().trim().to_string();
         if captcha.is_empty() {
             self.error_message = Some("请输入验证码".to_string());
             cx.notify();
@@ -422,7 +412,6 @@ impl JmsConnectionWindow {
                     Ok(info) => {
                         this.captcha_image_path = Self::persist_captcha_image(&info);
                         this.captcha_info = Some(info);
-                        this.error_message = None;
                     }
                     Err(e) => this.error_message = Some(format!("刷新验证码失败: {e}")),
                 }
@@ -806,16 +795,30 @@ impl JmsConnectionWindow {
                     .child(Input::new(&self.mfa_input).w_full()),
             )
             .child(
-                // 验证按钮
-                h_flex().justify_end().child(
-                    Button::new("verify-button")
-                        .primary()
-                        .label("验证")
-                        .disabled(is_verifying)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.handle_mfa_verify(window, cx);
-                        })),
-                ),
+                // 操作按钮
+                h_flex()
+                    .justify_between()
+                    .items_center()
+                    .child(
+                        Button::new("mfa-back-button")
+                            .ghost()
+                            .label("返回")
+                            .disabled(is_verifying)
+                            .on_click(cx.listener(|this, _, _window, cx| {
+                                this.state = ConnectionState::Input;
+                                this.error_message = None;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("verify-button")
+                            .primary()
+                            .label("验证")
+                            .disabled(is_verifying)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.handle_mfa_verify(window, cx);
+                            })),
+                    ),
             )
             .into_any_element()
     }
@@ -869,15 +872,29 @@ impl JmsConnectionWindow {
                     .child(Input::new(&self.captcha_input).w_full()),
             )
             .child(
-                h_flex().justify_end().child(
-                    Button::new("captcha-submit-button")
-                        .primary()
-                        .label("提交")
-                        .disabled(is_verifying)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.handle_captcha_submit(window, cx);
-                        })),
-                ),
+                h_flex()
+                    .justify_between()
+                    .items_center()
+                    .child(
+                        Button::new("captcha-back-button")
+                            .ghost()
+                            .label("返回")
+                            .disabled(is_verifying)
+                            .on_click(cx.listener(|this, _, _window, cx| {
+                                this.state = ConnectionState::Input;
+                                this.error_message = None;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("captcha-submit-button")
+                            .primary()
+                            .label("提交")
+                            .disabled(is_verifying)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.handle_captcha_submit(window, cx);
+                            })),
+                    ),
             )
             .into_any_element()
     }
