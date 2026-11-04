@@ -13,8 +13,8 @@ pub enum OscEvent {
     PromptStart,
     /// 输入区域开始（OSC 133;B）
     InputStart,
-    /// 命令执行开始（OSC 133;C）
-    CommandStart,
+    /// 命令执行开始（OSC 133;C,可带 base64 编码的命令文本,供 agent 识别用）
+    CommandStart { command: Option<String> },
     /// 命令执行完毕（OSC 133;D;<exit_code>）
     CommandFinished { exit_code: i32 },
     /// 工作目录变更（OSC 7;file://host/path）
@@ -74,7 +74,19 @@ pub fn parse_osc_payload(payload: &str) -> Option<OscEvent> {
         return match rest {
             "A" => Some(OscEvent::PromptStart),
             "B" => Some(OscEvent::InputStart),
-            "C" => Some(OscEvent::CommandStart),
+            "C" => Some(OscEvent::CommandStart { command: None }),
+            c if c.starts_with("C;") => {
+                // preexec 上报的原始命令文本(无 base64 依赖),剥离可能破坏
+                // 帧结构的控制字符后透传,供 agent 识别用
+                let raw = &c[2..];
+                let command: String = raw
+                    .chars()
+                    .filter(|ch| !matches!(ch, '\x07' | '\x1b' | '\r' | '\n'))
+                    .collect();
+                let command = command.trim().to_string();
+                let command = if command.is_empty() { None } else { Some(command) };
+                Some(OscEvent::CommandStart { command })
+            }
             d if d.starts_with("D;") => {
                 let code = d[2..].parse::<i32>().unwrap_or(-1);
                 Some(OscEvent::CommandFinished { exit_code: code })
@@ -121,7 +133,10 @@ mod tests {
 
     #[test]
     fn parse_osc_133_command_start() {
-        assert_eq!(parse_osc_payload("133;C"), Some(OscEvent::CommandStart));
+        assert_eq!(
+            parse_osc_payload("133;C"),
+            Some(OscEvent::CommandStart { command: None })
+        );
     }
 
     #[test]
@@ -175,7 +190,30 @@ mod tests {
         let events = extract_osc_events(data);
 
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0], OscEvent::CommandStart);
+        assert_eq!(events[0], OscEvent::CommandStart { command: None });
+    }
+
+    #[test]
+    fn parse_osc_133_c_with_raw_command() {
+        let payload = "133;C;claude";
+        assert_eq!(
+            parse_osc_payload(payload),
+            Some(OscEvent::CommandStart {
+                command: Some("claude".to_string())
+            })
+        );
+        // 带 UTF-8 与空格的命令原样透传
+        assert_eq!(
+            parse_osc_payload("133;C;npm run dev --port 3000"),
+            Some(OscEvent::CommandStart {
+                command: Some("npm run dev --port 3000".to_string())
+            })
+        );
+        // 空 payload 兼容:裸 133;C 仍解析为无命令的 CommandStart
+        assert_eq!(
+            parse_osc_payload("133;C"),
+            Some(OscEvent::CommandStart { command: None })
+        );
     }
 
     #[test]

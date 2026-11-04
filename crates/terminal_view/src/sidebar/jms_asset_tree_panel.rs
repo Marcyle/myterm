@@ -344,7 +344,9 @@ impl JmsAssetTreePanel {
                 .background_executor()
                 .spawn(async move {
                     let mut client = client;
-                    let r = client.create_connect_token(&asset_id, &account_token_param).await;
+                    let r = client
+                        .create_connect_token(&asset_id, &account_token_param)
+                        .await;
                     let ticket = if let Ok(ref token) = r {
                         client.create_koko_ticket(&token.id).await
                     } else {

@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod history;
 pub mod koko_backend;
 pub mod osc;

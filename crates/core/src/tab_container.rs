@@ -2,8 +2,8 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyView, App, AppContext as _, Context, Corner, Decorations, Entity, EntityId, EventEmitter,
     FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Render, RenderOnce, SharedString, Styled, Task, Window, WindowControlArea, div,
-    px,
+    ParentElement, Render, RenderOnce, SharedString, Styled, Subscription, Task, Window,
+    WindowControlArea, div, px,
 };
 use gpui::{ScrollHandle, StatefulInteractiveElement as _};
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -263,7 +263,13 @@ pub struct TabItem {
     from: SharedString,
     metadata: HashMap<String, String>,
     content: Arc<dyn TabContentView>,
+    /// 延迟订阅闭包:TabContainer 拿到自身 Context 后订阅内容实体的
+    /// StateChanged 事件并触发重绘,使 tab 图标/标题能随内容状态动态更新。
+    /// 已消费后置 None;恢复(rebuild)的占位 tab 为 None。
+    state_watcher: Option<TabStateWatcher>,
 }
+
+type TabStateWatcher = Box<dyn FnOnce(&mut Context<TabContainer>) -> Subscription>;
 
 impl TabItem {
     pub fn new<T: TabContent>(
@@ -271,11 +277,19 @@ impl TabItem {
         from: impl Into<String>,
         content: Entity<T>,
     ) -> Self {
+        let entity_for_watch = content.clone();
         Self {
             id: SharedString::from(id.into()),
             from: SharedString::from(from.into()),
             metadata: HashMap::new(),
             content: Arc::new(content),
+            state_watcher: Some(Box::new(move |cx| {
+                cx.subscribe(&entity_for_watch, |_, _, event: &TabContentEvent, cx| {
+                    if matches!(event, TabContentEvent::StateChanged) {
+                        cx.notify();
+                    }
+                })
+            })),
         }
     }
 
@@ -721,6 +735,8 @@ pub struct TabContainer {
     tab_bar_scroll_handle: ScrollHandle,
     list_popover_open: bool,
     tab_list: Option<Entity<ListState<TabListDelegate>>>,
+    /// 内容实体 StateChanged 订阅,保持存活以驱动 tab 图标/标题重绘
+    state_subscriptions: Vec<Subscription>,
     closing_tabs: HashSet<SharedString>,
     show_window_controls: bool,
     /// 点击标题栏"左右分屏"按钮时的回调
@@ -758,6 +774,7 @@ impl TabContainer {
             tab_bar_scroll_handle: ScrollHandle::new(),
             list_popover_open: false,
             tab_list: None,
+            state_subscriptions: Vec::new(),
             closing_tabs: HashSet::new(),
             show_window_controls: false,
             on_split_horizontal: None,
@@ -902,8 +919,20 @@ impl TabContainer {
         cx.notify();
     }
 
+    /// 订阅 tab 内容实体的状态变化(消费 TabItem 携带的延迟订阅闭包)。
+    /// 内容实体 emit TabContentEvent::StateChanged 时通知 TabContainer 重绘,
+    /// tab 栏因此能实时反映 agent 图标、标题等动态状态。
+    fn watch_tab_state(&mut self, tab: &mut TabItem, cx: &mut Context<Self>) {
+        if let Some(watcher) = tab.state_watcher.take() {
+            let subscription = watcher(cx);
+            self.state_subscriptions.push(subscription);
+        }
+    }
+
     /// Add a new tab
     pub fn add_tab(&mut self, tab: TabItem, cx: &mut Context<Self>) {
+        let mut tab = tab;
+        self.watch_tab_state(&mut tab, cx);
         self.tabs.push(tab);
         cx.emit(TabContainerEvent::LayoutChanged);
         cx.notify();
@@ -912,6 +941,8 @@ impl TabContainer {
     /// Add a new tab and activate it
     pub fn add_and_activate_tab(&mut self, tab: TabItem, cx: &mut Context<Self>) {
         let id = tab.id().to_string();
+        let mut tab = tab;
+        self.watch_tab_state(&mut tab, cx);
         self.tabs.push(tab);
         self.active_index = self.tabs.len() - 1;
         self.pinned_tab_active = false;
@@ -956,6 +987,8 @@ impl TabContainer {
     ) {
         let id = tab.id().to_string();
         let focus_handle = tab.content.focus_handle(cx);
+        let mut tab = tab;
+        self.watch_tab_state(&mut tab, cx);
         self.tabs.push(tab);
         self.active_index = self.tabs.len() - 1;
         self.pinned_tab_active = false;
@@ -1475,6 +1508,8 @@ impl TabContainer {
                     from: tab_state.from.clone(),
                     metadata: tab_state.metadata.clone(),
                     content,
+                    // 恢复的占位 tab 无具体实体类型可订阅;激活时内容会被重建并重新走 TabItem::new
+                    state_watcher: None,
                 });
             }
         }

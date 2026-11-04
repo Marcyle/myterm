@@ -137,8 +137,8 @@ pub enum TerminalEvent {
     PromptStart,
     /// shell prompt 已渲染完成，进入可输入状态（OSC 133;B）
     InputStart,
-    /// shell 命令开始执行（OSC 133;C）
-    CommandStart,
+    /// shell 命令开始执行（OSC 133;C,可带 base64 命令文本）
+    CommandStart { command: Option<String> },
     /// 终端标题已更改
     TitleChanged(String),
     /// 终端响铃

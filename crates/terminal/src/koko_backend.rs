@@ -153,8 +153,8 @@ impl KokoBackend {
                                         OscEvent::InputStart => {
                                             let _ = event_tx.send(TerminalEvent::InputStart);
                                         }
-                                        OscEvent::CommandStart => {
-                                            let _ = event_tx.send(TerminalEvent::CommandStart);
+                                        OscEvent::CommandStart { command } => {
+                                            let _ = event_tx.send(TerminalEvent::CommandStart { command });
                                         }
                                         OscEvent::CommandFinished { exit_code } => {
                                             let _ = event_tx.send(TerminalEvent::CommandFinished { exit_code });

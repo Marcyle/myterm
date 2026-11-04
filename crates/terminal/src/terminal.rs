@@ -38,6 +38,7 @@ use std::ffi::OsStr;
 #[cfg(any(test, target_os = "windows"))]
 use std::path::Path;
 
+use crate::agent::{self, AgentKind};
 use crate::history::{
     HistoryEntry, PERSISTED_HISTORY_LIMIT, SESSION_HISTORY_LIMIT, ShellHistoryFormat,
     collect_history_search_results, collect_history_suggestions_with_cwd, parse_shell_history,
@@ -667,6 +668,11 @@ pub struct Terminal {
 
     /// 终端标题
     title: String,
+    /// 正在运行的 AI agent(None = 未检测到或非 agent 命令)
+    running_agent: Option<AgentKind>,
+    /// 是否检测到 shell integration(OSC 133 事件)。
+    /// 激活后以命令检测为准,标题启发式仅用于本地终端等无 integration 的场景。
+    shell_integration_active: bool,
     /// 当前工作目录（由 OSC 7 更新，仅 SSH 终端）
     current_working_dir: Option<String>,
     /// 子进程退出码
@@ -792,6 +798,8 @@ impl Terminal {
             term,
             backend: None,
             title: String::new(),
+            running_agent: None,
+            shell_integration_active: false,
             current_working_dir: None,
             child_exited: None,
             connection_state: ConnectionState::Disconnected { error: Some(error) },
@@ -874,6 +882,8 @@ impl Terminal {
             term,
             backend: Some(Box::new(local_backend)),
             title: String::new(),
+            running_agent: None,
+            shell_integration_active: false,
             current_working_dir: None,
             child_exited: None,
             connection_state: ConnectionState::Connected,
@@ -982,6 +992,8 @@ impl Terminal {
             term,
             backend: None,
             title: String::new(),
+            running_agent: None,
+            shell_integration_active: false,
             current_working_dir: None,
             child_exited: None,
             connection_state: ConnectionState::Connecting,
@@ -1042,6 +1054,8 @@ impl Terminal {
             term,
             backend: None,
             title,
+            running_agent: None,
+            shell_integration_active: false,
             current_working_dir: None,
             child_exited: None,
             connection_state: ConnectionState::Connecting,
@@ -1084,6 +1098,8 @@ impl Terminal {
             term,
             backend: None,
             title: String::new(),
+            running_agent: None,
+            shell_integration_active: false,
             current_working_dir: None,
             child_exited: None,
             connection_state: ConnectionState::Disconnected { error: None },
@@ -1620,15 +1636,30 @@ impl Terminal {
                 cx.emit(TerminalModelEvent::SshMfaChanged);
             }
             TerminalEvent::PromptStart => {
+                // 回到提示符 = 命令窗口结束,同时激活 shell integration 标记
+                self.shell_integration_active = true;
+                self.running_agent = None;
                 cx.emit(TerminalModelEvent::PromptStart);
             }
             TerminalEvent::InputStart => {
+                self.shell_integration_active = true;
+                self.running_agent = None;
                 cx.emit(TerminalModelEvent::InputStart);
             }
-            TerminalEvent::CommandStart => {
+            TerminalEvent::CommandStart { command } => {
+                self.shell_integration_active = true;
+                // 粘性检测:仅命中已知 agent 时覆盖,避免管道后续命令抹掉已识别的 agent
+                if let Some(kind) = command.as_deref().and_then(agent::detect_from_command) {
+                    self.running_agent = Some(kind);
+                }
                 cx.emit(TerminalModelEvent::CommandStart);
             }
             TerminalEvent::TitleChanged(title) => {
+                // 无 shell integration 的会话(本地终端/PowerShell 等)用标题启发式:
+                // agent 设置的标题匹配已知特征则点亮图标,标题变走则清除。
+                if !self.shell_integration_active {
+                    self.running_agent = agent::detect_from_title(&title);
+                }
                 self.title = title.clone();
                 cx.emit(TerminalModelEvent::TitleChanged(title));
             }
@@ -1637,6 +1668,7 @@ impl Terminal {
             }
             TerminalEvent::ChildExit(code) => {
                 self.child_exited = Some(code);
+                self.running_agent = None;
                 cx.emit(TerminalModelEvent::ChildExit(code));
             }
             TerminalEvent::ClipboardStore(_ty, data) => {
@@ -1651,6 +1683,7 @@ impl Terminal {
             }
             TerminalEvent::CommandFinished { exit_code } => {
                 // 命令执行完毕（OSC 133;D）— 将退出码记录到最后一条历史条目
+                self.running_agent = None;
                 tracing::debug!("命令执行完毕，退出码: {}", exit_code);
                 if let Some(last) = self.session_history.back_mut() {
                     last.exit_code = Some(exit_code);
@@ -1672,6 +1705,11 @@ impl Terminal {
     /// 获取终端标题
     pub fn title(&self) -> &str {
         &self.title
+    }
+
+    /// 获取当前运行的 AI agent(None = 未检测到)
+    pub fn running_agent(&self) -> Option<AgentKind> {
+        self.running_agent.clone()
     }
 
     /// 获取子进程退出码
@@ -1919,6 +1957,8 @@ impl Terminal {
     }
 
     fn reset_terminal_surface(&mut self) {
+        self.running_agent = None;
+        self.shell_integration_active = false;
         let Some(event_tx) = self.event_tx.clone() else {
             return;
         };
@@ -1951,6 +1991,8 @@ impl Terminal {
     /// Closing a pane must release the potentially large scrollback grid even
     /// if the GPUI entity itself remains alive briefly during layout cleanup.
     fn release_terminal_surface(&mut self) {
+        self.running_agent = None;
+        self.shell_integration_active = false;
         let (event_tx, _event_rx) = unbounded_channel::<TerminalEvent>();
         let event_proxy = GpuiEventProxy::new(event_tx);
         let term_config = TermConfig {
@@ -2456,6 +2498,8 @@ mod tests {
             term,
             backend: None,
             title: "old title".to_string(),
+            running_agent: None,
+            shell_integration_active: false,
             current_working_dir: Some("/tmp/project".to_string()),
             child_exited: Some(255),
             connection_state: ConnectionState::Connected,

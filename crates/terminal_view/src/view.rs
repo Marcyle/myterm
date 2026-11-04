@@ -14,6 +14,14 @@ use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
 use gpui_component::{
     BlinkCursor, Icon, IconName, Sizable, Size, WindowExt, h_flex, kbd::Kbd, v_flex,
 };
+
+/// 指向 assets 中 agent SVG 的图标句柄(实现 IconNamed 以接入 Icon 体系)
+pub struct AgentIcon(pub &'static str);
+impl gpui_component::IconNamed for AgentIcon {
+    fn path(self) -> SharedString {
+        SharedString::from(self.0)
+    }
+}
 use lru::LruCache;
 use one_core::gpui_tokio::Tokio;
 use one_core::keybindings::{
@@ -58,6 +66,7 @@ use rust_i18n::t;
 use sftp::{RusshSftpClient, SftpClient};
 use std::ops::Deref;
 use terminal::LocalConfig;
+use terminal::agent::AgentKind;
 use terminal::terminal::{
     ConnectionState, Terminal, TerminalConnectionKind, TerminalModelEvent, TerminalScrollProxy,
     resolve_local_working_dir,
@@ -2381,15 +2390,18 @@ impl TerminalView {
             | TerminalModelEvent::InputStart
             | TerminalModelEvent::CommandStart => {
                 cx.notify();
+                // agent 状态随命令窗口变化,刷新 tab 栏与分屏标题栏
+                self.emit_tab_state_changed(cx);
             }
             TerminalModelEvent::TitleChanged(_) => {
-                cx.emit(TabContentEvent::StateChanged);
+                self.emit_tab_state_changed(cx);
             }
             TerminalModelEvent::Bell => {
                 // 可选：播放声音或闪烁标签
             }
             TerminalModelEvent::ChildExit(_) => {
                 cx.notify();
+                self.emit_tab_state_changed(cx);
             }
             TerminalModelEvent::ClipboardStore(data) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(data.clone()));
@@ -2503,6 +2515,32 @@ impl TerminalView {
     /// 获取连接类型（本地 / SSH）
     pub fn connection_kind(&self, cx: &App) -> TerminalConnectionKind {
         self.terminal.read(cx).connection_kind()
+    }
+
+    /// 获取当前运行的 AI agent(供 tab 图标/标题展示)
+    pub fn running_agent(&self, cx: &App) -> Option<AgentKind> {
+        self.terminal.read(cx).running_agent()
+    }
+
+    /// agent/tab 相关状态变化时统一广播:
+    /// 外层 TabContainer 重绘 tab 图标,dock 分屏标题栏同步刷新。
+    fn emit_tab_state_changed(&mut self, cx: &mut Context<Self>) {
+        cx.emit(TabContentEvent::StateChanged);
+        if let Some(tab_panel) = self.tab_panel.clone() {
+            tab_panel.update(cx, |_, cx| cx.notify());
+        }
+    }
+
+    /// 当前 tab 图标:运行 agent 时用对应品牌图标,否则回落终端图标
+    pub fn tab_icon(&self, cx: &App) -> Icon {
+        match self.running_agent(cx) {
+            Some(kind) => {
+                let (path, color) = kind.icon_asset();
+                let icon = Icon::new(AgentIcon(path));
+                if color { icon.color() } else { icon.mono() }
+            }
+            None => IconName::SquareTerminal.mono(),
+        }
     }
 
     /// 获取 SSH 连接 ID（本地终端返回 None）
@@ -4969,11 +5007,18 @@ impl Panel for TerminalView {
     }
 
     fn title(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if let Some(asset_name) = self.jms_asset_name(cx) {
+        let label: AnyElement = if let Some(asset_name) = self.jms_asset_name(cx) {
             asset_name.into_any_element()
         } else {
             <TerminalView as TabContent>::title(self, cx).into_any_element()
-        }
+        };
+        // 分屏标题栏:agent 图标 + 标题文本
+        h_flex()
+            .gap_1p5()
+            .items_center()
+            .child(self.tab_icon(cx))
+            .child(label)
+            .into_any_element()
     }
 
     fn tab_name(&self, cx: &App) -> Option<SharedString> {
@@ -5009,7 +5054,6 @@ impl TabContent for TerminalView {
     fn content_key(&self) -> &'static str {
         "Terminal"
     }
-
     fn title(&self, cx: &App) -> SharedString {
         let terminal = self.terminal.read(cx);
         let base_title = if terminal.connection_kind() == TerminalConnectionKind::JmsKoko {
@@ -5041,13 +5085,8 @@ impl TabContent for TerminalView {
             "Terminal".to_string()
         };
 
-        // 所有连接类型的分屏都保留基础标题，并在末尾附加 pane 序号，
-        // 避免用默认的裸 Tab1/Tab2 覆盖资产、账号或连接名称。
-        if let Some(index) = self.pane_index {
-            return SharedString::from(format!("{} (Tab{})", base_title, index));
-        }
-
-        // 如果有序号，添加到标题后
+        // 外层 tab 的序号后缀仅用于区分多个同类 tab;分屏不再附加 (TabN) 后缀,
+        // 标题栏的 agent 图标与标题文本已足够辨识。
         if let Some(index) = self.tab_index {
             SharedString::from(format!("{}({})", base_title, index))
         } else {
@@ -5055,8 +5094,8 @@ impl TabContent for TerminalView {
         }
     }
 
-    fn icon(&self, _cx: &App) -> Option<Icon> {
-        Some(IconName::SquareTerminal.mono())
+    fn icon(&self, cx: &App) -> Option<Icon> {
+        Some(self.tab_icon(cx))
     }
 
     fn closeable(&self, _cx: &App) -> bool {

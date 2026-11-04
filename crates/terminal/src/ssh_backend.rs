@@ -285,8 +285,8 @@ impl SshBackend {
                                                 shell_ready = true;
                                             }
                                         }
-                                        OscEvent::CommandStart => {
-                                            let _ = event_tx.send(TerminalEvent::CommandStart);
+                                        OscEvent::CommandStart { command } => {
+                                            let _ = event_tx.send(TerminalEvent::CommandStart { command });
                                         }
                                         OscEvent::CommandFinished { exit_code } => {
                                             // 133;D: 命令执行完毕

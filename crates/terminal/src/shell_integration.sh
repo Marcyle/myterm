@@ -16,7 +16,21 @@ __onetcli_prompt_end() {
 }
 
 __onetcli_command_start() {
-    __onetcli_emit_osc '133;C'
+    # OSC 133;C 携带原始命令文本,供终端侧做 agent 识别。
+    # 纯 bash 实现,零外部工具依赖(PTY 环境的 PATH 可能缺 coreutils):
+    # 剥离 BEL/ESC/CR/LF,截断 200 字符,去首尾空白。
+    local cmd="${1:-}"
+    if [[ -n "$cmd" ]]; then
+        cmd="${cmd//[$'\a\e\r\n']/}"
+        cmd="${cmd:0:200}"
+        cmd="${cmd#"${cmd%%[![:space:]]*}"}"
+        cmd="${cmd%"${cmd##*[![:space:]]}"}"
+    fi
+    if [[ -n "$cmd" ]]; then
+        __onetcli_emit_osc "133;C;${cmd}"
+    else
+        __onetcli_emit_osc '133;C'
+    fi
 }
 
 __onetcli_command_done() {
@@ -69,7 +83,8 @@ if [[ -n "${ZSH_VERSION:-}" ]]; then
 
     __onetcli_preexec_zsh() {
         __ONETCLI_COMMAND_STARTED=1
-        __onetcli_command_start
+        # zsh preexec 第一个参数即完整命令行
+        __onetcli_command_start "${1:-}"
     }
 
     precmd_functions+=(__onetcli_precmd_zsh)
@@ -86,8 +101,9 @@ else
     __onetcli_preexec_bash() {
         [[ "${__ONETCLI_IN_PRECMD:-0}" == "1" ]] && return
         [[ "${BASH_COMMAND:-}" == __onetcli_* ]] && return
+        local cmd="${BASH_COMMAND:-}"
         __ONETCLI_COMMAND_STARTED=1
-        __onetcli_command_start
+        __onetcli_command_start "$cmd"
     }
 
     if [[ -z "${PROMPT_COMMAND:-}" ]]; then

@@ -355,7 +355,13 @@ impl JmsConnectionWindow {
 
     /// 提交图片验证码继续登录
     fn handle_captcha_submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let captcha = self.captcha_input.read(cx).text().to_string().trim().to_string();
+        let captcha = self
+            .captcha_input
+            .read(cx)
+            .text()
+            .to_string()
+            .trim()
+            .to_string();
         if captcha.is_empty() {
             self.error_message = Some("请输入验证码".to_string());
             cx.notify();

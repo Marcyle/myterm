@@ -1,0 +1,44 @@
+[
+  {
+    "agent": "claude",
+    "file": "icons/agents/claude.svg",
+    "bytes": 1640
+  },
+  {
+    "agent": "gemini",
+    "file": "icons/agents/gemini.svg",
+    "bytes": 2780
+  },
+  {
+    "agent": "codex",
+    "file": "icons/agents/codex.svg",
+    "bytes": 1611
+  },
+  {
+    "agent": "opencode",
+    "file": "icons/agents/opencode.svg",
+    "bytes": 159
+  },
+  {
+    "agent": "pi",
+    "file": "icons/agents/pi.svg",
+    "bytes": 295
+  },
+  {
+    "agent": "omp",
+    "file": "icons/agents/omp.svg",
+    "bytes": 385,
+    "official": "https://omp.sh/favicon.svg (去底板版); 官方圆角底板版另存 omp-tile.svg"
+  },
+  {
+    "agent": "grok",
+    "file": "icons/agents/grok.svg",
+    "bytes": 680
+  },
+  {
+    "agent": "default",
+    "file": "icons/agents/default.svg",
+    "bytes": 360,
+    "license": "Lucide ISC (lucide bot)"
+  }
+]

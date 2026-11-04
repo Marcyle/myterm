@@ -646,8 +646,13 @@ impl TabContent for TerminalPaneArea {
             .unwrap_or_else(|| "Terminal".into())
     }
 
-    fn icon(&self, _cx: &App) -> Option<Icon> {
-        Some(IconName::SquareTerminal.mono())
+    fn icon(&self, cx: &App) -> Option<Icon> {
+        // 运行 agent 时点亮品牌图标(取活动分屏的状态)
+        Some(
+            self.active_terminal_view(cx)
+                .map(|view| view.read(cx).tab_icon(cx))
+                .unwrap_or_else(|| IconName::SquareTerminal.mono()),
+        )
     }
 
     fn closeable(&self, _cx: &App) -> bool {
