@@ -173,12 +173,21 @@ pub fn init(cx: &mut App) {
     cx.bind_keys(init_keybindings(cx));
     init_action_handlers(cx);
 
-    // 注册内置 JetBrains Mono 字体族（Regular, Light, ExtraLight）
+    // 注册内置等宽字体族（JetBrains Mono、Maple Mono 的多个字重）
     let mut font_bytes = Vec::new();
     for font_file in [
         "fonts/JetBrainsMono-Regular.ttf",
         "fonts/JetBrainsMono-Light.ttf",
         "fonts/JetBrainsMono-ExtraLight.ttf",
+        "fonts/MapleMono-ExtraLight.ttf",
+        "fonts/MapleMono-Light.ttf",
+        "fonts/MapleMono-Regular.ttf",
+        "fonts/MapleMono-Medium.ttf",
+        "fonts/MapleMono-SemiBold.ttf",
+        "fonts/MapleMono-Bold.ttf",
+        "fonts/MapleMono-NF-Regular.ttf",
+        "fonts/MapleMono-NF-Medium.ttf",
+        "fonts/MapleMono-NF-Bold.ttf",
     ] {
         if let Some(font_data) = gpui_component_assets::Assets::get(font_file) {
             font_bytes.push(font_data.data);
@@ -186,9 +195,9 @@ pub fn init(cx: &mut App) {
     }
     if !font_bytes.is_empty() {
         if let Err(err) = cx.text_system().add_fonts(font_bytes) {
-            tracing::warn!("Failed to add embedded JetBrains Mono fonts: {:?}", err);
+            tracing::warn!("Failed to add embedded monospace fonts: {:?}", err);
         } else {
-            tracing::info!("Successfully loaded embedded JetBrains Mono font family");
+            tracing::info!("Successfully loaded embedded monospace font families");
         }
     }
 

@@ -388,6 +388,8 @@ impl TerminalTheme {
             vec![
                 "Menlo", // macOS 默认
                 "JetBrains Mono",
+                "Maple Mono",
+                "Maple Mono NF",
                 "Monaco",
                 "SF Mono",
                 "Courier New",
@@ -401,6 +403,8 @@ impl TerminalTheme {
             vec![
                 "Consolas", // Windows 默认
                 "JetBrains Mono",
+                "Maple Mono",
+                "Maple Mono NF",
                 "Cascadia Mono",
                 "Cascadia Code",
                 "Courier New",
@@ -414,6 +418,8 @@ impl TerminalTheme {
             vec![
                 "DejaVu Sans Mono", // Linux 常见默认
                 "JetBrains Mono",
+                "Maple Mono",
+                "Maple Mono NF",
                 "Ubuntu Mono",
                 "Liberation Mono",
                 "Courier New",
