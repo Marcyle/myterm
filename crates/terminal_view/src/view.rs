@@ -2527,7 +2527,8 @@ impl TerminalView {
     fn emit_tab_state_changed(&mut self, cx: &mut Context<Self>) {
         cx.emit(TabContentEvent::StateChanged);
         if let Some(tab_panel) = self.tab_panel.clone() {
-            tab_panel.update(cx, |_, cx| cx.notify());
+            // 面板可能在关闭流程中被移除,升级失败可安全忽略
+            let _ = tab_panel.update(cx, |_, cx| cx.notify());
         }
     }
 
