@@ -204,14 +204,16 @@ pub struct HomePage {
     pub(crate) rail_view: RailView,
     /// 当前选中的工作区分组（None 表示全选）
     pub(crate) selected_group_id: Option<i64>,
+    /// 当前选中的是「默认分组」（未归入任何分组的连接）
+    pub(crate) selected_default_group: bool,
     /// 顶栏协议筛选：None 为全部，Some 为 SSH/JMS 等
     pub(crate) protocol_filter: Option<ConnectionType>,
-    /// 顶栏仅看在线开关
-    pub(crate) online_only_filter: bool,
     /// 批量选择的连接 ID 集合
     pub(crate) selected_connection_ids: HashSet<i64>,
-    /// 导出弹层状态
-    pub(crate) export_popover_open: bool,
+    /// 顶栏溢出弹层（导入/导出）状态
+    pub(crate) toolbar_more_open: bool,
+    /// 溢出弹层当前显示导出表单（false 时显示菜单入口）
+    pub(crate) toolbar_more_export_mode: bool,
     pub(crate) export_scope: ExportScope,
     pub(crate) export_format: ExportFormat,
     pub(crate) export_include_passwords: bool,
@@ -279,10 +281,11 @@ impl HomePage {
             density: CardDensity::Grid,
             rail_view: RailView::All,
             selected_group_id: None,
+            selected_default_group: false,
             protocol_filter: None,
-            online_only_filter: false,
             selected_connection_ids: HashSet::new(),
-            export_popover_open: false,
+            toolbar_more_open: false,
+            toolbar_more_export_mode: false,
             export_scope: ExportScope::All,
             export_format: ExportFormat::Json,
             export_include_passwords: false,
@@ -767,8 +770,9 @@ impl HomePage {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.export_popover_open {
-            self.export_popover_open = false;
+        if self.toolbar_more_open {
+            self.toolbar_more_open = false;
+            self.toolbar_more_export_mode = false;
             cx.notify();
         } else if self.import_modal_open {
             self.import_modal_open = false;
@@ -956,6 +960,12 @@ impl HomePage {
                         .filter(|c| c.workspace_id == Some(gid))
                         .cloned()
                         .collect()
+                } else if self.selected_default_group {
+                    self.connections
+                        .iter()
+                        .filter(|c| self.is_ungrouped(c))
+                        .cloned()
+                        .collect()
                 } else {
                     self.connections.clone()
                 }
@@ -983,7 +993,8 @@ impl HomePage {
         match generate_export_content(items, self.export_format, include_passwords) {
             Ok(content) => match save_export_file(&content, self.export_format) {
                 Ok(path) => {
-                    self.export_popover_open = false;
+                    self.toolbar_more_open = false;
+                    self.toolbar_more_export_mode = false;
                     let filename = path
                         .file_name()
                         .unwrap_or_default()
@@ -1110,7 +1121,6 @@ impl HomePage {
 
     fn visible_connections(&self, cx: &App) -> Vec<StoredConnection> {
         let search_query = self.search_query.read(cx).to_lowercase();
-        let active_conns = cx.global::<ActiveConnections>();
         let mut list: Vec<StoredConnection> = self.connections.clone();
 
         // 1. 左栏视图筛选
@@ -1132,6 +1142,8 @@ impl HomePage {
         // 2. 当前选中分组
         if let Some(gid) = self.selected_group_id {
             list.retain(|c| c.workspace_id == Some(gid));
+        } else if self.selected_default_group {
+            list.retain(|c| self.is_ungrouped(c));
         }
 
         // 3. 顶栏协议筛选
@@ -1139,12 +1151,7 @@ impl HomePage {
             list.retain(|c| c.connection_type == proto);
         }
 
-        // 4. 仅看在线筛选
-        if self.online_only_filter {
-            list.retain(|c| c.id.map_or(false, |id| active_conns.is_active(id)));
-        }
-
-        // 5. 关键词搜索（实时过滤名称、主机、用户、环境、标签、分组）
+        // 4. 关键词搜索（实时过滤名称、主机、用户、环境、标签、分组）
         if !search_query.is_empty() {
             list.retain(|c| self.match_connection(c, &search_query));
         }
@@ -1159,6 +1166,13 @@ impl HomePage {
         }
 
         list
+    }
+
+    /// 连接是否未归入任何分组（workspace_id 为空，或分组已被删除）
+    fn is_ungrouped(&self, conn: &StoredConnection) -> bool {
+        conn.workspace_id.map_or(true, |wid| {
+            !self.workspaces.iter().any(|w| w.id == Some(wid))
+        })
     }
 
     fn select_connection(&mut self, offset: isize, cx: &mut Context<Self>) {
@@ -1818,9 +1832,9 @@ impl HomePage {
     fn clear_connection_filters(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.selected_filter = ConnectionType::All;
         self.protocol_filter = None;
-        self.online_only_filter = false;
         self.rail_view = RailView::All;
         self.selected_group_id = None;
+        self.selected_default_group = false;
         self.selected_connection_ids.clear();
         self.clear_workspace_filter(cx);
         self.search_input.update(cx, |input, cx| {
@@ -1834,12 +1848,30 @@ impl HomePage {
     }
 
     fn render_rail(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let is_all = self.rail_view == RailView::All && self.selected_group_id.is_none();
+        let is_all = self.rail_view == RailView::All
+            && self.selected_group_id.is_none()
+            && !self.selected_default_group;
         let is_fav = self.rail_view == RailView::Favorite;
         let is_recent = self.rail_view == RailView::Recent;
         let total_count = self.connections.len();
         let fav_count = self.connections.iter().filter(|c| c.is_favorite).count();
-        let recent_count = std::cmp::min(5, total_count);
+        // 最近使用计数：7 天内真实用过的连接数（视图本身仍最多展示 5 条）
+        let recent_count = {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            self.connections
+                .iter()
+                .filter(|c| c.last_used_at.is_some_and(|ts| now - ts < 7 * 86400))
+                .count()
+        };
+        let ungrouped_count = self
+            .connections
+            .iter()
+            .filter(|c| self.is_ungrouped(c))
+            .count();
+        let is_default_selected = self.selected_default_group && self.rail_view == RailView::All;
         let has_master_key = crypto::has_master_key();
 
         v_flex()
@@ -1873,6 +1905,7 @@ impl HomePage {
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.rail_view = RailView::All;
                         this.selected_group_id = None;
+                        this.selected_default_group = false;
                         cx.notify();
                     })),
             )
@@ -1900,6 +1933,7 @@ impl HomePage {
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.rail_view = RailView::Favorite;
                         this.selected_group_id = None;
+                        this.selected_default_group = false;
                         cx.notify();
                     })),
             )
@@ -1914,19 +1948,23 @@ impl HomePage {
                             .w_full()
                             .items_center()
                             .gap_4()
-                            .child(IconName::Undo.mono().with_size(px(15.0)))
+                            .child(IconName::History.mono().with_size(px(15.0)))
                             .child(div().text_sm().child("最近使用"))
-                            .child(
-                                div()
-                                    .ml_auto()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(recent_count.to_string()),
-                            ),
+                            .when(recent_count > 0, |row| {
+                                row.child(
+                                    div()
+                                        .ml_auto()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(recent_count.to_string()),
+                                )
+                            }),
                     )
+                    .tooltip("显示最近使用的连接（最多 5 条）")
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.rail_view = RailView::Recent;
                         this.selected_group_id = None;
+                        this.selected_default_group = false;
                         cx.notify();
                     })),
             )
@@ -1946,6 +1984,7 @@ impl HomePage {
                     .child(
                         Button::new("btn-new-workspace")
                             .icon(IconName::Plus)
+                            .label("新建分组")
                             .xsmall()
                             .ghost()
                             .tooltip("新建分组")
@@ -1981,6 +2020,8 @@ impl HomePage {
                         let row_id =
                             SharedString::from(format!("rail-grp-row-{}", ws_id.unwrap_or(0)));
                         let ws_name = ws.name.clone();
+                        let edit_ws_name = ws_name.clone();
+                        let is_grp_empty = count == 0;
 
                         h_flex()
                             .id(row_id.clone())
@@ -2003,14 +2044,20 @@ impl HomePage {
                                         .items_center()
                                         .gap_4()
                                         .child(
-                                            IconName::Folder
-                                                .mono()
-                                                .with_size(px(15.0))
-                                                .text_color(dot_color),
+                                            IconName::Folder.mono().with_size(px(15.0)).text_color(
+                                                if is_grp_empty && !is_grp_selected {
+                                                    dot_color.opacity(0.45)
+                                                } else {
+                                                    dot_color
+                                                },
+                                            ),
                                         )
                                         .child(
                                             div()
                                                 .text_sm()
+                                                .when(is_grp_empty && !is_grp_selected, |d| {
+                                                    d.text_color(cx.theme().muted_foreground)
+                                                })
                                                 .overflow_hidden()
                                                 .text_ellipsis()
                                                 .whitespace_nowrap()
@@ -2030,6 +2077,7 @@ impl HomePage {
                                 )
                                 .on_click(cx.listener(
                                     move |this, _, _, cx| {
+                                        this.selected_default_group = false;
                                         if this.selected_group_id == ws_id {
                                             this.selected_group_id = None;
                                         } else {
@@ -2042,6 +2090,32 @@ impl HomePage {
                             )
                             .when_some(ws_id, |this, id| {
                                 this.child(
+                                    div()
+                                        .invisible()
+                                        .group_hover(row_id.clone(), |s| s.visible())
+                                        .flex_shrink_0()
+                                        .child(
+                                            Button::new(SharedString::from(format!(
+                                                "rename-ws-{}",
+                                                id
+                                            )))
+                                            .icon(IconName::Edit)
+                                            .xsmall()
+                                            .ghost()
+                                            .tooltip("重命名分组")
+                                            .on_click(cx.listener(move |_, _, window, cx| {
+                                                cx.stop_propagation();
+                                                show_workspace_dialog(
+                                                    cx.entity(),
+                                                    Some(id),
+                                                    edit_ws_name.clone(),
+                                                    window,
+                                                    cx,
+                                                );
+                                            })),
+                                        ),
+                                )
+                                .child(
                                     div()
                                         .invisible()
                                         .group_hover(row_id.clone(), |s| s.visible())
@@ -2062,7 +2136,54 @@ impl HomePage {
                                         ),
                                 )
                             })
-                    })),
+                    }))
+                    // 默认分组入口：未归入任何分组的连接（与内容区「默认分组」对应）
+                    .when(ungrouped_count > 0, |rail| {
+                        rail.child(
+                            Button::new("rail-default-group")
+                                .w_full()
+                                .justify_start()
+                                .when(is_default_selected, |b| b.primary())
+                                .when(!is_default_selected, |b| b.ghost())
+                                .child(
+                                    h_flex()
+                                        .w_full()
+                                        .items_center()
+                                        .gap_4()
+                                        .child(
+                                            IconName::Inbox
+                                                .mono()
+                                                .with_size(px(15.0))
+                                                .text_color(cx.theme().muted_foreground),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_sm()
+                                                .overflow_hidden()
+                                                .text_ellipsis()
+                                                .whitespace_nowrap()
+                                                .child("默认分组"),
+                                        )
+                                        .child(
+                                            div()
+                                                .ml_auto()
+                                                .text_xs()
+                                                .text_color(if is_default_selected {
+                                                    cx.theme().primary_foreground.opacity(0.8)
+                                                } else {
+                                                    cx.theme().muted_foreground
+                                                })
+                                                .child(ungrouped_count.to_string()),
+                                        ),
+                                )
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.selected_default_group = !this.selected_default_group;
+                                    this.selected_group_id = None;
+                                    this.rail_view = RailView::All;
+                                    cx.notify();
+                                })),
+                        )
+                    }),
             )
             // Footer: Master key & Settings (始终吸底)
             .child(
@@ -2076,19 +2197,30 @@ impl HomePage {
                         Button::new("rail-encryption")
                             .ghost()
                             .w_full()
-                            .justify_start()
                             .child(
-                                div()
-                                    .w(px(8.0))
-                                    .h(px(8.0))
-                                    .rounded_full()
-                                    .when(has_master_key, |d| d.bg(cx.theme().success))
-                                    .when(!has_master_key, |d| d.bg(cx.theme().muted)),
+                                h_flex()
+                                    .w_full()
+                                    .items_center()
+                                    .gap_4()
+                                    .child(
+                                        div()
+                                            .w(px(8.0))
+                                            .h(px(8.0))
+                                            .rounded_full()
+                                            .flex_shrink_0()
+                                            .when(has_master_key, |d| d.bg(cx.theme().success))
+                                            .when(!has_master_key, |d| d.bg(cx.theme().muted)),
+                                    )
+                                    .child(div().text_sm().child(if has_master_key {
+                                        "主密码已解锁"
+                                    } else {
+                                        "解锁主密码"
+                                    })),
                             )
-                            .label(if has_master_key {
-                                "主密码已解锁"
+                            .tooltip(if has_master_key {
+                                "点击管理主密码"
                             } else {
-                                "解锁主密码"
+                                "点击解锁主密码"
                             })
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.show_encryption_key_dialog(window, cx);
@@ -2098,9 +2230,14 @@ impl HomePage {
                         Button::new("rail-settings")
                             .ghost()
                             .w_full()
-                            .justify_start()
-                            .icon(IconName::Settings)
-                            .label("设置")
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .items_center()
+                                    .gap_4()
+                                    .child(IconName::Settings.mono().with_size(px(15.0)))
+                                    .child(div().text_sm().child("设置")),
+                            )
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.add_settings_tab(window, cx);
                             })),
@@ -2110,14 +2247,12 @@ impl HomePage {
 
     fn render_unified_toolbar(
         &mut self,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let is_proto_all = self.protocol_filter.is_none();
         let is_proto_ssh = self.protocol_filter == Some(ConnectionType::SshSftp);
         let is_proto_jms = self.protocol_filter == Some(ConnectionType::Jms);
-        let is_online = self.online_only_filter;
-
         let visible_count = self.visible_connections(cx).len();
         let selected_count = self.selected_connection_ids.len();
         let search_query = self.search_query.read(cx).clone();
@@ -2127,6 +2262,8 @@ impl HomePage {
             if let Some(ws) = self.workspaces.iter().find(|w| w.id == Some(gid)) {
                 summary.push_str(&format!(" · 分组 {}", ws.name));
             }
+        } else if self.selected_default_group {
+            summary.push_str(" · 默认分组");
         }
         if !search_query.is_empty() {
             summary.push_str(&format!(" · 匹配“{}”", search_query));
@@ -2138,8 +2275,93 @@ impl HomePage {
             "☰"
         };
 
-        let export_popover_open = self.export_popover_open;
-        let export_popover = self.render_export_popover(export_popover_open, window, cx);
+        // 顶栏溢出弹层：菜单入口（导入/导出）↔ 导出表单 两级切换
+        let toolbar_more = {
+            let view = cx.entity();
+            Popover::new("toolbar-more-popover")
+                .trigger(
+                    Button::new("btn-toolbar-more")
+                        .icon(IconName::Ellipsis)
+                        .ghost()
+                        .xsmall()
+                        .tooltip("导入 / 导出"),
+                )
+                .open(self.toolbar_more_open)
+                .on_open_change(cx.listener(|this, open, _, cx| {
+                    this.toolbar_more_open = *open;
+                    if !open {
+                        this.toolbar_more_export_mode = false;
+                    }
+                    cx.notify();
+                }))
+                .content(move |_, _, cx| {
+                    let view = view.clone();
+                    if view.read(cx).toolbar_more_export_mode {
+                        let home = view.read(cx);
+                        home.render_export_form(view.clone(), cx)
+                    } else {
+                        let view_export = view.clone();
+                        let view_import = view.clone();
+                        v_flex()
+                            .w(px(180.0))
+                            .p_1()
+                            .gap_0p5()
+                            .child(
+                                h_flex()
+                                    .id("toolbar-more-export")
+                                    .gap_2()
+                                    .items_center()
+                                    .rounded(px(6.0))
+                                    .px_2()
+                                    .py_1p5()
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(cx.theme().accent.opacity(0.1)))
+                                    .on_click(move |_, _, cx| {
+                                        view_export.update(cx, |this, cx| {
+                                            this.toolbar_more_export_mode = true;
+                                            cx.notify();
+                                        });
+                                    })
+                                    .child(
+                                        IconName::Export
+                                            .mono()
+                                            .with_size(px(14.0))
+                                            .text_color(cx.theme().muted_foreground),
+                                    )
+                                    .child(div().text_sm().child("导出连接…")),
+                            )
+                            .child(
+                                h_flex()
+                                    .id("toolbar-more-import")
+                                    .gap_2()
+                                    .items_center()
+                                    .rounded(px(6.0))
+                                    .px_2()
+                                    .py_1p5()
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(cx.theme().accent.opacity(0.1)))
+                                    .on_click(move |_, _, cx| {
+                                        view_import.update(cx, |this, cx| {
+                                            this.toolbar_more_open = false;
+                                            this.toolbar_more_export_mode = false;
+                                            this.import_modal_open = true;
+                                            this.import_step = ImportStep::Step1;
+                                            this.import_preflight_report = None;
+                                            cx.notify();
+                                        });
+                                    })
+                                    .child(
+                                        IconName::Upload
+                                            .mono()
+                                            .with_size(px(14.0))
+                                            .text_color(cx.theme().muted_foreground),
+                                    )
+                                    .child(div().text_sm().child("导入连接…")),
+                            )
+                            .into_any_element()
+                    }
+                })
+        };
 
         h_flex()
             .w_full()
@@ -2155,7 +2377,8 @@ impl HomePage {
                 Button::new("toolbar-local-term")
                     .ghost()
                     .xsmall()
-                    .label("🖥 本地终端")
+                    .icon(IconName::Terminal)
+                    .label("本地终端")
                     .tooltip("新建本地终端 (Ctrl+T)")
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.add_terminal_tab(window, cx);
@@ -2230,17 +2453,6 @@ impl HomePage {
                                 this.protocol_filter = Some(ConnectionType::Jms);
                                 cx.notify();
                             })),
-                    )
-                    .child(
-                        Button::new("chip-filter-online")
-                            .xsmall()
-                            .when(is_online, |b| b.primary())
-                            .when(!is_online, |b| b.ghost())
-                            .label("在线")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.online_only_filter = !this.online_only_filter;
-                                cx.notify();
-                            })),
                     ),
             )
             // 弹性空白
@@ -2272,7 +2484,8 @@ impl HomePage {
                                 .label("导出所选")
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.export_scope = ExportScope::Selected;
-                                    this.export_popover_open = true;
+                                    this.toolbar_more_open = true;
+                                    this.toolbar_more_export_mode = true;
                                     cx.notify();
                                 })),
                         )
@@ -2297,21 +2510,8 @@ impl HomePage {
                         ),
                 )
             })
-            // ⤓ 导出
-            .child(export_popover)
-            // ⤒ 导入
-            .child(
-                Button::new("btn-import-modal")
-                    .ghost()
-                    .xsmall()
-                    .label("⤒ 导入")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.import_modal_open = true;
-                        this.import_step = ImportStep::Step1;
-                        this.import_preflight_report = None;
-                        cx.notify();
-                    })),
-            )
+            // 导入/导出（低频操作，收进溢出弹层）
+            .child(toolbar_more)
             // 密度切换 ▦/☰
             .child(
                 Button::new("btn-density-toggle")
@@ -2345,332 +2545,323 @@ impl HomePage {
             )
     }
 
-    fn render_export_popover(
-        &mut self,
-        open: bool,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_export_form(&self, view: Entity<Self>, cx: &App) -> AnyElement {
         let all_count = self.connections.len();
-        let group_count = self.selected_group_id.map_or(0, |gid| {
+        let group_count = if self.selected_default_group {
             self.connections
                 .iter()
-                .filter(|c| c.workspace_id == Some(gid))
+                .filter(|c| self.is_ungrouped(c))
                 .count()
-        });
+        } else {
+            self.selected_group_id.map_or(0, |gid| {
+                self.connections
+                    .iter()
+                    .filter(|c| c.workspace_id == Some(gid))
+                    .count()
+            })
+        };
         let sel_count = self.selected_connection_ids.len();
 
-        let current_group_name = self.selected_group_id.and_then(|gid| {
-            self.workspaces
-                .iter()
-                .find(|w| w.id == Some(gid))
-                .map(|w| w.name.clone())
-        });
+        let current_group_name = if self.selected_default_group {
+            Some("默认分组".to_string())
+        } else {
+            self.selected_group_id.and_then(|gid| {
+                self.workspaces
+                    .iter()
+                    .find(|w| w.id == Some(gid))
+                    .map(|w| w.name.clone())
+            })
+        };
 
-        let view = cx.entity().clone();
+        let view_for_scope_all = view.clone();
+        let view_for_scope_group = view.clone();
+        let view_for_scope_sel = view.clone();
+        let view_for_json = view.clone();
+        let view_for_csv = view.clone();
+        let view_for_yaml = view.clone();
+        let view_for_include_pwd = view.clone();
+        let view_for_cancel = view.clone();
+        let view_for_cancel2 = view.clone();
+        let view_for_export = view.clone();
 
-        Popover::new("export-popover")
-            .trigger(
-                Button::new("btn-export-trigger")
-                    .ghost()
-                    .xsmall()
-                    .label("⤓ 导出"),
-            )
-            .open(open)
-            .on_open_change(cx.listener(|this, open, _, cx| {
-                this.export_popover_open = *open;
-                cx.notify();
-            }))
-            .content(move |_, _, cx| {
-                let view_for_scope_all = view.clone();
-                let view_for_scope_group = view.clone();
-                let view_for_scope_sel = view.clone();
-                let view_for_json = view.clone();
-                let view_for_csv = view.clone();
-                let view_for_yaml = view.clone();
-                let view_for_include_pwd = view.clone();
-                let view_for_cancel = view.clone();
-                let view_for_cancel2 = view.clone();
-                let view_for_export = view.clone();
+        let cur_scope = self.export_scope;
+        let cur_fmt = self.export_format;
+        let cur_include_pwd = self.export_include_passwords;
 
-                let cur_scope = view.read(cx).export_scope;
-                let cur_fmt = view.read(cx).export_format;
-                let cur_include_pwd = view.read(cx).export_include_passwords;
-
-                v_flex()
-                    .w(px(320.0))
-                    .p_4()
-                    .gap_3()
-                    .child(
-                        h_flex()
-                            .justify_between()
-                            .items_center()
-                            .child(
-                                div()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_sm()
-                                    .child("导出连接配置"),
-                            )
-                            .child(
-                                div()
-                                    .id("btn-close-export")
-                                    .cursor_pointer()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("×")
-                                    .on_click(move |_, _, cx| {
-                                        view_for_cancel.update(cx, |this, cx| {
-                                            this.export_popover_open = false;
-                                            cx.notify();
-                                        });
-                                    }),
-                            ),
-                    )
-                    // Scope radios
-                    .child(
-                        v_flex()
-                            .gap_1p5()
-                            .child(
-                                h_flex()
-                                    .id("scope-all-opt")
-                                    .gap_2()
-                                    .items_center()
-                                    .cursor_pointer()
-                                    .on_click(move |_, _, cx| {
-                                        view_for_scope_all.update(cx, |this, cx| {
-                                            this.export_scope = ExportScope::All;
-                                            cx.notify();
-                                        });
-                                    })
-                                    .child(
-                                        div()
-                                            .w(px(14.0))
-                                            .h(px(14.0))
-                                            .rounded_full()
-                                            .border_1()
-                                            .border_color(cx.theme().border)
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .when(cur_scope == ExportScope::All, |d| {
-                                                d.child(
-                                                    div()
-                                                        .w(px(8.0))
-                                                        .h(px(8.0))
-                                                        .rounded_full()
-                                                        .bg(cx.theme().accent),
-                                                )
-                                            }),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .child(format!("全部分组 · {} 个连接", all_count)),
-                                    ),
-                            )
-                            .child(
-                                h_flex()
-                                    .id("scope-grp-opt")
-                                    .gap_2()
-                                    .items_center()
-                                    .when(current_group_name.is_some(), |h| {
-                                        h.cursor_pointer().on_click(move |_, _, cx| {
-                                            view_for_scope_group.update(cx, |this, cx| {
-                                                this.export_scope = ExportScope::CurrentGroup;
-                                                cx.notify();
-                                            });
-                                        })
-                                    })
-                                    .when(current_group_name.is_none(), |h| {
-                                        h.text_color(cx.theme().muted)
-                                    })
-                                    .child(
-                                        div()
-                                            .w(px(14.0))
-                                            .h(px(14.0))
-                                            .rounded_full()
-                                            .border_1()
-                                            .border_color(cx.theme().border)
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .when(cur_scope == ExportScope::CurrentGroup, |d| {
-                                                d.child(
-                                                    div()
-                                                        .w(px(8.0))
-                                                        .h(px(8.0))
-                                                        .rounded_full()
-                                                        .bg(cx.theme().accent),
-                                                )
-                                            }),
-                                    )
-                                    .child(div().text_xs().child(format!(
-                                        "仅当前分组 {} · {} 个",
-                                        current_group_name.as_deref().unwrap_or("（未选）"),
-                                        group_count
-                                    ))),
-                            )
-                            .child(
-                                h_flex()
-                                    .id("scope-sel-opt")
-                                    .gap_2()
-                                    .items_center()
-                                    .when(sel_count > 0, |h| {
-                                        h.cursor_pointer().on_click(move |_, _, cx| {
-                                            view_for_scope_sel.update(cx, |this, cx| {
-                                                this.export_scope = ExportScope::Selected;
-                                                cx.notify();
-                                            });
-                                        })
-                                    })
-                                    .when(sel_count == 0, |h| h.text_color(cx.theme().muted))
-                                    .child(
-                                        div()
-                                            .w(px(14.0))
-                                            .h(px(14.0))
-                                            .rounded_full()
-                                            .border_1()
-                                            .border_color(cx.theme().border)
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .when(cur_scope == ExportScope::Selected, |d| {
-                                                d.child(
-                                                    div()
-                                                        .w(px(8.0))
-                                                        .h(px(8.0))
-                                                        .rounded_full()
-                                                        .bg(cx.theme().accent),
-                                                )
-                                            }),
-                                    )
-                                    .child(
-                                        div().text_xs().child(format!(
-                                            "已选连接 · {} 个（卡片勾选）",
-                                            sel_count
-                                        )),
-                                    ),
-                            ),
-                    )
-                    // Format chips
-                    .child(
-                        h_flex()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("格式"),
-                            )
-                            .child(
-                                Button::new("fmt-json")
-                                    .small()
-                                    .when(cur_fmt == ExportFormat::Json, |b| b.primary())
-                                    .when(cur_fmt != ExportFormat::Json, |b| b.ghost())
-                                    .label("JSON")
-                                    .on_click(move |_, _, cx| {
-                                        view_for_json.update(cx, |this, cx| {
-                                            this.export_format = ExportFormat::Json;
-                                            cx.notify();
-                                        });
-                                    }),
-                            )
-                            .child(
-                                Button::new("fmt-csv")
-                                    .small()
-                                    .when(cur_fmt == ExportFormat::Csv, |b| b.primary())
-                                    .when(cur_fmt != ExportFormat::Csv, |b| b.ghost())
-                                    .label("CSV")
-                                    .on_click(move |_, _, cx| {
-                                        view_for_csv.update(cx, |this, cx| {
-                                            this.export_format = ExportFormat::Csv;
-                                            cx.notify();
-                                        });
-                                    }),
-                            )
-                            .child(
-                                Button::new("fmt-yaml")
-                                    .small()
-                                    .when(cur_fmt == ExportFormat::Yaml, |b| b.primary())
-                                    .when(cur_fmt != ExportFormat::Yaml, |b| b.ghost())
-                                    .label("YAML")
-                                    .on_click(move |_, _, cx| {
-                                        view_for_yaml.update(cx, |this, cx| {
-                                            this.export_format = ExportFormat::Yaml;
-                                            cx.notify();
-                                        });
-                                    }),
-                            ),
-                    )
-                    // Include passwords checkbox
-                    .child(
-                        h_flex()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                Checkbox::new("chk-include-passwords")
-                                    .checked(cur_include_pwd)
-                                    .on_click(move |checked, _window, cx| {
-                                        view_for_include_pwd.update(cx, |this, cx| {
-                                            this.export_include_passwords = *checked;
-                                            cx.notify();
-                                        });
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .child("包含连接密码（导出时需重新确认主密码）"),
-                            ),
-                    )
-                    // Note
+        v_flex()
+            .w(px(320.0))
+            .p_4()
+            .gap_3()
+            .child(
+                h_flex()
+                    .justify_between()
+                    .items_center()
                     .child(
                         div()
-                            .p_2()
-                            .rounded(px(6.0))
-                            .when(cur_include_pwd, |d| {
-                                d.bg(cx.theme().warning.opacity(0.1))
-                                    .text_color(cx.theme().warning)
-                                    .text_xs()
-                                    .child("⚠ 包含凭据的导出文件含有明文连接密码，请妥善保管。")
-                            })
-                            .when(!cur_include_pwd, |d| {
-                                d.bg(cx.theme().surface)
-                                    .text_color(cx.theme().muted_foreground)
-                                    .text_xs()
-                                    .child("🛡 已脱敏导出（不含密码 / 私钥口令），文件可安全分享。")
-                            }),
+                            .font_weight(FontWeight::BOLD)
+                            .text_sm()
+                            .child("导出连接配置"),
                     )
-                    // Action buttons
+                    .child(
+                        div()
+                            .id("btn-close-export")
+                            .cursor_pointer()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("×")
+                            .on_click(move |_, _, cx| {
+                                view_for_cancel.update(cx, |this, cx| {
+                                    this.toolbar_more_open = false;
+                                    this.toolbar_more_export_mode = false;
+                                    cx.notify();
+                                });
+                            }),
+                    ),
+            )
+            // Scope radios
+            .child(
+                v_flex()
+                    .gap_1p5()
                     .child(
                         h_flex()
-                            .justify_end()
+                            .id("scope-all-opt")
                             .gap_2()
+                            .items_center()
+                            .cursor_pointer()
+                            .on_click(move |_, _, cx| {
+                                view_for_scope_all.update(cx, |this, cx| {
+                                    this.export_scope = ExportScope::All;
+                                    cx.notify();
+                                });
+                            })
                             .child(
-                                Button::new("btn-export-cancel")
-                                    .small()
-                                    .ghost()
-                                    .label("取消")
-                                    .on_click(move |_, _, cx| {
-                                        view_for_cancel2.update(cx, |this, cx| {
-                                            this.export_popover_open = false;
-                                            cx.notify();
-                                        });
+                                div()
+                                    .w(px(14.0))
+                                    .h(px(14.0))
+                                    .rounded_full()
+                                    .border_1()
+                                    .border_color(cx.theme().border)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .when(cur_scope == ExportScope::All, |d| {
+                                        d.child(
+                                            div()
+                                                .w(px(8.0))
+                                                .h(px(8.0))
+                                                .rounded_full()
+                                                .bg(cx.theme().accent),
+                                        )
                                     }),
                             )
                             .child(
-                                Button::new("btn-export-confirm")
-                                    .small()
-                                    .primary()
-                                    .label("导出文件")
-                                    .on_click(move |_, window, cx| {
-                                        view_for_export.update(cx, |this, cx| {
-                                            this.handle_export(window, cx);
-                                        });
-                                    }),
+                                div()
+                                    .text_xs()
+                                    .child(format!("全部分组 · {} 个连接", all_count)),
                             ),
                     )
-            })
+                    .child(
+                        h_flex()
+                            .id("scope-grp-opt")
+                            .gap_2()
+                            .items_center()
+                            .when(current_group_name.is_some(), |h| {
+                                h.cursor_pointer().on_click(move |_, _, cx| {
+                                    view_for_scope_group.update(cx, |this, cx| {
+                                        this.export_scope = ExportScope::CurrentGroup;
+                                        cx.notify();
+                                    });
+                                })
+                            })
+                            .when(current_group_name.is_none(), |h| {
+                                h.text_color(cx.theme().muted)
+                            })
+                            .child(
+                                div()
+                                    .w(px(14.0))
+                                    .h(px(14.0))
+                                    .rounded_full()
+                                    .border_1()
+                                    .border_color(cx.theme().border)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .when(cur_scope == ExportScope::CurrentGroup, |d| {
+                                        d.child(
+                                            div()
+                                                .w(px(8.0))
+                                                .h(px(8.0))
+                                                .rounded_full()
+                                                .bg(cx.theme().accent),
+                                        )
+                                    }),
+                            )
+                            .child(div().text_xs().child(format!(
+                                "仅当前分组 {} · {} 个",
+                                current_group_name.as_deref().unwrap_or("（未选）"),
+                                group_count
+                            ))),
+                    )
+                    .child(
+                        h_flex()
+                            .id("scope-sel-opt")
+                            .gap_2()
+                            .items_center()
+                            .when(sel_count > 0, |h| {
+                                h.cursor_pointer().on_click(move |_, _, cx| {
+                                    view_for_scope_sel.update(cx, |this, cx| {
+                                        this.export_scope = ExportScope::Selected;
+                                        cx.notify();
+                                    });
+                                })
+                            })
+                            .when(sel_count == 0, |h| h.text_color(cx.theme().muted))
+                            .child(
+                                div()
+                                    .w(px(14.0))
+                                    .h(px(14.0))
+                                    .rounded_full()
+                                    .border_1()
+                                    .border_color(cx.theme().border)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .when(cur_scope == ExportScope::Selected, |d| {
+                                        d.child(
+                                            div()
+                                                .w(px(8.0))
+                                                .h(px(8.0))
+                                                .rounded_full()
+                                                .bg(cx.theme().accent),
+                                        )
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .child(format!("已选连接 · {} 个（卡片勾选）", sel_count)),
+                            ),
+                    ),
+            )
+            // Format chips
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("格式"),
+                    )
+                    .child(
+                        Button::new("fmt-json")
+                            .small()
+                            .when(cur_fmt == ExportFormat::Json, |b| b.primary())
+                            .when(cur_fmt != ExportFormat::Json, |b| b.ghost())
+                            .label("JSON")
+                            .on_click(move |_, _, cx| {
+                                view_for_json.update(cx, |this, cx| {
+                                    this.export_format = ExportFormat::Json;
+                                    cx.notify();
+                                });
+                            }),
+                    )
+                    .child(
+                        Button::new("fmt-csv")
+                            .small()
+                            .when(cur_fmt == ExportFormat::Csv, |b| b.primary())
+                            .when(cur_fmt != ExportFormat::Csv, |b| b.ghost())
+                            .label("CSV")
+                            .on_click(move |_, _, cx| {
+                                view_for_csv.update(cx, |this, cx| {
+                                    this.export_format = ExportFormat::Csv;
+                                    cx.notify();
+                                });
+                            }),
+                    )
+                    .child(
+                        Button::new("fmt-yaml")
+                            .small()
+                            .when(cur_fmt == ExportFormat::Yaml, |b| b.primary())
+                            .when(cur_fmt != ExportFormat::Yaml, |b| b.ghost())
+                            .label("YAML")
+                            .on_click(move |_, _, cx| {
+                                view_for_yaml.update(cx, |this, cx| {
+                                    this.export_format = ExportFormat::Yaml;
+                                    cx.notify();
+                                });
+                            }),
+                    ),
+            )
+            // Include passwords checkbox
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        Checkbox::new("chk-include-passwords")
+                            .checked(cur_include_pwd)
+                            .on_click(move |checked, _window, cx| {
+                                view_for_include_pwd.update(cx, |this, cx| {
+                                    this.export_include_passwords = *checked;
+                                    cx.notify();
+                                });
+                            }),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .child("包含连接密码（导出时需重新确认主密码）"),
+                    ),
+            )
+            // Note
+            .child(
+                div()
+                    .p_2()
+                    .rounded(px(6.0))
+                    .when(cur_include_pwd, |d| {
+                        d.bg(cx.theme().warning.opacity(0.1))
+                            .text_color(cx.theme().warning)
+                            .text_xs()
+                            .child("⚠ 包含凭据的导出文件含有明文连接密码，请妥善保管。")
+                    })
+                    .when(!cur_include_pwd, |d| {
+                        d.bg(cx.theme().surface)
+                            .text_color(cx.theme().muted_foreground)
+                            .text_xs()
+                            .child("🛡 已脱敏导出（不含密码 / 私钥口令），文件可安全分享。")
+                    }),
+            )
+            // Action buttons
+            .child(
+                h_flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("btn-export-cancel")
+                            .small()
+                            .ghost()
+                            .label("取消")
+                            .on_click(move |_, _, cx| {
+                                view_for_cancel2.update(cx, |this, cx| {
+                                    this.toolbar_more_open = false;
+                                    this.toolbar_more_export_mode = false;
+                                    cx.notify();
+                                });
+                            }),
+                    )
+                    .child(
+                        Button::new("btn-export-confirm")
+                            .small()
+                            .primary()
+                            .label("导出文件")
+                            .on_click(move |_, window, cx| {
+                                view_for_export.update(cx, |this, cx| {
+                                    this.handle_export(window, cx);
+                                });
+                            }),
+                    ),
+            )
             .into_any_element()
     }
 
@@ -3249,19 +3440,46 @@ fn format_last_used(last_used_at: Option<i64>) -> Option<String> {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let diff = now.saturating_sub(ts);
-    if diff < 60 {
+    const MINUTE: i64 = 60;
+    const HOUR: i64 = 60 * MINUTE;
+    const DAY: i64 = 24 * HOUR;
+    const WEEK: i64 = 7 * DAY;
+    const MONTH: i64 = 30 * DAY;
+    const YEAR: i64 = 365 * DAY;
+    if diff < MINUTE {
         Some("刚刚".to_string())
-    } else if diff < 3600 {
-        Some(format!("{} 分钟前", diff / 60))
-    } else if diff < 86400 {
-        Some(format!("{} 小时前", diff / 3600))
-    } else if diff < 172800 {
+    } else if diff < HOUR {
+        Some(format!("{} 分钟前", diff / MINUTE))
+    } else if diff < DAY {
+        Some(format!("{} 小时前", diff / HOUR))
+    } else if diff < 2 * DAY {
         Some("昨天".to_string())
-    } else if diff < 604800 {
-        Some(format!("{} 天前", diff / 86400))
+    } else if diff < WEEK {
+        Some(format!("{} 天前", diff / DAY))
+    } else if diff < 8 * WEEK {
+        Some(format!("{} 周前", diff / WEEK))
+    } else if diff < YEAR {
+        Some(format!("{} 个月前", (diff / MONTH).max(1)))
     } else {
-        Some(format!("{} 周前", diff / 604800))
+        Some(format!("{} 年前", (diff / YEAR).max(1)))
     }
+}
+
+/// endpoint_display 的展示格式化。
+/// JMS 连接的 host 是完整 URL（如 https://jms.example.com:8080），
+/// 剥掉 scheme 后直接展示 authority，并跳过固定端口的重复拼接。
+fn format_endpoint_display(user: &str, host: &str, port: u16) -> String {
+    if host.is_empty() {
+        return String::new();
+    }
+    if let Some(rest) = host
+        .strip_prefix("https://")
+        .or_else(|| host.strip_prefix("http://"))
+    {
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+        return format!("{user}@{authority}");
+    }
+    format!("{user}@{host}:{port}")
 }
 
 impl HomePage {
@@ -3299,15 +3517,11 @@ impl HomePage {
         };
 
         let (user, host, port) = conn.endpoint_display();
-        let endpoint_str = if !host.is_empty() {
-            format!("{user}@{host}:{port}")
-        } else {
-            String::new()
-        };
+        let endpoint_str = format_endpoint_display(&user, &host, port);
 
         let proto_label = match connection_type {
             ConnectionType::SshSftp => "SSH",
-            ConnectionType::PortForwarding => "PortForwarding",
+            ConnectionType::PortForwarding => "PFD",
             ConnectionType::Jms => "JMS",
             _ => "DB",
         };
@@ -3334,15 +3548,17 @@ impl HomePage {
         )))
         .density(self.density)
         .selected(is_selected)
-        .active(is_active)
         .favorite(conn.is_favorite)
         .checked(is_checked)
         .show_checkbox(show_chk)
         .protocol(proto_label)
         .endpoint(endpoint_str)
         .tags(conn.tags_vec())
-        .on_click(cx.listener(move |this, _, window, cx| {
+        .on_click(cx.listener(move |this, _, _, cx| {
             this.selected_connection_id = conn_id;
+            cx.notify();
+        }))
+        .on_double_click(cx.listener(move |this, _, window, cx| {
             this.open_connection_from_quick(&open_conn, window, cx);
         }))
         .on_connect(move |window, cx| {
@@ -3666,4 +3882,56 @@ fn re_encrypt_all_connections(
     }
 
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn now_secs() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+    }
+
+    #[test]
+    fn format_last_used_buckets() {
+        let now = now_secs();
+        let at = |diff: i64| format_last_used(Some(now - diff)).unwrap();
+        assert_eq!(at(30), "刚刚");
+        assert_eq!(at(5 * 60), "5 分钟前");
+        assert_eq!(at(2 * 3600), "2 小时前");
+        assert_eq!(at(26 * 3600), "昨天");
+        assert_eq!(at(3 * 86400), "3 天前");
+        assert_eq!(at(3 * 604800), "3 周前");
+        assert_eq!(at(7 * 604800 + 6 * 86400), "7 周前");
+        assert_eq!(at(8 * 604800 + 86400), "1 个月前");
+        assert_eq!(at(90 * 86400), "3 个月前");
+        assert_eq!(at(200 * 86400), "6 个月前");
+        assert_eq!(at(400 * 86400), "1 年前");
+        assert_eq!(at(800 * 86400), "2 年前");
+        assert_eq!(format_last_used(None), None);
+    }
+
+    #[test]
+    fn format_endpoint_display_variants() {
+        assert_eq!(
+            format_endpoint_display("xumy", "https://jms.tsxy.com:22", 22),
+            "xumy@jms.tsxy.com:22"
+        );
+        assert_eq!(
+            format_endpoint_display("u", "https://jms.example.com", 22),
+            "u@jms.example.com"
+        );
+        assert_eq!(
+            format_endpoint_display("u", "http://a.b/c/path", 22),
+            "u@a.b"
+        );
+        assert_eq!(
+            format_endpoint_display("u", "10.0.0.1", 22),
+            "u@10.0.0.1:22"
+        );
+        assert_eq!(format_endpoint_display("", "", 0), "");
+    }
 }

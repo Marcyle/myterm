@@ -38,7 +38,6 @@ pub struct ConnectionCard {
     tags: Vec<SharedString>,
     last_used: Option<SharedString>,
     selected: bool,
-    active: bool,
     is_favorite: bool,
     checked: bool,
     show_checkbox: bool,
@@ -80,7 +79,6 @@ impl ConnectionCard {
             tags: Vec::new(),
             last_used: None,
             selected: false,
-            active: false,
             is_favorite: false,
             checked: false,
             show_checkbox: false,
@@ -143,11 +141,6 @@ impl ConnectionCard {
 
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
-        self
-    }
-
-    pub fn active(mut self, active: bool) -> Self {
-        self.active = active;
         self
     }
 
@@ -297,21 +290,6 @@ impl ConnectionCard {
                 )),
         );
 
-        // Status dot (在线带微光轮廓，离线灰色)
-        let dot = div()
-            .w(px(8.0))
-            .h(px(8.0))
-            .rounded_full()
-            .flex_shrink_0()
-            .when(self.active, |this| {
-                this.bg(cx.theme().success)
-                    .border_2()
-                    .border_color(cx.theme().success.opacity(0.4))
-                    .shadow_sm()
-            })
-            .when(!self.active, |this| this.bg(cx.theme().muted));
-        row1 = row1.child(dot);
-
         // Name
         let name_el = div()
             .text_sm()
@@ -325,7 +303,7 @@ impl ConnectionCard {
             .child(self.title.clone());
         row1 = row1.child(name_el);
 
-        // Fav star（常显：已收藏 ★ / 未收藏 ☆，点击切换，保证可发现性）
+        // Fav star（已收藏 ★ 常显保持状态可见；未收藏 ☆ 仅悬浮显示，点击切换）
         if on_toggle_favorite.is_some() {
             let fav_cb = on_toggle_favorite.clone();
             row1 = row1.child(
@@ -336,7 +314,9 @@ impl ConnectionCard {
                     .cursor_pointer()
                     .when(is_fav, |d| d.text_color(cx.theme().warning))
                     .when(!is_fav, |d| {
-                        d.text_color(cx.theme().muted_foreground.opacity(0.55))
+                        d.invisible()
+                            .group_hover(CARD_GROUP, |s| s.visible())
+                            .text_color(cx.theme().muted_foreground.opacity(0.55))
                             .hover(|s| s.text_color(cx.theme().warning))
                     })
                     .on_click(move |_, window, cx| {
@@ -368,17 +348,22 @@ impl ConnectionCard {
             row1 = row1.children(self.actions);
         }
 
-        // More menu ⋯
+        // More menu ⋯（仅悬浮显示）
         if let Some(menu_builder) = self.menu_builder {
             row1 = row1.child(
-                div().ml_auto().flex_shrink_0().child(
-                    Button::new(self.menu_id)
-                        .icon(IconName::Ellipsis)
-                        .xsmall()
-                        .ghost()
-                        .tooltip("更多操作")
-                        .dropdown_menu(move |menu, window, cx| menu_builder(menu, window, cx)),
-                ),
+                div()
+                    .ml_auto()
+                    .flex_shrink_0()
+                    .invisible()
+                    .group_hover(CARD_GROUP, |s| s.visible())
+                    .child(
+                        Button::new(self.menu_id)
+                            .icon(IconName::Ellipsis)
+                            .xsmall()
+                            .ghost()
+                            .tooltip("更多操作")
+                            .dropdown_menu(move |menu, window, cx| menu_builder(menu, window, cx)),
+                    ),
             );
         }
 
@@ -389,7 +374,7 @@ impl ConnectionCard {
             let proto_color = match proto.to_uppercase().as_str() {
                 "SSH" | "SFTP" => cx.theme().connection_ssh,
                 "JMS" => cx.theme().connection_jms,
-                "PORTFORWARDING" => cx.theme().connection_port_forwarding,
+                "PFD" | "PORTFORWARDING" => cx.theme().connection_port_forwarding,
                 _ => cx.theme().muted_foreground,
             };
             row2 = row2.child(
@@ -561,21 +546,6 @@ impl ConnectionCard {
                 )),
         );
 
-        // Col: 在线状态点
-        let dot = div()
-            .w(px(8.0))
-            .h(px(8.0))
-            .rounded_full()
-            .flex_shrink_0()
-            .when(self.active, |this| {
-                this.bg(cx.theme().success)
-                    .border_2()
-                    .border_color(cx.theme().success.opacity(0.4))
-                    .shadow_sm()
-            })
-            .when(!self.active, |this| this.bg(cx.theme().muted));
-        card = card.child(dot);
-
         // Col: 名称（唯一弹性列，吸收剩余宽度）
         card = card.child(
             div()
@@ -590,7 +560,7 @@ impl ConnectionCard {
                 .child(self.title.clone()),
         );
 
-        // Col: 收藏星标（常显可点击）
+        // Col: 收藏星标（已收藏常显；未收藏悬浮显示）
         if on_toggle_favorite.is_some() {
             let fav_cb = on_toggle_favorite.clone();
             card = card.child(
@@ -601,7 +571,9 @@ impl ConnectionCard {
                     .cursor_pointer()
                     .when(is_fav, |d| d.text_color(cx.theme().warning))
                     .when(!is_fav, |d| {
-                        d.text_color(cx.theme().muted_foreground.opacity(0.55))
+                        d.invisible()
+                            .group_hover(CARD_GROUP, |s| s.visible())
+                            .text_color(cx.theme().muted_foreground.opacity(0.55))
                             .hover(|s| s.text_color(cx.theme().warning))
                     })
                     .on_click(move |_, window, cx| {
@@ -619,12 +591,12 @@ impl ConnectionCard {
             let proto_color = match proto.to_uppercase().as_str() {
                 "SSH" | "SFTP" => cx.theme().connection_ssh,
                 "JMS" => cx.theme().connection_jms,
-                "PORTFORWARDING" => cx.theme().connection_port_forwarding,
+                "PFD" | "PORTFORWARDING" => cx.theme().connection_port_forwarding,
                 _ => cx.theme().muted_foreground,
             };
             let proto_upper = proto.to_uppercase();
             let proto_short: SharedString = if proto_upper == "PORTFORWARDING" {
-                "PF".into()
+                "PFD".into()
             } else {
                 proto_upper.clone().into()
             };
@@ -747,11 +719,17 @@ impl ConnectionCard {
 
         if let Some(menu_builder) = self.menu_builder {
             tail = tail.child(
-                Button::new(self.menu_id)
-                    .icon(IconName::Ellipsis)
-                    .xsmall()
-                    .ghost()
-                    .dropdown_menu(move |menu, window, cx| menu_builder(menu, window, cx)),
+                div()
+                    .invisible()
+                    .group_hover(CARD_GROUP, |s| s.visible())
+                    .flex_shrink_0()
+                    .child(
+                        Button::new(self.menu_id)
+                            .icon(IconName::Ellipsis)
+                            .xsmall()
+                            .ghost()
+                            .dropdown_menu(move |menu, window, cx| menu_builder(menu, window, cx)),
+                    ),
             );
         }
 
