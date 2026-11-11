@@ -26,7 +26,6 @@ use gpui_component::{
 use one_core::gpui_tokio::Tokio;
 use one_core::keybindings::action_id;
 use one_core::popup_window::{PopupWindowOptions, open_popup_window};
-use terminal_view::theme::TerminalTheme;
 pub const DEFAULT_SYSTEM_HOTKEY_MACOS: &str = "cmd-alt-m";
 pub const DEFAULT_SYSTEM_HOTKEY_OTHER: &str = "ctrl-space";
 
@@ -297,10 +296,7 @@ impl SettingsPanel {
                                 SettingItem::new(
                                     t!("Settings.General.Terminal.font_family"),
                                     SettingField::dropdown(
-                                        TerminalTheme::available_monospace_fonts()
-                                            .into_iter()
-                                            .map(|f| (f.into(), f.into()))
-                                            .collect(),
+                                        terminal_font_options(_cx),
                                         |cx: &App| {
                                             SharedString::from(
                                                 AppSettings::global(cx)
@@ -665,6 +661,18 @@ impl Render for SettingsPanel {
                 .pages(self.setting_pages(window, cx)),
         )
     }
+}
+
+/// 终端字体下拉项：枚举系统等宽字体族（含内置注册的 JetBrains Mono / Maple Mono NF），
+/// 同时保证当前配置值在列表中，否则字体被卸载后下拉框会显示为空、
+/// 用户也无法从 UI 里改回其他字体。
+fn terminal_font_options(cx: &App) -> Vec<(SharedString, SharedString)> {
+    let current = AppSettings::global(cx).terminal_font_family.clone();
+    let mut families = terminal_view::theme::available_terminal_fonts(cx);
+    if !current.is_empty() && !families.iter().any(|f| f.as_ref() == current) {
+        families.insert(0, SharedString::from(current));
+    }
+    families.into_iter().map(|f| (f.clone(), f)).collect()
 }
 
 fn render_global_proxy_settings_item(cx: &mut App) -> gpui::AnyElement {

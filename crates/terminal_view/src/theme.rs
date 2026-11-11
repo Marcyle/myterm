@@ -14,7 +14,8 @@
 //! - 在 `muted` 上使用 `foreground` 或 `muted_foreground`
 //! - 在 `accent` 上使用 `accent_foreground`
 
-use gpui::{Hsla, SharedString, rgb};
+use gpui::{App, Font, Hsla, SharedString, TextSystem, px, rgb};
+use std::sync::OnceLock;
 
 /// 最小字体大小
 pub const MIN_FONT_SIZE: f32 = 8.0;
@@ -86,21 +87,47 @@ pub fn default_monospace_font() -> &'static str {
     }
 }
 
+/// Nerd Font 备用字体（用于渲染私用区图标字形）
+///
+/// TUI 程序（yazi、eza、starship、lsd 等）的图标位于私用区：
+/// U+E000–U+F8FF 以及补充私用区 U+F0000–U+FFFFD（Nerd Fonts v3 图标大量在后者）。
+/// 普通等宽字体（Consolas、JetBrains Mono、Menlo 等）没有这些字形，缺少时的表现
+/// 就是空白或方框（.notdef），因此必须由打过 Nerd Fonts 补丁的家族来兜底。
+///
+/// 列表按优先级排列，未安装的家族会被字形查找自动跳过；`Maple Mono NF`
+/// 由应用内置（见 myterm_app.rs 中 add_fonts 的注册逻辑），因此一定可用。
+pub fn nerd_font_fallbacks() -> Vec<SharedString> {
+    vec![
+        "Maple Mono NF".into(),
+        "Symbols Nerd Font Mono".into(),
+        "Symbols Nerd Font".into(),
+        "JetBrainsMono Nerd Font Mono".into(),
+        "JetBrainsMono Nerd Font".into(),
+        "CaskaydiaCove Nerd Font Mono".into(),
+        "CaskaydiaMono Nerd Font Mono".into(),
+        "FiraCode Nerd Font Mono".into(),
+        "Hack Nerd Font Mono".into(),
+        "MesloLGS NF".into(),
+        "SauceCodePro Nerd Font Mono".into(),
+        "UbuntuMono Nerd Font Mono".into(),
+        "Maple Mono NF CN".into(),
+        "Maple Mono Normal NF CN".into(),
+    ]
+}
+
 /// 默认备用字体列表（按优先级排序，跨平台兼容）
+///
+/// 顺序：本平台常见等宽字体 → Nerd Font 图标字体 → Emoji / CJK 字体。
+/// Nerd Font 必须排在 CJK 字体之前：部分中文字体在私用区也有映射，
+/// 若排在前面会把图标字形“抢”成乱码或空白。
 pub fn default_font_fallbacks() -> Vec<SharedString> {
-    if cfg!(target_os = "macos") {
+    let mut fallbacks: Vec<SharedString> = if cfg!(target_os = "macos") {
         vec![
             "JetBrains Mono".into(),
             "Menlo".into(),
             "Monaco".into(),
             "SF Mono".into(),
             "Courier New".into(),
-            "Apple Color Emoji".into(),
-            "Apple Symbols".into(),
-            "PingFang SC".into(),
-            "PingFang TC".into(),
-            "Hiragino Sans GB".into(),
-            "Heiti SC".into(),
         ]
     } else if cfg!(target_os = "windows") {
         vec![
@@ -109,12 +136,6 @@ pub fn default_font_fallbacks() -> Vec<SharedString> {
             "Consolas".into(),
             "Courier New".into(),
             "Lucida Console".into(),
-            "Segoe UI Emoji".into(),
-            "Microsoft YaHei UI".into(),
-            "Microsoft YaHei".into(),
-            "SimHei".into(),
-            "DengXian".into(),
-            "SimSun".into(),
         ]
     } else {
         vec![
@@ -122,13 +143,144 @@ pub fn default_font_fallbacks() -> Vec<SharedString> {
             "Ubuntu Mono".into(),
             "Liberation Mono".into(),
             "Courier New".into(),
+        ]
+    };
+
+    fallbacks.extend(nerd_font_fallbacks());
+
+    if cfg!(target_os = "macos") {
+        fallbacks.extend([
+            "Apple Color Emoji".into(),
+            "Apple Symbols".into(),
+            "PingFang SC".into(),
+            "PingFang TC".into(),
+            "Hiragino Sans GB".into(),
+            "Heiti SC".into(),
+        ]);
+    } else if cfg!(target_os = "windows") {
+        fallbacks.extend([
+            "Segoe UI Emoji".into(),
+            "Microsoft YaHei UI".into(),
+            "Microsoft YaHei".into(),
+            "SimHei".into(),
+            "DengXian".into(),
+            "SimSun".into(),
+        ]);
+    } else {
+        fallbacks.extend([
             "Noto Color Emoji".into(),
             "Noto Sans Mono CJK SC".into(),
             "Noto Sans CJK SC".into(),
             "WenQuanYi Micro Hei".into(),
             "WenQuanYi Zen Hei".into(),
-        ]
+        ]);
     }
+
+    fallbacks
+}
+
+/// 系统可用等宽字体族（含内置注册字体），用于设置面板的字体下拉框。
+///
+/// 结果在进程内只枚举一次（`OnceLock` 缓存）：
+/// `all_font_names()` 会遍历系统字体集合，逐族判定等宽又会做多次字形度量，
+/// 开销较大，而 `SettingField::dropdown` 每次渲染都会重新构造选项列表。
+pub fn available_terminal_fonts(cx: &App) -> Vec<SharedString> {
+    static CACHE: OnceLock<Vec<SharedString>> = OnceLock::new();
+    CACHE
+        .get_or_init(|| enumerate_monospace_fonts(cx.text_system()))
+        .clone()
+}
+
+/// 枚举系统里真实存在的等宽字体族，并按「推荐优先」排序。
+fn enumerate_monospace_fonts(text_system: &TextSystem) -> Vec<SharedString> {
+    // 过滤掉内部家族（".SystemUIFont"）与 Windows 竖排/旋转变体（以 '@' 开头）
+    let mut families: Vec<String> = text_system
+        .all_font_names()
+        .into_iter()
+        .filter(|name| !name.is_empty() && !name.starts_with('.') && !name.starts_with('@'))
+        .filter(|name| is_monospace_family(text_system, name))
+        .collect();
+
+    // 系统字体集合与内置字体集合可能同名（如已安装 JetBrains Mono），去重
+    families.sort_by_key(|name| name.to_lowercase());
+    families.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+
+    let mut ordered: Vec<SharedString> = Vec::with_capacity(families.len());
+    let preferred: Vec<String> = TerminalTheme::available_monospace_fonts()
+        .iter()
+        .map(|name| name.to_string())
+        .chain(nerd_font_fallbacks().iter().map(|name| name.to_string()))
+        .collect();
+    for name in preferred {
+        if let Some(pos) = families.iter().position(|f| f.eq_ignore_ascii_case(&name)) {
+            ordered.push(families.remove(pos).into());
+        }
+    }
+    ordered.extend(families.into_iter().map(SharedString::from));
+    ordered
+}
+
+/// 判定一个字体族是否适合做终端等宽字体，三条都满足才算：
+///
+/// 1. `m` / `i` / `W` / `0` 的前进宽度一致——最基本的一条；
+/// 2. 单元格宽度落在 0.4~0.8 em。东亚旧字体（宋体、MS Gothic）与多数等宽字体在此区间，
+///    而 Marlett / Webdings / Wingdings 这类“整字宽图标字体”会被排掉；
+/// 3. `g` 比 `x` 高（下伸部）、`X` 比 `x` 高（大写字高）。这一条专门排除
+///    Segoe MDL2 Assets / Segoe Fluent Icons / Kingsoft UE 这类图标字体：
+///    它们把 a–z/A–Z 码位都映射成同尺寸图元，两个比值恒为 1.00。
+///
+/// 名字启发式（带 Mono/Code）不可取：Consolas、Menlo、Hack 名字里都没有 Mono。
+fn is_monospace_family(text_system: &TextSystem, family: &str) -> bool {
+    const SIZE: f32 = 16.0;
+    let font = Font {
+        family: SharedString::from(family.to_owned()),
+        ..Default::default()
+    };
+    let font_id = text_system.resolve_font(&font);
+    let size = px(SIZE);
+
+    let advance = |ch: char| {
+        text_system
+            .advance(font_id, size, ch)
+            .ok()
+            .map(|s| f32::from(s.width))
+    };
+    let height = |ch: char| {
+        text_system
+            .typographic_bounds(font_id, size, ch)
+            .ok()
+            .map(|b| f32::from(b.size.height))
+    };
+
+    // 1) 等宽
+    let Some(cell) = advance('m') else {
+        return false;
+    };
+    for ch in ['i', 'W', '0'] {
+        match advance(ch) {
+            Some(other) if (other - cell).abs() < 0.3 => {}
+            _ => return false,
+        }
+    }
+
+    // 2) 单元格宽度合理
+    if !(0.4 * SIZE..=0.8 * SIZE).contains(&cell) {
+        return false;
+    }
+
+    // 3) 确实含拉丁文字字形（有下伸部、有独立大写字高）
+    let (Some(x_height), Some(g_height), Some(cap_height)) =
+        (height('x'), height('g'), height('X'))
+    else {
+        return false;
+    };
+    if x_height <= 0.0 {
+        return false;
+    }
+
+    let descender_ratio = g_height / x_height;
+    let cap_ratio = cap_height / x_height;
+    (1.15..=2.5).contains(&descender_ratio) && (1.10..=2.5).contains(&cap_ratio)
 }
 
 impl TerminalTheme {
@@ -382,7 +534,11 @@ impl TerminalTheme {
         }
     }
 
-    /// 获取可用的等宽字体列表（按操作系统优化排序）
+    /// 人工维护的「推荐等宽字体」列表（按操作系统优化排序）
+    ///
+    /// 仅用于两件事：字体下拉框的置顶顺序；以及极端情况下（字体枚举失败）的兼容返回。
+    /// 下拉框的实际内容由 [`available_terminal_fonts`] 枚举系统字体得到，
+    /// 因此用户自己安装的字体（如 FiraCode Nerd Font Mono、Maple Mono NF CN）也能选到。
     pub fn available_monospace_fonts() -> Vec<&'static str> {
         if cfg!(target_os = "macos") {
             vec![

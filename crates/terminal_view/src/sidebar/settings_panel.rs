@@ -130,14 +130,17 @@ impl SettingsPanel {
             state.set_value(&format!("{:.0}", font_size), window, cx);
         });
 
-        // 字体选择列表
-        let fonts: Vec<SharedString> = TerminalTheme::available_monospace_fonts()
-            .into_iter()
-            .map(|f| SharedString::from(f))
-            .collect();
+        // 字体选择列表：枚举系统等宽字体（含内置注册的 JetBrains Mono / Maple Mono NF）
+        let mut fonts: Vec<SharedString> = crate::theme::available_terminal_fonts(cx);
+        let current_font = initial_font_family.to_string();
+        // 当前配置值不在枚举结果里（字体已卸载 / 列表为空）时也保留，避免下拉框显示为空
+        if !current_font.is_empty()
+            && !fonts.iter().any(|f| f.as_ref() == current_font)
+        {
+            fonts.insert(0, SharedString::from(current_font.clone()));
+        }
 
         // 找到当前字体的索引
-        let current_font = initial_font_family.to_string();
         let selected_index = fonts
             .iter()
             .position(|f| f.as_ref() == current_font)
