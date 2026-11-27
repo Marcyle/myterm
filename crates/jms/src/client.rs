@@ -18,6 +18,52 @@ struct SessionState {
     org_id: String,
 }
 
+/// 解析资产树相关的节点列表。
+///
+/// JumpServer 不同版本/网关在不同情况下会返回：
+/// - 直接是数组；
+/// - `{"data": [...]}` / `{"results": [...]}` 这类包一层的对象；
+/// - `{}` 或 `{"detail": "..."}`（无子节点、权限不足、限流等）。
+/// 后三种都不应该让整棵树报错，这里统一降级为空列表并记录原始响应。
+fn parse_node_list(text: &str) -> Result<Vec<JmsAssetNode>, JmsError> {
+    let value: serde_json::Value = match serde_json::from_str(text) {
+        Ok(value) => value,
+        Err(err) => {
+            let preview: String = text.chars().take(200).collect();
+            return Err(JmsError::ParseError(format!("{err}（响应: {preview}）")));
+        }
+    };
+
+    match value {
+        serde_json::Value::Array(items) => serde_json::from_value(items.into())
+            .map_err(|err| JmsError::ParseError(err.to_string())),
+        serde_json::Value::Object(map) => {
+            for key in ["data", "results", "children", "tree", "nodes"] {
+                if let Some(serde_json::Value::Array(items)) = map.get(key) {
+                    return serde_json::from_value(items.clone().into())
+                        .map_err(|err| JmsError::ParseError(err.to_string()));
+                }
+            }
+            let preview: String = text.chars().take(200).collect();
+            tracing::debug!(
+                target: "jms.client",
+                body = %preview,
+                "资产树接口返回了非列表对象，按空列表处理"
+            );
+            Ok(Vec::new())
+        }
+        _ => {
+            let preview: String = text.chars().take(200).collect();
+            tracing::debug!(
+                target: "jms.client",
+                body = %preview,
+                "资产树接口返回了非预期 JSON，按空列表处理"
+            );
+            Ok(Vec::new())
+        }
+    }
+}
+
 /// JMS API 客户端
 ///
 /// 采用纯 Web Session 认证:通过 `/core/auth/login/` 表单登录获取**已认证**的
@@ -260,7 +306,7 @@ impl JmsClient {
         );
         if let Ok((status, text)) = self.get_json(&full_tree_url).await {
             if (200..300).contains(&status) {
-                if let Ok(nodes) = serde_json::from_str::<Vec<JmsAssetNode>>(&text) {
+                if let Ok(nodes) = parse_node_list(&text) {
                     if !nodes.is_empty() {
                         return Ok(nodes);
                     }
@@ -276,9 +322,7 @@ impl JmsClient {
         let (status, text) = self.get_json(&url).await?;
 
         if (200..300).contains(&status) {
-            let nodes: Vec<JmsAssetNode> =
-                serde_json::from_str(&text).map_err(|e| JmsError::ParseError(e.to_string()))?;
-            Ok(nodes)
+            parse_node_list(&text)
         } else {
             Err(JmsError::ApiError(format!("获取资产树失败: {}", text)))
         }
@@ -299,9 +343,7 @@ impl JmsClient {
         let (status, text) = self.get_json(&url).await?;
 
         if (200..300).contains(&status) {
-            let nodes: Vec<JmsAssetNode> =
-                serde_json::from_str(&text).map_err(|e| JmsError::ParseError(e.to_string()))?;
-            Ok(nodes)
+            parse_node_list(&text)
         } else {
             Err(JmsError::ApiError(format!("获取子节点失败: {}", text)))
         }
@@ -321,8 +363,7 @@ impl JmsClient {
         let (status, text) = self.get_json(&url).await?;
 
         if (200..300).contains(&status) {
-            let nodes: Vec<JmsAssetNode> =
-                serde_json::from_str(&text).map_err(|e| JmsError::ParseError(e.to_string()))?;
+            let nodes = parse_node_list(&text)?;
             // 仅保留资产叶子节点(过滤目录节点)
             let assets = nodes
                 .into_iter()
@@ -350,10 +391,7 @@ impl JmsClient {
                 "{}/api/v1/perms/users/self/assets/{}/",
                 self.base_url, asset_id
             ),
-            format!(
-                "{}/api/v1/assets/assets/{}/",
-                self.base_url, asset_id
-            ),
+            format!("{}/api/v1/assets/assets/{}/", self.base_url, asset_id),
             format!(
                 "{}/api/v1/assets/accounts/?asset={}",
                 self.base_url, asset_id
@@ -385,8 +423,12 @@ impl JmsClient {
                         }
                         // 2. 尝试从对象字段解析: { "permed_accounts": [ ... ] } 或 { "accounts": [ ... ] }
                         if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
-                            if let Some(arr) = val.get("permed_accounts").or_else(|| val.get("accounts")) {
-                                if let Ok(accounts) = serde_json::from_value::<Vec<JmsAssetAccount>>(arr.clone()) {
+                            if let Some(arr) =
+                                val.get("permed_accounts").or_else(|| val.get("accounts"))
+                            {
+                                if let Ok(accounts) =
+                                    serde_json::from_value::<Vec<JmsAssetAccount>>(arr.clone())
+                                {
                                     if !accounts.is_empty() {
                                         return Ok(accounts);
                                     }
@@ -416,16 +458,39 @@ impl JmsClient {
         asset_id: &str,
         account: &str,
     ) -> Result<JmsConnectToken, JmsError> {
+        self.raw_create_connect_token_with(asset_id, account, "ssh", "web_cli")
+            .await
+    }
+
+    /// 申请指定协议/连接方式的 connect token（SFTP 用 `sftp` + `web_sftp`）。
+    pub async fn create_connect_token_for(
+        &mut self,
+        asset_id: &str,
+        account: &str,
+        protocol: &str,
+        connect_method: &str,
+    ) -> Result<JmsConnectToken, JmsError> {
+        self.raw_create_connect_token_with(asset_id, account, protocol, connect_method)
+            .await
+    }
+
+    async fn raw_create_connect_token_with(
+        &mut self,
+        asset_id: &str,
+        account: &str,
+        protocol: &str,
+        connect_method: &str,
+    ) -> Result<JmsConnectToken, JmsError> {
         // JumpServer v4/v5: POST /api/v1/authentication/connection-token/
         let url = format!("{}/api/v1/authentication/connection-token/", self.base_url);
 
         let body = serde_json::json!({
             "asset": asset_id,
             "account": account,
-            "protocol": "ssh",
+            "protocol": protocol,
             "input_username": account,
             "input_secret": "",
-            "connect_method": "web_cli",
+            "connect_method": connect_method,
             "connect_options": {
                 "charset": "default",
                 "disableautohash": false,
@@ -503,7 +568,10 @@ impl JmsClient {
 
     /// 请求 Koko connect-ticket 临时连接凭证（JumpServer v5 使用）
     pub async fn create_koko_ticket(&mut self, token_id: &str) -> Option<String> {
-        let url = format!("{}/koko/api/connect-ticket/", self.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/koko/api/connect-ticket/",
+            self.base_url.trim_end_matches('/')
+        );
         let org_id = self.org_id();
         let body = serde_json::json!({
             "token_id": token_id,
@@ -528,10 +596,7 @@ impl JmsClient {
                 None
             }
             Err(e) => {
-                tracing::info!(
-                    "请求 Koko connect-ticket 接口失败: {}，将尝试直接连接",
-                    e
-                );
+                tracing::info!("请求 Koko connect-ticket 接口失败: {}，将尝试直接连接", e);
                 None
             }
         }
@@ -590,10 +655,7 @@ impl JmsClient {
                     if let Some(info) = Self::parse_captcha_from_html(&text, &self.base_url) {
                         self.last_captcha_key = Some(info.key.clone());
                         let info = self.fill_captcha_image(info).await;
-                        return Ok(WebLoginResult::CaptchaRequired {
-                            info,
-                            error: None,
-                        });
+                        return Ok(WebLoginResult::CaptchaRequired { info, error: None });
                     }
                 }
             }
@@ -652,7 +714,8 @@ impl JmsClient {
 
         // 200:仍在登录/MFA 页,按响应体判定
         let captcha_submitted = captcha_value.is_some();
-        self.classify_login_page(&text, otp_code, captcha_submitted).await
+        self.classify_login_page(&text, otp_code, captcha_submitted)
+            .await
     }
 
     /// 跟随登录重定向链(最多若干跳),落到 luna/ui 即成功,落到 MFA/登录页则判定
@@ -1410,12 +1473,38 @@ pub enum JmsError {
 
     #[error("未认证")]
     NotAuthenticated,
+
+    /// 用户主动取消（传输类操作）
+    #[error("已取消")]
+    Cancelled,
 }
 
 #[cfg(test)]
 mod tests {
     use super::JmsClient;
     use gpui::http_client::http;
+
+    #[test]
+    fn parse_node_list_accepts_wrapped_and_empty_payloads() {
+        // 直接数组
+        let array = r#"[{"id":"n1","name":"root","title":"root"}]"#;
+        assert_eq!(super::parse_node_list(array).unwrap().len(), 1);
+
+        // 包一层 data
+        let wrapped = r#"{"data":[{"id":"n1","name":"root","title":"root"}]}"#;
+        assert_eq!(super::parse_node_list(wrapped).unwrap().len(), 1);
+
+        // 空对象 / 错误详情 都不应报错
+        assert!(super::parse_node_list("{}").unwrap().is_empty());
+        assert!(
+            super::parse_node_list(r#"{"detail":"未找到。"}"#)
+                .unwrap()
+                .is_empty()
+        );
+
+        // 真正的非法 JSON 仍然报错
+        assert!(super::parse_node_list("not json").is_err());
+    }
 
     #[test]
     fn normalizes_browser_cookie_encoding() {

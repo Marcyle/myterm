@@ -10,7 +10,7 @@ pub mod jms_asset_tree_panel;
 mod quick_command_panel;
 mod settings_panel;
 
-pub use file_manager_panel::{FileManagerPanel, FileManagerPanelEvent};
+pub use file_manager_panel::{FileManagerPanel, FileManagerPanelEvent, JmsSftpSource};
 pub use jms_asset_tree_panel::{JmsAssetTreePanel, JmsAssetTreePanelEvent};
 pub use quick_command_panel::QuickCommandPanel;
 pub use settings_panel::SettingsPanel;
@@ -171,6 +171,7 @@ impl TerminalSidebar {
         _ssh_config: Option<SshTerminalConfig>,
         ssh_session_manager: Option<Arc<SshSessionManager>>,
         jms_context: Option<JmsSidebarContext>,
+        jms_sftp: Option<file_manager_panel::JmsSftpSource>,
         initial_theme: &TerminalTheme,
         initial_font_size: Pixels,
         initial_font_family: SharedString,
@@ -195,10 +196,13 @@ impl TerminalSidebar {
         });
         let quick_command_panel = cx.new(|cx| QuickCommandPanel::new(connection_id, window, cx));
 
-        // 仅 SSH 终端（有 StoredConnection）时创建文件管理器面板
-        let file_manager_panel = stored_connection
-            .zip(ssh_session_manager.clone())
-            .map(|(conn, manager)| cx.new(|cx| FileManagerPanel::new(conn, manager, window, cx)));
+        // SSH 终端用直连 SFTP，JMS 终端用 Koko Web SFTP；两者都没有就不建面板
+        let file_manager_panel = match (stored_connection.clone(), ssh_session_manager.clone()) {
+            (Some(conn), Some(manager)) => {
+                Some(cx.new(|cx| FileManagerPanel::new(conn, manager, window, cx)))
+            }
+            _ => jms_sftp.map(|source| cx.new(|cx| FileManagerPanel::new_jms(source, window, cx))),
+        };
 
         // 订阅设置面板事件
         let set_sub = cx.subscribe(
@@ -356,6 +360,28 @@ impl TerminalSidebar {
             self.active_panel = panel;
             cx.emit(TerminalSidebarEvent::PanelChanged(panel));
             cx.notify();
+        }
+    }
+
+    /// JMS 资产切换后，把新的连接参数同步给文件管理器面板
+    pub fn update_jms_sftp_params(
+        &mut self,
+        params: jms::KokoConnectParams,
+        cx: &mut Context<Self>,
+    ) {
+        tracing::info!(
+            target: "terminal.sidebar.file_manager",
+            asset_id = params.asset_id.as_deref().unwrap_or(""),
+            has_cookie = params.session_cookie.is_some(),
+            has_ticket = params.ticket.is_some(),
+            "JMS 文件管理器参数已更新"
+        );
+        if let Some(ref fm_panel) = self.file_manager_panel {
+            fm_panel.update(cx, |panel, cx| panel.set_jms_params(params, cx));
+            // 文件管理器已经打开着就立刻重连，不必让用户手动点「重试」
+            if self.active_panel == Some(SidebarPanel::FileManager) {
+                fm_panel.update(cx, |panel, cx| panel.connect_if_idle(cx));
+            }
         }
     }
 

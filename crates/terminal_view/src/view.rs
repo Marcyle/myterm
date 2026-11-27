@@ -1384,6 +1384,7 @@ impl TerminalView {
             tab_index,
             None,
             Some(config_for_view),
+            None,
             window,
             cx,
         );
@@ -1431,6 +1432,7 @@ impl TerminalView {
             tab_index,
             jms_context,
             None,
+            Some(params_for_view.clone()),
             window,
             cx,
         );
@@ -1441,7 +1443,11 @@ impl TerminalView {
     pub fn connect_jms_koko(&mut self, params: jms::KokoConnectParams, cx: &mut Context<Self>) {
         self.koko_params = Some(params.clone());
         self.terminal.update(cx, |terminal, cx| {
-            terminal.connect_jms_koko(params, cx);
+            terminal.connect_jms_koko(params.clone(), cx);
+        });
+        // 资产已选定：把新参数同步给侧栏的 Web SFTP 文件管理器
+        self.sidebar.update(cx, |sidebar, cx| {
+            sidebar.update_jms_sftp_params(params, cx);
         });
     }
 
@@ -1461,6 +1467,7 @@ impl TerminalView {
             None,
             tab_index,
             jms_context,
+            None,
             None,
             window,
             cx,
@@ -1488,6 +1495,7 @@ impl TerminalView {
             tab_index,
             None,
             None,
+            None,
             window,
             cx,
         )
@@ -1502,6 +1510,7 @@ impl TerminalView {
         tab_index: Option<usize>,
         jms_context: Option<crate::sidebar::JmsSidebarContext>,
         local_config: Option<LocalConfig>,
+        koko_params: Option<jms::KokoConnectParams>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -1534,6 +1543,31 @@ impl TerminalView {
                 ctx.is_placeholder = false;
             }
         }
+        // JMS 终端：用同一个 JmsClient 打开 Web SFTP 文件管理器。
+        // SFTP 走 `?asset=` 方式（token 为空），避免 connect-token 不能复用的问题。
+        let jms_sftp = jms_context.as_ref().map(|ctx| {
+            let mut sftp_params = koko_params
+                .clone()
+                .unwrap_or_else(|| jms::KokoConnectParams {
+                    base_url: ctx.client.base_url().to_string(),
+                    token_id: String::new(),
+                    session_cookie: None,
+                    org_id: ctx.client.org_id(),
+                    proxy: ctx.proxy.clone(),
+                    title: String::new(),
+                    asset_id: None,
+                    account_name: None,
+                    account_id: None,
+                    ticket: None,
+                });
+            // SFTP 用 `?asset=` 方式，token 不复用
+            sftp_params.token_id = String::new();
+            sftp_params.ticket = None;
+            crate::sidebar::JmsSftpSource {
+                client: ctx.client.clone(),
+                params: sftp_params,
+            }
+        });
         let jms_context_for_view = jms_context.clone();
         let sidebar = cx.new(|cx| {
             TerminalSidebar::new(
@@ -1542,6 +1576,7 @@ impl TerminalView {
                 ssh_config,
                 ssh_session_manager,
                 jms_context,
+                jms_sftp,
                 &default_theme,
                 default_font_size,
                 default_font_family.clone(),
@@ -1814,12 +1849,10 @@ impl TerminalView {
                 ));
             }
             TerminalSidebarEvent::ConnectJmsInCurrentTab(params) => {
-                // 在本 tab(占位终端)上直接连接,不新开 tab
-                // 保存连接参数,以便后续复制该标签页时能重新申请 token
-                self.koko_params = Some(params.clone());
-                self.terminal.update(cx, |t, cx| {
-                    t.connect_jms_koko(params.clone(), cx);
-                });
+                // 在本 tab(占位终端)上直接连接,不新开 tab。
+                // 统一走 connect_jms_koko：它会把参数同步给侧栏的 Web SFTP 文件管理器
+                // （占位 tab 首次选资产时走的就是这条路径）。
+                self.connect_jms_koko(params.clone(), cx);
             }
         }
     }
@@ -2611,10 +2644,10 @@ impl TerminalView {
     /// 终端右下角的传输进度卡片。
     fn render_zmodem_overlay(&self, _cx: &mut Context<Self>) -> Option<AnyElement> {
         let state = self.zmodem_transfer.as_ref()?;
-        let ratio = state
-            .total
-            .filter(|total| *total > 0)
-            .map(|total| (state.transferred as f32 / total as f32).clamp(0.0, 1.0));
+        // gpui-component 的 Progress 取值是「百分比 0..100」，不是 0..1
+        let percent = state.total.filter(|total| *total > 0).map(|total| {
+            (state.transferred as f64 / total as f64 * 100.0).clamp(0.0, 100.0) as f32
+        });
         let title = if state.direction.is_download() {
             t!("Zmodem.downloading").to_string()
         } else {
@@ -2622,9 +2655,10 @@ impl TerminalView {
         };
         let detail = match state.total {
             Some(total) if total > 0 => format!(
-                "{} / {}",
+                "{} / {}  {:.0}%",
                 format_transfer_size(state.transferred),
-                format_transfer_size(total)
+                format_transfer_size(total),
+                percent.unwrap_or(0.0)
             ),
             _ => format_transfer_size(state.transferred),
         };
@@ -2666,7 +2700,7 @@ impl TerminalView {
                                 .child(format!("{title} {}", state.file_name)),
                         ),
                 )
-                .child(Progress::new("zmodem-transfer-progress").value(ratio.unwrap_or(0.0)))
+                .child(Progress::new("zmodem-transfer-progress").value(percent.unwrap_or(0.0)))
                 .child(
                     div()
                         .text_xs()

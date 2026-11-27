@@ -11,6 +11,7 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 rust-i18n = { workspace = true }
 russh = { workspace = true }
+jms = { path = "../jms" }
 russh-sftp = { workspace = true }
 ssh = { workspace = true }
 tokio-socks = { workspace = true }

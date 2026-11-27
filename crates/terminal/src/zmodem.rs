@@ -25,6 +25,8 @@ use tokio::sync::oneshot;
 use zmodem2::{Receiver as ZmodemReceiver, ReceiverEvent, Sender as ZmodemSender, SenderEvent};
 
 /// ZMODEM 帧头前缀：`*` `*` ZDLE。
+/// ZMODEM 转义字符（ZDLE）
+const ZDLE: u8 = 0x18;
 const START_PREFIX: &[u8] = b"**\x18";
 /// 帧头标记字节（十六进制帧）。
 const HEX_FRAME_MARK: u8 = b'B';
@@ -523,6 +525,10 @@ struct UploadFile {
     sent: u64,
     /// 当前文件读指针，避免每个子包都 seek
     position: u64,
+    /// 本地文件的修改时间（秒），写进 ZFILE 让远端 rz 恢复时间
+    modified: Option<u32>,
+    /// 本地文件的权限位（含 0o100000 普通文件标记）
+    mode: Option<u32>,
 }
 
 fn emit_progress(
@@ -793,6 +799,7 @@ fn run_upload(
                                 .unwrap_or_else(|| "upload.bin".to_string());
                             let file = File::open(&path)
                                 .map_err(|err| format!("打开文件失败 {}: {err}", path.display()))?;
+                            let (modified, mode) = local_file_time_and_mode(&path, &meta);
                             queue.push_back(UploadFile {
                                 path,
                                 name,
@@ -800,6 +807,8 @@ fn run_upload(
                                 size: meta.len(),
                                 sent: 0,
                                 position: 0,
+                                modified,
+                                mode,
                             });
                         }
                         if queue.is_empty() {
@@ -828,6 +837,29 @@ fn run_upload(
                 machine
                     .start_file(file.name.as_bytes(), file.size.min(u32::MAX as u64) as u32)
                     .map_err(|err| format!("发送文件名失败: {err}"))?;
+
+                // zmodem2 0.5 的 ZFILE 只带「文件名 + 大小」，lrzsz 的 rz 因此会把文件时间
+                // 写成接收时刻。这里把这一帧重建成带 mtime/mode 的版本（rz 会据此 utime/chmod）。
+                let (frame, original_len) = {
+                    let outgoing = machine.drain_outgoing();
+                    let original_len = outgoing.len();
+                    let frame = if outgoing.starts_with(&[0x2a, ZDLE, 0x43]) {
+                        build_zfile_frame(
+                            file.name.as_bytes(),
+                            file.size,
+                            file.modified,
+                            file.mode,
+                        )
+                    } else {
+                        outgoing.to_vec()
+                    };
+                    (frame, original_len)
+                };
+                if original_len > 0 {
+                    machine.advance_outgoing(original_len);
+                    write(&frame);
+                }
+
                 emit(ZmodemEvent::Started {
                     session,
                     direction: ZmodemDirection::Upload,
@@ -1079,6 +1111,133 @@ fn find_remote_zrinit(data: &[u8]) -> Option<(u16, u8)> {
     None
 }
 
+/// ZMODEM 转义表（与 zmodem2 内部实现逐字节一致）。
+const ZDLE_TABLE: [u8; 256] = [
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x4d, 0x0e, 0x0f,
+    0x50, 0x51, 0x12, 0x53, 0x14, 0x15, 0x16, 0x17, 0x58, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
+    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f,
+    0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f,
+    0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a, 0x5b, 0x5c, 0x5d, 0x5e, 0x5f,
+    0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f,
+    0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x6c,
+    0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0xcd, 0x8e, 0x8f,
+    0xd0, 0xd1, 0x92, 0xd3, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9e, 0x9f,
+    0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf,
+    0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba, 0xbb, 0xbc, 0xbd, 0xbe, 0xbf,
+    0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xce, 0xcf,
+    0xd0, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf,
+    0xe0, 0xe1, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9, 0xea, 0xeb, 0xec, 0xed, 0xee, 0xef,
+    0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0x6d,
+];
+
+/// 读取本地文件的修改时间（秒）与权限位（含 0o100000 普通文件标记）。
+fn local_file_time_and_mode(path: &Path, meta: &std::fs::Metadata) -> (Option<u32>, Option<u32>) {
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs().min(u32::MAX as u64) as u32);
+
+    #[cfg(unix)]
+    let mode = Some(std::os::unix::fs::PermissionsExt::mode(&meta.permissions()));
+    #[cfg(not(unix))]
+    let mode = {
+        let _ = path;
+        Some(if meta.permissions().readonly() {
+            0o100444
+        } else {
+            0o100644
+        })
+    };
+
+    (modified, mode)
+}
+
+/// 按 ZMODEM 规则转义写入（ZDLE + 映射字节）。
+fn push_escaped(out: &mut Vec<u8>, data: &[u8]) {
+    for &byte in data {
+        let escaped = ZDLE_TABLE[byte as usize];
+        if escaped != byte {
+            out.push(ZDLE);
+        }
+        out.push(escaped);
+    }
+}
+
+/// CRC-32/ISO-HDLC（zlib 多项式，反射），与 zmodem2 的 CRC32 一致。
+fn crc32_iso_hdlc(data: &[u8]) -> u32 {
+    let mut crc: u32 = 0xFFFF_FFFF;
+    for &byte in data {
+        crc ^= byte as u32;
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+/// 自行拼出一个带「修改时间 + 权限」的 ZFILE 帧（ZBIN32）。
+///
+/// zmodem2 0.5 的 `start_file` 只发 `文件名 + 大小` 两个字段，lrzsz 的 `rz` 因此会把文件时间
+/// 写成接收时刻。这里按 lrzsz 的格式补上 `size mtime mode`（mtime/mode 均为八进制），
+/// 让 rz 收到后调用 utime/chmod。
+fn build_zfile_frame(
+    name: &[u8],
+    size: u64,
+    modified: Option<u32>,
+    mode: Option<u32>,
+) -> Vec<u8> {
+    /// ZPAD
+    const ZPAD: u8 = 0x2a;
+    /// ZBIN32 编码标记
+    const ENCODING_ZBIN32: u8 = 0x43;
+    /// ZFILE 帧类型
+    const FRAME_ZFILE: u8 = 4;
+    /// ZCRCW 子包类型
+    const KIND_ZCRCW: u8 = 0x6b;
+
+    let mut payload = Vec::with_capacity(name.len() + 32);
+    payload.extend_from_slice(name);
+    payload.push(0);
+    payload.extend_from_slice(size.to_string().as_bytes());
+    if modified.is_some() || mode.is_some() {
+        payload.push(b' ');
+        payload.extend_from_slice(format!("{:o}", modified.unwrap_or(0)).as_bytes());
+    }
+    if let Some(mode) = mode {
+        payload.push(b' ');
+        payload.extend_from_slice(format!("{mode:o}").as_bytes());
+    }
+    payload.push(0);
+
+    let mut frame = Vec::with_capacity(payload.len() * 2 + 32);
+    frame.push(ZPAD);
+    frame.push(ZDLE);
+    frame.push(ENCODING_ZBIN32);
+
+    // 头：帧类型 + 4 字节参数 + CRC32(LE)
+    let mut head = vec![FRAME_ZFILE, 0, 0, 0, 0];
+    let head_crc = crc32_iso_hdlc(&head);
+    head.extend_from_slice(&head_crc.to_le_bytes());
+    push_escaped(&mut frame, &head);
+
+    // 子包：payload + ZDLE + 类型 + CRC32(payload+类型, LE)
+    push_escaped(&mut frame, &payload);
+    frame.push(ZDLE);
+    frame.push(KIND_ZCRCW);
+    let mut crc_input = payload.clone();
+    crc_input.push(KIND_ZCRCW);
+    let data_crc = crc32_iso_hdlc(&crc_input);
+    push_escaped(&mut frame, &data_crc.to_le_bytes());
+
+    frame
+}
+
 /// CRC-16/XMODEM（poly 0x1021，初值 0），与 ZMODEM 十六进制帧头一致。
 fn crc16_xmodem(data: &[u8]) -> u16 {
     let mut crc: u16 = 0;
@@ -1254,6 +1413,41 @@ mod tests {
         );
         assert_eq!(frame_direction(b"01000000"), Some(ZmodemDirection::Upload));
         assert_eq!(frame_direction(b"04000000"), None);
+    }
+
+    #[test]
+    fn zfile_frame_matches_lrzsz_field_layout() {
+        // 载荷格式：`name size mtime mode `，mtime/mode 为八进制
+        let frame = build_zfile_frame(b"a.txt", 1234, Some(1_700_000_000), Some(0o100644));
+        // 帧头：ZPAD ZDLE ZBIN32
+        assert_eq!(&frame[..3], &[0x2a, ZDLE, 0x43]);
+
+        // 反向解析：去掉转义后应是 帧类型(4)+4字节参数+CRC32 + 载荷 + ZDLE + kind + CRC32
+        let mut raw = Vec::new();
+        let mut index = 3;
+        while index < frame.len() {
+            if frame[index] == ZDLE {
+                raw.push(frame[index + 1]);
+                index += 2;
+            } else {
+                raw.push(frame[index]);
+                index += 1;
+            }
+        }
+        assert_eq!(raw[0], 4, "ZFILE 帧类型");
+        let payload_start = 9; // 类型1 + 参数4 + CRC32 4
+        let payload_end = raw.len() - 1 - 4; // 末尾 ZDLE+kind(2) + CRC32(4) → 载荷到 kind 前
+        let payload = &raw[payload_start..payload_end];
+        let mut expected: Vec<u8> = Vec::new();
+        expected.extend_from_slice(b"a.txt\0");
+        expected.extend_from_slice(b"1234 14524770400 100644\0");
+        assert_eq!(payload, expected.as_slice(), "ZFILE 载荷格式应与 lrzsz 一致");
+    }
+
+    #[test]
+    fn crc32_matches_standard_vector() {
+        // CRC-32/ISO-HDLC 的标准校验值
+        assert_eq!(crc32_iso_hdlc(b"123456789"), 0xCBF43926);
     }
 
     #[test]

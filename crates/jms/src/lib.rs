@@ -8,7 +8,10 @@
 mod client;
 mod koko;
 mod models;
+mod websftp;
+mod wsconn;
 
 pub use client::{JmsClient, JmsError, WebLoginResult};
 pub use koko::{KokoChannel, KokoConnectParams, KokoEvent, KokoProxy};
+pub use websftp::{SftpFileEntry, WebSftpChannel};
 pub use models::*;

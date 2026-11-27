@@ -4,6 +4,7 @@
 //! UI 参考 `sftp_view` 的 `FileListPanel`，但为侧边栏场景做了精简和适配。
 //! 支持文件传输（上传/下载/拖拽），使用独立的传输连接避免阻塞浏览。
 
+use anyhow::anyhow;
 use chrono::{DateTime, Local};
 use gpui::{
     App, ClipboardItem, Context, Entity, EventEmitter, ExternalPaths, FocusHandle, Focusable,
@@ -34,7 +35,7 @@ use one_core::storage::{
     sftp_favorite_connection_key,
 };
 use rust_i18n::t;
-use sftp::{RusshSftpClient, SftpClient, TransferCancelled, TransferProgress};
+use sftp::{SftpClient, SftpConnection, TransferCancelled, TransferProgress};
 use ssh::{ChannelEvent, SshChannel, SshSessionManager};
 use std::collections::{HashSet, VecDeque};
 use std::ops::Range;
@@ -343,6 +344,15 @@ fn format_file_size(size: u64) -> String {
 fn format_modified_time(time: SystemTime) -> String {
     let datetime: DateTime<Local> = time.into();
     let now = Local::now();
+    // 后端给出异常时间戳时不要显示天文数字
+    let year = datetime
+        .format("%Y")
+        .to_string()
+        .parse::<i32>()
+        .unwrap_or(0);
+    if !(1970..=2100).contains(&year) {
+        return "-".to_string();
+    }
     // 同年使用 M/D HH:MM，不同年使用 YYYY/M/D
     if datetime.format("%Y").to_string() == now.format("%Y").to_string() {
         datetime.format("%-m/%-d %H:%M").to_string()
@@ -669,7 +679,7 @@ fn update_delete_progress(progress: &SharedProgress, name: &str, transferred: u6
 }
 
 async fn delete_remote_target(
-    client: &mut RusshSftpClient,
+    client: &mut SftpConnection,
     target: &DeleteTarget,
     cancelled: Arc<AtomicBool>,
     progress: Arc<SharedProgress>,
@@ -701,7 +711,7 @@ async fn delete_remote_target(
 }
 
 async fn delete_targets_with_progress(
-    client: Arc<Mutex<RusshSftpClient>>,
+    client: Arc<Mutex<SftpConnection>>,
     targets: Vec<DeleteTarget>,
     progress: Arc<SharedProgress>,
 ) -> anyhow::Result<()> {
@@ -800,12 +810,95 @@ async fn remote_extract_has_conflict(
 /// 从 StoredConnection 构建 SshConnectConfig
 // ── FileManagerPanel ──────────────────────────────────────────
 
+/// JumpServer Web SFTP 的连接来源
+#[derive(Clone)]
+pub struct JmsSftpSource {
+    /// 已认证的 JMS 客户端（保留会话 cookie / 组织信息）
+    pub client: jms::JmsClient,
+    /// Koko 连接参数（SFTP 走 `?asset=` 方式，token_id 留空以支持多连接）
+    pub params: jms::KokoConnectParams,
+}
+
+/// 文件管理器的连接来源
+#[derive(Clone)]
+enum SftpSource {
+    /// SSH 直连（复用终端会话）
+    Ssh(Arc<SshSessionManager>),
+    /// JumpServer Web SFTP
+    Jms(JmsSftpSource),
+}
+
+impl SftpSource {
+    async fn open(&self) -> anyhow::Result<SftpConnection> {
+        match self {
+            SftpSource::Ssh(manager) => {
+                let shared_client = manager.client().await?;
+                SftpConnection::from_shared_ssh(shared_client).await
+            }
+            SftpSource::Jms(source) => {
+                // 先用「?asset= + 会话 Cookie/票据」直连（与 Luna 文件管理器一致）
+                match SftpConnection::connect_jms(source.params.clone()).await {
+                    Ok(connection) => Ok(connection),
+                    Err(first_error) => {
+                        // 失败再退化为「申请专用 sftp connect-token + 新票据」
+                        match Self::open_jms_with_fresh_token(source).await {
+                            Ok(connection) => Ok(connection),
+                            Err(second_error) => Err(anyhow!(
+                                "{first_error}（专用 sftp token 重试也失败：{second_error}）"
+                            )),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// 申请一个 `protocol=sftp / connect_method=web_sftp` 的连接凭证再重连。
+    async fn open_jms_with_fresh_token(source: &JmsSftpSource) -> anyhow::Result<SftpConnection> {
+        let asset_id = source
+            .params
+            .asset_id
+            .clone()
+            .ok_or_else(|| anyhow!("缺少资产 ID，无法申请 sftp 连接凭证"))?;
+        let account = source
+            .params
+            .account_id
+            .clone()
+            .or_else(|| source.params.account_name.clone())
+            .ok_or_else(|| anyhow!("缺少账号信息，无法申请 sftp 连接凭证"))?;
+
+        let mut client = source.client.clone();
+        let token = client
+            .create_connect_token_for(&asset_id, &account, "sftp", "web_sftp")
+            .await
+            .map_err(|err| anyhow!("申请 sftp 连接凭证失败: {err}"))?;
+        let ticket = client.create_koko_ticket(&token.id).await;
+
+        let mut params = source.params.clone();
+        params.token_id = token.id;
+        params.ticket = ticket;
+        SftpConnection::connect_jms(params).await
+    }
+
+    fn is_jms(&self) -> bool {
+        matches!(self, SftpSource::Jms(_))
+    }
+
+    /// 需要执行远端 shell 命令的能力（解压等）只有 SSH 直连支持
+    fn ssh_manager(&self) -> Option<Arc<SshSessionManager>> {
+        match self {
+            SftpSource::Ssh(manager) => Some(manager.clone()),
+            SftpSource::Jms(_) => None,
+        }
+    }
+}
+
 /// 终端侧边栏文件管理器面板
 pub struct FileManagerPanel {
-    /// 共享 SSH 会话管理器
-    session_manager: Arc<SshSessionManager>,
+    /// 连接来源（SSH 直连 / JumpServer Web SFTP）
+    source: SftpSource,
     /// SFTP 客户端（浏览用）
-    sftp_client: Option<Arc<Mutex<RusshSftpClient>>>,
+    sftp_client: Option<Arc<Mutex<SftpConnection>>>,
     /// 连接状态
     connection_state: ConnectionState,
     /// 当前远程路径
@@ -852,7 +945,7 @@ pub struct FileManagerPanel {
 
     // ── 传输相关字段 ──
     /// 独立的传输 SFTP 连接（懒创建）
-    transfer_client: Option<Arc<Mutex<RusshSftpClient>>>,
+    transfer_client: Option<Arc<Mutex<SftpConnection>>>,
     /// 传输队列
     transfer_queue: TransferQueue,
     /// 下一个任务 ID
@@ -873,6 +966,35 @@ impl FileManagerPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        Self::build(
+            SftpSource::Ssh(session_manager),
+            stored_connection.id,
+            sftp_favorite_connection_key(&stored_connection),
+            window,
+            cx,
+        )
+    }
+
+    /// JumpServer 终端：用 Web SFTP 通道浏览/传输文件
+    pub fn new_jms(source: JmsSftpSource, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let key = format!(
+            "jms:{}",
+            source
+                .params
+                .asset_id
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string())
+        );
+        Self::build(SftpSource::Jms(source), None, key, window, cx)
+    }
+
+    fn build(
+        source: SftpSource,
+        favorite_connection_id: Option<i64>,
+        favorite_connection_key: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus_handle = cx.focus_handle();
         let search_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(t!("FileManager.search_placeholder"))
@@ -885,8 +1007,6 @@ impl FileManagerPanel {
         let favorite_edit_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(t!("FileManager.favorite_edit_placeholder"))
         });
-        let favorite_connection_id = stored_connection.id;
-        let favorite_connection_key = sftp_favorite_connection_key(&stored_connection);
         let favorite_paths = Self::load_favorite_paths(&favorite_connection_key, cx);
 
         let mut subscriptions = Vec::new();
@@ -933,7 +1053,7 @@ impl FileManagerPanel {
         ));
 
         Self {
-            session_manager,
+            source,
             sftp_client: None,
             connection_state: ConnectionState::Idle,
             current_path: "/".to_string(),
@@ -978,14 +1098,36 @@ impl FileManagerPanel {
             return;
         }
 
+        // JMS 需要先选定资产（asset_id）且保留有效会话 Cookie
+        if let SftpSource::Jms(source) = &self.source {
+            if source.params.asset_id.as_deref().unwrap_or("").is_empty() {
+                self.connection_state =
+                    ConnectionState::Error("请先在左侧资产树选择要连接的资产".to_string());
+                cx.notify();
+                return;
+            }
+            if source
+                .params
+                .session_cookie
+                .as_deref()
+                .unwrap_or("")
+                .is_empty()
+            {
+                self.connection_state = ConnectionState::Error(
+                    "JMS 会话已失效，请重新登录后再打开文件管理器".to_string(),
+                );
+                cx.notify();
+                return;
+            }
+        }
+
         self.connection_state = ConnectionState::Connecting;
         cx.notify();
 
         let initial_dir = self.working_dir_hint.clone();
-        let session_manager = self.session_manager.clone();
+        let source = self.source.clone();
         let task = Tokio::spawn(cx, async move {
-            let shared_client = session_manager.client().await?;
-            let mut client = RusshSftpClient::connect_with_client(shared_client).await?;
+            let mut client = source.open().await?;
             // 优先使用终端当前工作目录，否则回退到 realpath(".")
             let real_path = if let Some(dir) = initial_dir {
                 dir
@@ -1035,6 +1177,26 @@ impl FileManagerPanel {
     }
 
     /// 仅在 Idle 状态时自动连接（用于面板首次激活）
+    /// 更新 JMS 连接参数（资产切换后重新指向新的资产）。
+    pub fn set_jms_params(&mut self, params: jms::KokoConnectParams, cx: &mut Context<Self>) {
+        let SftpSource::Jms(source) = &mut self.source else {
+            return;
+        };
+        let mut params = params;
+        // SFTP 优先用 `?asset=` + 会话 Cookie；v5 的 connect ticket 保留下来一起发，
+        // 服务端据此判定 WS 鉴权（复用票据失败时 open() 会退化为申请专用 token）。
+        params.token_id = String::new();
+        source.params = params;
+        self.sftp_client = None;
+        self.transfer_client = None;
+        self.connection_state = ConnectionState::Idle;
+        self.current_path = "/".to_string();
+        self.items.clear();
+        self.filtered_indices.clear();
+        self.selected_indices.clear();
+        cx.notify();
+    }
+
     pub fn connect_if_idle(&mut self, cx: &mut Context<Self>) {
         if self.connection_state == ConnectionState::Idle {
             self.connect(cx);
@@ -1490,7 +1652,7 @@ impl FileManagerPanel {
         let path = self.current_path.clone();
         let listed_path = path.clone();
         let task = Tokio::spawn(cx, async move {
-            let mut client: tokio::sync::MutexGuard<'_, RusshSftpClient> = client.lock().await;
+            let mut client: tokio::sync::MutexGuard<'_, SftpConnection> = client.lock().await;
             client.list_dir(&path).await
         });
 
@@ -1690,12 +1852,17 @@ impl FileManagerPanel {
             return;
         }
 
-        let session_manager = self.session_manager.clone();
-        let connect_task = Tokio::spawn(cx, async move {
-            let shared_client = session_manager.client().await?;
-            let client = RusshSftpClient::connect_with_client(shared_client).await?;
-            Ok::<_, anyhow::Error>(client)
-        });
+        // JMS Web SFTP 复用浏览连接（WS 会话较贵，且服务端可能限制并发）
+        if self.source.is_jms()
+            && let Some(existing) = self.sftp_client.clone()
+        {
+            self.transfer_client = Some(existing);
+            self.schedule_transfers(cx);
+            return;
+        }
+
+        let source = self.source.clone();
+        let connect_task = Tokio::spawn(cx, async move { source.open().await });
 
         cx.spawn(async move |this, cx| {
             let result = match connect_task.await {
@@ -2679,7 +2846,13 @@ impl FileManagerPanel {
             return;
         };
 
-        let session_manager = self.session_manager.clone();
+        let Some(session_manager) = self.source.ssh_manager() else {
+            window.push_notification(
+                Notification::error(t!("FileManager.extract_unsupported")),
+                cx,
+            );
+            return;
+        };
         let view = cx.entity().clone();
         let task = Tokio::spawn(cx, async move {
             remote_extract_has_conflict(session_manager, &check_command).await
@@ -2818,7 +2991,14 @@ impl FileManagerPanel {
         });
         cx.notify();
 
-        let session_manager = self.session_manager.clone();
+        let Some(session_manager) = self.source.ssh_manager() else {
+            self.active_extract = None;
+            window.push_notification(
+                Notification::error(t!("FileManager.extract_unsupported")),
+                cx,
+            );
+            return;
+        };
         let view = cx.entity().clone();
         let task = Tokio::spawn(cx, async move {
             exec_remote_command(session_manager, &command).await
