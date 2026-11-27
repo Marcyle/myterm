@@ -16,6 +16,8 @@ jms = { path = "../jms" }
 
 # Terminal emulation
 alacritty_terminal.workspace = true
+zmodem2.workspace = true
+polling.workspace = true
 serde = { workspace = true }
 tracing = { workspace = true }
 serialport = { workspace = true }

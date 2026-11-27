@@ -79,6 +79,8 @@ pub enum TerminalModelEvent {
     ClipboardStore(String),
     /// 远程工作目录变更（OSC 7）
     WorkingDirChanged(String),
+    /// ZMODEM（rz/sz）文件传输事件
+    Zmodem(crate::zmodem::ZmodemEvent),
 }
 
 /// 终端连接状态
@@ -873,7 +875,12 @@ impl Terminal {
             #[cfg(target_os = "windows")]
             escape_args: true,
         };
-        let local_backend = LocalPtyBackend::new(term.clone(), event_proxy.clone(), pty_options)?;
+        let local_backend = LocalPtyBackend::new(
+            term.clone(),
+            event_proxy.clone(),
+            pty_options,
+            event_tx.clone(),
+        )?;
 
         Self::spawn_event_loop(event_rx, event_proxy.wakeup_pending_handle(), cx);
         Self::spawn_local_history_loader(history_shell.as_deref(), cx);
@@ -1691,6 +1698,9 @@ impl Terminal {
             }
             TerminalEvent::CommandRecorded(command) => {
                 self.record_history_entry(&command, cx);
+            }
+            TerminalEvent::Zmodem(event) => {
+                cx.emit(TerminalModelEvent::Zmodem(event));
             }
         }
     }

@@ -113,6 +113,10 @@ sha2 = "0.10"
 # Terminal emulation
 alacritty_terminal = "0.26"
 
+# ZMODEM (rz/sz) 文件传输
+zmodem2 = "0.5"
+polling = "3.10"
+
 # Serial port
 serialport = "4"
 

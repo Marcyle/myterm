@@ -10,6 +10,7 @@ use gpui_component::dock::{Panel, PanelEvent, PanelInfo, PanelState, TabPanel, r
 use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_component::notification::Notification;
+use gpui_component::progress::Progress;
 use gpui_component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarShow};
 use gpui_component::{
     BlinkCursor, Icon, IconName, Sizable, Size, WindowExt, h_flex, kbd::Kbd, v_flex,
@@ -71,6 +72,7 @@ use terminal::terminal::{
     ConnectionState, Terminal, TerminalConnectionKind, TerminalModelEvent, TerminalScrollProxy,
     resolve_local_working_dir,
 };
+use terminal::zmodem::{ZmodemDirection, ZmodemEvent};
 use tokio::sync::Mutex;
 
 actions!(
@@ -443,81 +445,114 @@ fn has_unterminated_shell_quote(text: &str) -> bool {
     in_single_quote || in_double_quote
 }
 
-fn has_multiline_shell_structure(text: &str) -> bool {
-    if text.lines().any(|line| line.trim().is_empty()) {
-        return true;
+/// 多行粘贴里「一旦按行拆开就会改变语义」的结构。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MultilineShellStructure {
+    /// `if/for/while/case` 等块起始关键字，且同一行里没有结束该块
+    BlockKeyword,
+    /// heredoc（`cat <<EOF`）
+    Heredoc,
+    /// 引号跨行
+    MultilineQuote,
+    /// 圆括号/花括号跨行未闭合
+    OpenGroup,
+}
+
+impl MultilineShellStructure {
+    fn label(self) -> &'static str {
+        match self {
+            Self::BlockKeyword => "block-keyword",
+            Self::Heredoc => "heredoc",
+            Self::MultilineQuote => "multiline-quote",
+            Self::OpenGroup => "open-group",
+        }
     }
-    if text.lines().any(|line| {
-        let keyword = line
-            .trim_start()
+}
+
+/// 判断多行粘贴里是否含有「必须整体输入」的结构。
+///
+/// 只看**跨行**的构造：单行里的 `|`、`;`、`&&`、`>`、`2>&1`、成对引号都是
+/// 一条完整命令的一部分，拆开按行发送完全没问题（之前把它们也当成结构，
+/// 结果含管道的命令批量粘贴就退化成了整段粘贴）。
+fn detect_multiline_shell_structure(text: &str) -> Option<MultilineShellStructure> {
+    // heredoc 必须整体输入
+    if text.contains("<<") {
+        return Some(MultilineShellStructure::Heredoc);
+    }
+
+    // 块起始关键字：本行内没有对应的结束关键字才算跨行结构
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let keyword = trimmed
             .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | '(' | ')' | '{' | '}'))
             .next()
             .unwrap_or_default();
-        matches!(
+        let closed_inline = match keyword {
+            "if" => trimmed.contains("fi"),
+            "for" | "while" | "until" | "select" => trimmed.contains("done"),
+            "case" => trimmed.contains("esac"),
+            "function" => trimmed.contains('}') || trimmed.contains("end"),
+            "do" | "then" | "elif" | "else" | "fi" | "done" | "esac" => true,
+            _ => true,
+        };
+        let opens_block = matches!(
             keyword,
-            "if" | "then"
-                | "elif"
-                | "else"
-                | "fi"
-                | "for"
-                | "while"
-                | "until"
-                | "select"
-                | "do"
-                | "done"
-                | "case"
-                | "esac"
-                | "function"
-        )
-    }) {
-        return true;
+            "if" | "for" | "while" | "until" | "select" | "case" | "function"
+        );
+        if opens_block && !closed_inline {
+            return Some(MultilineShellStructure::BlockKeyword);
+        }
     }
 
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
+    let mut group_depth = 0i32;
+    let mut in_single = false;
+    let mut in_double = false;
     let mut escaped = false;
 
     for ch in text.chars() {
-        if in_single_quote {
+        if in_single {
             if ch == '\'' {
-                in_single_quote = false;
+                in_single = false;
             } else if ch == '\n' {
-                return true;
+                return Some(MultilineShellStructure::MultilineQuote);
             }
             continue;
         }
-
-        if in_double_quote {
+        if in_double {
             if escaped {
                 escaped = false;
             } else if ch == '\\' {
                 escaped = true;
             } else if ch == '"' {
-                in_double_quote = false;
+                in_double = false;
             } else if ch == '\n' {
-                return true;
+                return Some(MultilineShellStructure::MultilineQuote);
             }
             continue;
         }
-
         if escaped {
-            if ch == '\n' {
-                return true;
-            }
+            // 行尾反斜杠是续行，由 split_batch_commands 合并处理
             escaped = false;
             continue;
         }
-
         match ch {
             '\\' => escaped = true,
-            '\'' => in_single_quote = true,
-            '"' => in_double_quote = true,
-            '|' | '&' | ';' | '(' | ')' | '{' | '}' | '<' | '>' | '`' => return true,
+            '\'' => in_single = true,
+            '"' => in_double = true,
+            '(' | '{' => group_depth += 1,
+            ')' | '}' => group_depth -= 1,
+            '\n' if group_depth > 0 => {
+                return Some(MultilineShellStructure::OpenGroup);
+            }
             _ => {}
         }
     }
 
-    false
+    None
+}
+
+fn has_multiline_shell_structure(text: &str) -> bool {
+    detect_multiline_shell_structure(text).is_some()
 }
 
 fn detect_unbracketed_paste_hazard(text: &str) -> Option<UnbracketedPasteHazard> {
@@ -559,6 +594,13 @@ fn shell_escape(s: &str) -> String {
     }
 }
 
+/// 批量命令队列：首条命令的等待时间（无 shell integration 时）。
+///
+/// 旧实现固定每条等 1500ms，一屏命令要等十几秒；这里改成按「输出静默」推进。
+const COMMAND_QUEUE_FIRST_DELAY: Duration = Duration::from_millis(150);
+/// 批量命令队列：上一条命令输出静默多久后发送下一条。
+const COMMAND_QUEUE_QUIET_DELAY: Duration = Duration::from_millis(300);
+
 /// 把多行文本拆分为批量命令队列。
 ///
 /// 以换行符分隔命令，但会把行尾带反斜杠（`\`）的续行与其下一行合并为
@@ -583,7 +625,12 @@ fn split_batch_commands(text: &str) -> Option<Vec<String>> {
         current.push_str(line);
 
         let trimmed = line.trim_end();
-        let is_continuation = trimmed.ends_with('\\') || trimmed.ends_with('`');
+        // 行尾续行：反斜杠/反引号，以及悬空的管道与逻辑运算符
+        let is_continuation = trimmed.ends_with('\\')
+            || trimmed.ends_with('`')
+            || trimmed.ends_with("&&")
+            || trimmed.ends_with("||")
+            || trimmed.ends_with('|');
         if trimmed.is_empty() || !is_continuation {
             commands.push(std::mem::take(&mut current));
         }
@@ -600,13 +647,14 @@ fn split_batch_commands(text: &str) -> Option<Vec<String>> {
     }
 }
 
-fn batch_commands_for_paste(
-    use_bracketed: bool,
-    is_alt_screen: bool,
-    is_local: bool,
-    text: &str,
-) -> Option<Vec<String>> {
-    if use_bracketed || is_alt_screen || is_local || has_multiline_shell_structure(text) {
+/// 多行粘贴是否应该拆成「一条条发送」的队列。
+///
+/// 只有两种情况不拆：alt screen（vim/less 里的粘贴是数据不是命令）、
+/// 以及 `if/for/heredoc/引号跨行` 这类必须整体输入的 shell 结构。
+/// 即使远端 shell 支持 bracketed paste 也仍然逐条发送——整段粘贴会把
+/// 所有命令的输出一股脑吐出来，看不出每条命令对应哪段结果。
+fn batch_commands_for_paste(is_alt_screen: bool, text: &str) -> Option<Vec<String>> {
+    if is_alt_screen || has_multiline_shell_structure(text) {
         return None;
     }
 
@@ -1008,6 +1056,32 @@ struct SshMfaInput {
     input: Entity<InputState>,
 }
 
+/// ZMODEM（rz/sz）传输的界面状态，用于右下角进度卡片。
+#[derive(Clone, Debug)]
+struct ZmodemTransferState {
+    session: u64,
+    direction: ZmodemDirection,
+    file_name: String,
+    transferred: u64,
+    total: Option<u64>,
+}
+
+/// 字节数的人类可读格式（ZMODEM 进度展示用）。
+fn format_transfer_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0usize;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
 /// Terminal view component - supports both Local and SSH backends
 pub struct TerminalView {
     // ====== 核心组件 ======
@@ -1067,6 +1141,8 @@ pub struct TerminalView {
     terminal_bounds: Bounds<Pixels>,
     /// False while a pane is collapsed, hidden, or has not received a valid layout.
     pane_visible: bool,
+    /// 当前 ZMODEM（rz/sz）传输状态
+    zmodem_transfer: Option<ZmodemTransferState>,
 
     // ====== IME 输入 ======
     ime_state: Option<ImeState>,
@@ -1089,6 +1165,8 @@ pub struct TerminalView {
     command_queue_active: bool,
     /// 批量命令队列的 fallback 定时器（无 shell integration 时使用）
     command_queue_fallback_timer: Option<gpui::Task<()>>,
+    /// 批量命令队列定时器代号：每次发送/输出都会自增，使旧定时器失效
+    command_queue_epoch: u64,
 
     // ====== cd 目录补全 ======
     /// `cd` 目录补全的独立 SFTP 连接
@@ -1571,6 +1649,7 @@ impl TerminalView {
             focus_handle,
             terminal_bounds: Bounds::default(),
             pane_visible: false,
+            zmodem_transfer: None,
             ime_state: None,
             history_prompt: HistoryPromptState::default(),
             shell_prompt_input_active: false,
@@ -1579,6 +1658,7 @@ impl TerminalView {
             command_queue_active: false,
             shell_integration_detected: false,
             command_queue_fallback_timer: None,
+            command_queue_epoch: 0,
             suggestion_debounce: None,
             cd_completion_client: None,
             cd_completion_cache: LruCache::new(std::num::NonZeroUsize::new(100).unwrap()),
@@ -2379,6 +2459,14 @@ impl TerminalView {
                 if self.history_prompt.is_active() {
                     self.refresh_history_prompt_matches(cx);
                 }
+                // 批量命令：有输出就把“静默计时”往后推，
+                // 避免上一条命令还在打印就被插队发送下一条。
+                if self.command_queue_active
+                    && !self.shell_integration_detected
+                    && self.command_queue_fallback_timer.is_some()
+                {
+                    self.arm_command_queue_timer(COMMAND_QUEUE_QUIET_DELAY, cx);
+                }
                 cx.notify();
             }
             TerminalModelEvent::SshMfaChanged => {
@@ -2413,7 +2501,180 @@ impl TerminalView {
                     sidebar.sync_file_manager_path(path, cx);
                 });
             }
+            TerminalModelEvent::Zmodem(event) => {
+                self.handle_zmodem_event(event, window, cx);
+            }
         }
+    }
+
+    /// 处理 ZMODEM 传输事件：上传选文件、进度显示、结束提示。
+    fn handle_zmodem_event(
+        &mut self,
+        event: &ZmodemEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            ZmodemEvent::UploadRequest(request) => {
+                let request = request.clone();
+                let future = cx.prompt_for_paths(PathPromptOptions {
+                    files: true,
+                    multiple: true,
+                    directories: false,
+                    prompt: Some(t!("Zmodem.pick_upload").to_string().into()),
+                });
+                window
+                    .spawn(cx, async move |_cx| {
+                        let files = match future.await {
+                            Ok(Ok(Some(paths))) if !paths.is_empty() => Some(paths),
+                            _ => None,
+                        };
+                        request.respond(files);
+                    })
+                    .detach();
+                cx.notify();
+            }
+            ZmodemEvent::Started {
+                session,
+                direction,
+                file_name,
+                file_size,
+            } => {
+                self.zmodem_transfer = Some(ZmodemTransferState {
+                    session: *session,
+                    direction: *direction,
+                    file_name: file_name.clone(),
+                    transferred: 0,
+                    total: *file_size,
+                });
+                cx.notify();
+            }
+            ZmodemEvent::Progress {
+                session,
+                direction,
+                file_name,
+                transferred,
+                total,
+            } => {
+                let same_session = self
+                    .zmodem_transfer
+                    .as_ref()
+                    .is_some_and(|state| state.session == *session);
+                if same_session {
+                    if let Some(state) = self.zmodem_transfer.as_mut() {
+                        state.file_name = file_name.clone();
+                        state.transferred = *transferred;
+                        state.total = *total;
+                    }
+                } else {
+                    self.zmodem_transfer = Some(ZmodemTransferState {
+                        session: *session,
+                        direction: *direction,
+                        file_name: file_name.clone(),
+                        transferred: *transferred,
+                        total: *total,
+                    });
+                }
+                cx.notify();
+            }
+            ZmodemEvent::Finished {
+                direction,
+                files,
+                location,
+                ..
+            } => {
+                self.zmodem_transfer = None;
+                let message = match (direction, location) {
+                    (ZmodemDirection::Download, Some(dir)) => t!(
+                        "Zmodem.download_done",
+                        count = *files,
+                        path = dir.display().to_string()
+                    )
+                    .to_string(),
+                    _ => t!("Zmodem.upload_done", count = *files).to_string(),
+                };
+                window.push_notification(Notification::success(message).autohide(true), cx);
+                cx.notify();
+            }
+            ZmodemEvent::Failed { message, .. } => {
+                self.zmodem_transfer = None;
+                window.push_notification(
+                    Notification::error(t!("Zmodem.failed", message = message.clone()).to_string())
+                        .autohide(true),
+                    cx,
+                );
+                cx.notify();
+            }
+        }
+    }
+
+    /// 终端右下角的传输进度卡片。
+    fn render_zmodem_overlay(&self, _cx: &mut Context<Self>) -> Option<AnyElement> {
+        let state = self.zmodem_transfer.as_ref()?;
+        let ratio = state
+            .total
+            .filter(|total| *total > 0)
+            .map(|total| (state.transferred as f32 / total as f32).clamp(0.0, 1.0));
+        let title = if state.direction.is_download() {
+            t!("Zmodem.downloading").to_string()
+        } else {
+            t!("Zmodem.uploading").to_string()
+        };
+        let detail = match state.total {
+            Some(total) if total > 0 => format!(
+                "{} / {}",
+                format_transfer_size(state.transferred),
+                format_transfer_size(total)
+            ),
+            _ => format_transfer_size(state.transferred),
+        };
+        let icon = if state.direction.is_download() {
+            IconName::ArrowDown
+        } else {
+            IconName::ArrowUp
+        };
+
+        Some(
+            v_flex()
+                .absolute()
+                .right(px(16.))
+                .bottom(px(16.))
+                .w(px(320.))
+                .p_3()
+                .gap_2()
+                .rounded_md()
+                .border_1()
+                .border_color(self.current_theme.foreground.opacity(0.15))
+                .bg(self.current_theme.background.opacity(0.96))
+                .shadow_lg()
+                .child(
+                    h_flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            Icon::new(icon)
+                                .xsmall()
+                                .text_color(self.current_theme.foreground.opacity(0.7)),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .text_sm()
+                                .child(format!("{title} {}", state.file_name)),
+                        ),
+                )
+                .child(Progress::new("zmodem-transfer-progress").value(ratio.unwrap_or(0.0)))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(self.current_theme.foreground.opacity(0.6))
+                        .child(detail),
+                )
+                .into_any_element(),
+        )
     }
 
     fn sync_ssh_mfa_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -3569,32 +3830,66 @@ impl TerminalView {
     }
 
     fn paste_text_unchecked(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if self.command_queue_active {
-            return;
-        }
-
         let mode = self.terminal.read(cx).mode();
         let is_local = self.connection_kind(cx) == TerminalConnectionKind::Local;
         let use_bracketed = mode.contains(TermMode::BRACKETED_PASTE);
         let normalized = normalize_paste_text(text);
 
-        if let Some(commands) = batch_commands_for_paste(
-            use_bracketed,
-            mode.contains(TermMode::ALT_SCREEN),
-            is_local,
-            &normalized,
-        ) {
-            self.clear_command_queue();
-            self.start_command_queue(commands, window, cx);
+        // 多行命令一律走队列：一条条发、等上一条输出完再发下一条，
+        // 这样每条命令的结果都能单独看到。
+        if let Some(commands) =
+            batch_commands_for_paste(mode.contains(TermMode::ALT_SCREEN), &normalized)
+        {
+            if self.command_queue_active {
+                tracing::info!(
+                    target: "terminal.command_queue",
+                    appended = commands.len(),
+                    remaining = self.command_queue.len(),
+                    "批量命令：追加到正在执行的队列"
+                );
+                self.command_queue.extend(commands);
+            } else {
+                self.start_command_queue(commands, window, cx);
+            }
+            self.focus_terminal(window, cx);
+            return;
+        }
+
+        tracing::info!(
+            target: "terminal.command_queue",
+            alt_screen = mode.contains(TermMode::ALT_SCREEN),
+            structure = detect_multiline_shell_structure(&normalized).map(|reason| reason.label()),
+            lines = normalized.lines().count(),
+            "粘贴：未走批量队列，整段写入"
+        );
+
+        // 队列执行中不接受普通粘贴，避免和队列抢输入
+        if self.command_queue_active {
+            tracing::info!(
+                target: "terminal.command_queue",
+                "批量命令执行中，忽略这次粘贴"
+            );
             return;
         }
 
         self.apply_paste_to_history_prompt(&normalized, cx);
         if use_bracketed {
+            tracing::info!(
+                target: "terminal.command_queue",
+                path = "bracketed",
+                lines = normalized.lines().count(),
+                "粘贴：单行或 shell 结构，整体写入"
+            );
             self.write_to_pty(encode_bracketed_paste(&normalized), cx);
         } else if is_local {
             let lines: Vec<&str> = normalized.split('\n').collect();
             if lines.len() > 1 {
+                tracing::info!(
+                    target: "terminal.command_queue",
+                    path = "local-lines",
+                    lines = lines.len(),
+                    "多行粘贴：本地终端逐行写入（每行间隔 30ms）"
+                );
                 let data_clone: Vec<Vec<u8>> = lines
                     .iter()
                     .map(|line| {
@@ -3627,15 +3922,40 @@ impl TerminalView {
 
     /// 执行队列中的下一条命令
     fn execute_next_queued_command(&mut self, cx: &mut Context<Self>) {
+        // 任何一次发送都让既有兜底定时器失效，避免重复发送
+        self.bump_command_queue_epoch();
+
         if let Some(command) = self.command_queue.pop_front() {
-            let mut data = command.into_bytes();
-            data.push(b'\n');
+            tracing::info!(
+                target: "terminal.command_queue",
+                remaining = self.command_queue.len(),
+                integration = self.shell_integration_detected,
+                command = %command.lines().next().unwrap_or_default(),
+                "批量命令：发送一条命令"
+            );
+            // 用 CR 模拟真实回车（raw pty 下 Enter 发的就是 CR）；
+            // 续行命令内部的换行也要转成 CR，否则 shell 会把它当 C-j 执行掉半条命令。
+            let mut data = command.replace('\n', "\r").into_bytes();
+            data.push(b'\r');
             self.write_to_pty(data, cx);
         }
+
         if self.command_queue.is_empty() {
             self.command_queue_active = false;
-            self.command_queue_fallback_timer.take();
+            return;
         }
+
+        if !self.shell_integration_detected {
+            // 没有 OSC 133 事件可用：等输出安静下来再发下一条
+            self.arm_command_queue_timer(COMMAND_QUEUE_QUIET_DELAY, cx);
+        }
+        // 有 shell integration 时等下一个 InputStart（OSC 133;B）
+    }
+
+    /// 让旧的队列定时器失效并自增代号
+    fn bump_command_queue_epoch(&mut self) {
+        self.command_queue_epoch = self.command_queue_epoch.wrapping_add(1);
+        self.command_queue_fallback_timer.take();
     }
 
     /// shell prompt 就绪时触发队列下一条命令
@@ -3661,13 +3981,21 @@ impl TerminalView {
         self.command_queue.extend(commands);
         self.command_queue_active = true;
 
+        tracing::info!(
+            target: "terminal.command_queue",
+            total = self.command_queue.len(),
+            at_prompt = self.shell_prompt_input_active,
+            integration = self.shell_integration_detected,
+            "批量命令：开始执行队列"
+        );
+
         if self.shell_prompt_input_active {
             // shell 已经处于可输入状态，直接发送第一条
             self.execute_next_queued_command(cx);
             self.focus_terminal(window, cx);
         } else if !self.shell_integration_detected {
-            // 未检测到 shell integration，使用 fallback 定时器
-            self.start_fallback_timer(cx);
+            // 未检测到 shell integration：短暂等待后开始，之后按输出静默推进
+            self.arm_command_queue_timer(COMMAND_QUEUE_FIRST_DELAY, cx);
         }
         // 否则等待下一个 InputStart/PromptStart 事件
     }
@@ -3676,24 +4004,26 @@ impl TerminalView {
     fn clear_command_queue(&mut self) {
         self.command_queue.clear();
         self.command_queue_active = false;
-        self.command_queue_fallback_timer.take();
+        self.bump_command_queue_epoch();
     }
 
-    /// 无 shell integration 时的兜底定时器
-    fn start_fallback_timer(&mut self, cx: &mut Context<Self>) {
+    /// 排一个延时任务：到点且期间没有新输出、也没有被其他路径抢先发送时，发下一条。
+    fn arm_command_queue_timer(&mut self, delay: Duration, cx: &mut Context<Self>) {
+        let epoch = self.command_queue_epoch.wrapping_add(1);
+        self.command_queue_epoch = epoch;
+        self.command_queue_fallback_timer.take();
+
         let task = cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(1500))
-                .await;
+            cx.background_executor().timer(delay).await;
             let _ = this.update(cx, |this, cx| {
-                if this.command_queue_active
-                    && !this.command_queue.is_empty()
-                    && !this.shell_integration_detected
-                {
-                    this.execute_next_queued_command(cx);
-                    // 继续 fallback 直到检测 integration 或队列空
-                    this.start_fallback_timer(cx);
+                if this.command_queue_epoch != epoch {
+                    // 期间有新的输出，或已被 OSC 133 推进
+                    return;
                 }
+                if !this.command_queue_active || this.command_queue.is_empty() {
+                    return;
+                }
+                this.execute_next_queued_command(cx);
             });
         });
         self.command_queue_fallback_timer = Some(task);
@@ -5324,6 +5654,9 @@ impl Render for TerminalView {
                             .when_some(self.render_history_prompt_overlay(cx), |this, overlay| {
                                 this.child(overlay)
                             })
+                            .when_some(self.render_zmodem_overlay(cx), |this, overlay| {
+                                this.child(overlay)
+                            })
                             .context_menu(move |menu, window, cx| {
                                 Self::build_context_menu(
                                     menu,
@@ -5663,14 +5996,14 @@ impl Element for ResizeEventHandler {
 #[cfg(test)]
 mod tests {
     use super::{
-        TERMINAL_MIN_COLS, TERMINAL_MIN_ROWS, TerminalSurfaceSize, TerminalView,
-        UnbracketedPasteHazard, batch_commands_for_paste, detect_unbracketed_paste_hazard,
-        encode_bracketed_paste, encode_mouse_modifiers, has_multiline_shell_structure,
-        has_unterminated_shell_quote, high_risk_command_matches, history_prompt_available,
-        history_prompt_dropdown_origin, history_prompt_overlay_bounds, mouse_button_code,
-        normalize_paste_text, selection_drag_autoscroll_delta, sgr_mouse_button_report,
-        sgr_mouse_mode_enabled, sgr_mouse_wheel_report, should_advance_command_queue,
-        should_confirm_local_terminal_close,
+        MultilineShellStructure, TERMINAL_MIN_COLS, TERMINAL_MIN_ROWS, TerminalSurfaceSize,
+        TerminalView, UnbracketedPasteHazard, batch_commands_for_paste,
+        detect_multiline_shell_structure, detect_unbracketed_paste_hazard, encode_bracketed_paste,
+        encode_mouse_modifiers, has_multiline_shell_structure, has_unterminated_shell_quote,
+        high_risk_command_matches, history_prompt_available, history_prompt_dropdown_origin,
+        history_prompt_overlay_bounds, mouse_button_code, normalize_paste_text,
+        selection_drag_autoscroll_delta, sgr_mouse_button_report, sgr_mouse_mode_enabled,
+        sgr_mouse_wheel_report, should_advance_command_queue, should_confirm_local_terminal_close,
         should_defer_inline_history_prompt_input_to_text_system, should_defer_sgr_left_press,
         should_dismiss_history_prompt_for_keystroke, should_dismiss_history_prompt_for_mouse,
         should_dismiss_history_prompt_for_scroll, should_reset_history_prompt_for_terminal_event,
@@ -6254,11 +6587,8 @@ mod tests {
         assert!(has_multiline_shell_structure(
             "for x in a b; do\n  echo \"$x\"\ndone"
         ));
-        assert!(has_multiline_shell_structure(concat!(
-            "printf '%s' ",
-            "\\",
-            "\n  one"
-        )));
+        // 行尾反斜杠是续行：由 split_batch_commands 合并成一条，不算结构
+        assert!(!has_multiline_shell_structure("printf '%s' \\\n  one"));
     }
 
     #[test]
@@ -6272,9 +6602,120 @@ mod tests {
     }
 
     #[test]
-    fn bracketed_paste_never_uses_the_command_queue() {
+    fn single_line_shell_operators_do_not_block_the_queue() {
+        // 管道、分号、重定向都是单行内的事，不该让批量粘贴退化成整段粘贴
         assert_eq!(
-            batch_commands_for_paste(true, false, false, "echo one\necho two"),
+            detect_multiline_shell_structure("ps -ef | grep nginx"),
+            None
+        );
+        assert_eq!(
+            detect_multiline_shell_structure("cd /a && ls -l; echo done"),
+            None
+        );
+        assert_eq!(
+            detect_multiline_shell_structure("ls /x > /tmp/out 2>&1"),
+            None
+        );
+        assert_eq!(
+            batch_commands_for_paste(
+                false,
+                "ps -ef | grep '[n]ginx'
+echo ok"
+            ),
+            Some(vec![
+                "ps -ef | grep '[n]ginx'".to_string(),
+                "echo ok".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn multiline_structure_reasons_are_specific() {
+        assert_eq!(
+            detect_multiline_shell_structure(
+                "cat <<EOF
+body
+EOF"
+            ),
+            Some(MultilineShellStructure::Heredoc)
+        );
+        assert_eq!(
+            detect_multiline_shell_structure(
+                "if true
+then
+ echo yes
+fi"
+            ),
+            Some(MultilineShellStructure::BlockKeyword)
+        );
+        assert_eq!(
+            detect_multiline_shell_structure(
+                "printf 'line1
+line2'"
+            ),
+            Some(MultilineShellStructure::MultilineQuote)
+        );
+        assert_eq!(
+            detect_multiline_shell_structure(
+                "(
+cd /tmp
+ls
+)"
+            ),
+            Some(MultilineShellStructure::OpenGroup)
+        );
+        // 单行 if 已闭合，不算结构
+        assert_eq!(
+            detect_multiline_shell_structure("if true; then echo hi; fi"),
+            None
+        );
+    }
+
+    #[test]
+    fn dangling_operators_are_joined_into_one_command() {
+        assert_eq!(
+            split_batch_commands("cd /tmp &&\nls\necho done"),
+            Some(vec!["cd /tmp &&\nls".to_string(), "echo done".to_string()])
+        );
+        assert_eq!(
+            split_batch_commands("cat a |\nwc -l\necho done"),
+            Some(vec!["cat a |\nwc -l".to_string(), "echo done".to_string()])
+        );
+        // 合并后只剩一条命令时返回 None（交给整段粘贴路径）
+        assert_eq!(split_batch_commands("cd /tmp &&\nls"), None);
+    }
+
+    #[test]
+    fn multi_line_paste_always_uses_the_command_queue() {
+        // 即使远端 shell 支持 bracketed paste，也逐条发送，便于看到每条命令的结果
+        assert_eq!(
+            batch_commands_for_paste(
+                false,
+                "echo one
+echo two"
+            ),
+            Some(vec!["echo one".to_string(), "echo two".to_string()])
+        );
+        // 空行只是分隔符，不应阻止排队
+        assert_eq!(
+            batch_commands_for_paste(
+                false,
+                "echo one
+
+echo two"
+            ),
+            Some(vec!["echo one".to_string(), "echo two".to_string()])
+        );
+    }
+
+    #[test]
+    fn alt_screen_paste_never_uses_the_command_queue() {
+        assert_eq!(
+            batch_commands_for_paste(
+                true,
+                "echo one
+echo two"
+            ),
             None
         );
     }
@@ -6282,20 +6723,24 @@ mod tests {
     #[test]
     fn complex_multiline_paste_never_uses_the_command_queue() {
         assert_eq!(
-            batch_commands_for_paste(false, false, false, "cat <<'EOF'\none\n\ntwo\nEOF"),
-            None
-        );
-        assert_eq!(
-            batch_commands_for_paste(false, false, false, "for x in a b; do\n echo \"$x\"\ndone"),
-            None
-        );
-    }
+            batch_commands_for_paste(
+                false,
+                "cat <<'EOF'
+one
 
-    #[test]
-    fn simple_unbracketed_remote_commands_can_use_the_queue() {
+two
+EOF"
+            ),
+            None
+        );
         assert_eq!(
-            batch_commands_for_paste(false, false, false, "echo one\necho two"),
-            Some(vec!["echo one".to_string(), "echo two".to_string()])
+            batch_commands_for_paste(
+                false,
+                "for x in a b; do
+ echo \"$x\"
+done"
+            ),
+            None
         );
     }
 

@@ -700,6 +700,32 @@ TerminalAddon:
     zh-CN: "无法打开本地路径: %{error}"
     zh-HK: "無法打開本地路徑: %{error}"
 
+Zmodem:
+  downloading:
+    en: Downloading
+    zh-CN: 正在下载
+    zh-HK: 正在下載
+  uploading:
+    en: Uploading
+    zh-CN: 正在上传
+    zh-HK: 正在上傳
+  pick_upload:
+    en: Select files to upload
+    zh-CN: 选择要上传的文件
+    zh-HK: 選擇要上傳的文件
+  download_done:
+    en: "Saved %{count} file(s) to %{path}"
+    zh-CN: "已保存 %{count} 个文件到 %{path}"
+    zh-HK: "已儲存 %{count} 個檔案到 %{path}"
+  upload_done:
+    en: "Uploaded %{count} file(s)"
+    zh-CN: "已上传 %{count} 个文件"
+    zh-HK: "已上傳 %{count} 個檔案"
+  failed:
+    en: "ZMODEM transfer failed: %{message}"
+    zh-CN: "ZMODEM 传输失败：%{message}"
+    zh-HK: "ZMODEM 傳輸失敗：%{message}"
+
 TerminalView:
   terminal_size_changed:
     en: "Terminal size changed: %{old} -> %{new}, cell_width=%{cell_width}, line_height=%{line_height}, bounds=%{bounds}"

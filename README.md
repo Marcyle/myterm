@@ -53,6 +53,12 @@ MyTerm authenticates against JumpServer the same way the browser does — throug
 </details>
 
 <details>
+<summary><strong>Does MyTerm support rz/sz file transfer?</strong></summary>
+
+Yes. Run `sz <file>` in an SSH, local, or JumpServer terminal to download: MyTerm detects the ZMODEM protocol automatically, saves the file into your system Downloads folder, and shows progress in the bottom-right corner of the terminal. Running `rz` pops a file picker (multi-select supported) and uploads the chosen files to the remote host. Pressing any key during a transfer cancels it.
+</details>
+
+<details>
 <summary><strong>Are my credentials safe?</strong></summary>
 
 Connection credentials are encrypted at rest using a master key (AES-GCM). Once a repository password is set, saved connections stay locked until you unlock them.

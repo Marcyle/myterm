@@ -1,8 +1,8 @@
-use alacritty_terminal::event::{Event as AlacTermEvent, EventListener, WindowSize};
+use alacritty_terminal::event::{Event as AlacTermEvent, EventListener, OnResize, WindowSize};
 use alacritty_terminal::event_loop::{EventLoop, EventLoopSender, Msg};
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::{ClipboardType, Term};
-use alacritty_terminal::tty::{self, Options as PtyOptions};
+use alacritty_terminal::tty::{self, EventedPty, EventedReadWrite, Options as PtyOptions};
 use alacritty_terminal::vte::ansi::{NamedColor, Rgb};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -16,7 +16,109 @@ use std::thread;
 use std::thread::JoinHandle;
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::zmodem::{ZmodemScanner, ZmodemState};
 use crate::{TerminalBackend, TerminalSize};
+
+/// alacritty PTY 的具体类型（Windows ConPTY / Unix 各自的实现）。
+type InnerPty = tty::Pty;
+type InnerPtyReader = <InnerPty as EventedReadWrite>::Reader;
+type InnerPtyWriter = <InnerPty as EventedReadWrite>::Writer;
+
+/// 读取 PTY 时截流 ZMODEM 字节的 reader 包装。
+///
+/// alacritty 的 EventLoop 只认识 `EventedReadWrite::Reader`，\
+/// 因此这里把 `ZmodemPty` 的 reader 换成自己，读取后先过一遍 [`ZmodemScanner`]。
+struct ZmodemReader {
+    /// 指向 `ZmodemPty::inner` 的 reader；每次 `reader()` 调用时刷新，
+    /// 保证 EventLoop 线程搬移结构体后指针仍然有效。
+    inner: *mut InnerPtyReader,
+    pending: Vec<u8>,
+    scratch: Vec<u8>,
+    scanner: ZmodemScanner,
+    state: Arc<ZmodemState>,
+}
+
+impl std::io::Read for ZmodemReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            if !self.pending.is_empty() {
+                let n = buf.len().min(self.pending.len());
+                buf[..n].copy_from_slice(&self.pending[..n]);
+                self.pending.drain(..n);
+                return Ok(n);
+            }
+
+            // SAFETY: `inner` 由 `ZmodemPty::reader()` 在每次读取前刷新，
+            // 且指向的 reader 不会在此期间被销毁。
+            let inner = unsafe { &mut *self.inner };
+            let read = inner.read(self.scratch.as_mut_slice())?;
+            if read == 0 {
+                return Ok(0);
+            }
+
+            self.pending = self.scanner.scan(&self.state, &self.scratch[..read]);
+        }
+    }
+}
+
+/// 包装 alacritty 的 PTY，在读取侧插入 ZMODEM 探测。
+struct ZmodemPty {
+    inner: InnerPty,
+    reader: ZmodemReader,
+}
+
+// SAFETY: ZmodemReader 里的裸指针只在 EventLoop 线程内使用，
+// 且每次使用前都会重新指向 `inner`。
+unsafe impl Send for ZmodemPty {}
+
+impl EventedReadWrite for ZmodemPty {
+    type Reader = ZmodemReader;
+    type Writer = InnerPtyWriter;
+
+    unsafe fn register(
+        &mut self,
+        poll: &Arc<polling::Poller>,
+        event: polling::Event,
+        mode: polling::PollMode,
+    ) -> std::io::Result<()> {
+        // SAFETY: 转交给内层 PTY 的 register。
+        unsafe { self.inner.register(poll, event, mode) }
+    }
+
+    fn reregister(
+        &mut self,
+        poll: &Arc<polling::Poller>,
+        event: polling::Event,
+        mode: polling::PollMode,
+    ) -> std::io::Result<()> {
+        self.inner.reregister(poll, event, mode)
+    }
+
+    fn deregister(&mut self, poll: &Arc<polling::Poller>) -> std::io::Result<()> {
+        self.inner.deregister(poll)
+    }
+
+    fn reader(&mut self) -> &mut Self::Reader {
+        self.reader.inner = self.inner.reader() as *mut InnerPtyReader;
+        &mut self.reader
+    }
+
+    fn writer(&mut self) -> &mut Self::Writer {
+        self.inner.writer()
+    }
+}
+
+impl EventedPty for ZmodemPty {
+    fn next_child_event(&mut self) -> Option<tty::ChildEvent> {
+        self.inner.next_child_event()
+    }
+}
+
+impl OnResize for ZmodemPty {
+    fn on_resize(&mut self, window_size: WindowSize) {
+        self.inner.on_resize(window_size);
+    }
+}
 
 fn insert_environment_variable(env: &mut HashMap<String, String>, name: String, value: String) {
     if let Some(existing_name) = env
@@ -155,6 +257,8 @@ pub enum TerminalEvent {
     CommandFinished { exit_code: i32 },
     /// 记录 shell 实际执行过的命令
     CommandRecorded(String),
+    /// ZMODEM（rz/sz）文件传输事件
+    Zmodem(crate::zmodem::ZmodemEvent),
 }
 
 /// Commands from UI layer to PTY backend
@@ -198,6 +302,8 @@ impl PtyWriteBack {
 pub struct LocalPtyBackend {
     event_loop_sender: EventLoopSender,
     event_proxy: GpuiEventProxy,
+    /// ZMODEM 会话状态；传输期间用户输入会转为取消请求
+    zmodem: Arc<ZmodemState>,
     _event_loop_handle: JoinHandle<()>,
 }
 
@@ -206,6 +312,7 @@ impl LocalPtyBackend {
         term: Arc<FairMutex<Term<GpuiEventProxy>>>,
         event_proxy: GpuiEventProxy,
         mut pty_options: PtyOptions,
+        event_tx: UnboundedSender<TerminalEvent>,
     ) -> anyhow::Result<Self> {
         let window_size = WindowSize {
             num_lines: 24,
@@ -222,6 +329,26 @@ impl LocalPtyBackend {
             window_size.cell_height
         );
 
+        // ZMODEM 回写通道：EventLoopSender 要等 EventLoop 建好才存在，
+        // 因此先用共享槽位，EventLoop 就绪后再填入。
+        let write_slot: Arc<Mutex<Option<EventLoopSender>>> = Arc::new(Mutex::new(None));
+        let write_slot_for_session = write_slot.clone();
+        let write_fn: crate::zmodem::ZmodemWriteFn = Arc::new(move |data: &[u8]| {
+            if let Ok(guard) = write_slot_for_session.lock()
+                && let Some(sender) = guard.as_ref()
+            {
+                let _ = sender.send(Msg::Input(Cow::Owned(data.to_vec())));
+            }
+        });
+        let emit_fn: crate::zmodem::ZmodemEventFn = {
+            let event_tx = event_tx.clone();
+            Arc::new(move |event| {
+                let _ = event_tx.send(TerminalEvent::Zmodem(event));
+            })
+        };
+        let zmodem = ZmodemState::new(write_fn, emit_fn, crate::zmodem::default_download_dir());
+        let zmodem_for_thread = zmodem.clone();
+
         // Windows 上 CreateProcessW 启动 WindowsApps 应用（如 PowerShell 7）时，
         // 可能同步派发 Windows 消息并触发 GPUI 窗口过程重入。若在 UI 事件处理中
         // 直接调用 tty::new，重入的 frame callback 会尝试再次借用 AppCell，导致
@@ -233,6 +360,16 @@ impl LocalPtyBackend {
                 #[cfg(target_os = "windows")]
                 reload_windows_environment(&mut pty_options.env);
                 let pty = tty::new(&pty_options, window_size, 0)?;
+                let pty = ZmodemPty {
+                    inner: pty,
+                    reader: ZmodemReader {
+                        inner: std::ptr::null_mut(),
+                        pending: Vec::new(),
+                        scratch: vec![0u8; 64 * 1024],
+                        scanner: ZmodemScanner::new(),
+                        state: zmodem_for_thread,
+                    },
+                };
                 let event_loop = EventLoop::new(term, event_proxy_for_thread, pty, true, false)?;
                 Ok(event_loop)
             })();
@@ -243,6 +380,9 @@ impl LocalPtyBackend {
             .recv()
             .map_err(|_| anyhow::anyhow!("PTY 创建线程异常退出"))??;
         let event_loop_sender = event_loop.channel();
+        if let Ok(mut slot) = write_slot.lock() {
+            *slot = Some(event_loop_sender.clone());
+        }
 
         // 设置 PtyWrite 回写通道，使 DA 等终端响应能写回 PTY
         event_proxy.set_write_back(PtyWriteBack::Local(event_loop_sender.clone()));
@@ -255,11 +395,22 @@ impl LocalPtyBackend {
         Ok(Self {
             event_loop_sender,
             event_proxy,
+            zmodem,
             _event_loop_handle: handle,
         })
     }
 
     pub fn write(&self, data: Vec<u8>) {
+        // 传输期间用户的按键会打断 ZMODEM 字节流，直接转成取消请求。
+        if self.zmodem.is_active() {
+            tracing::debug!(
+                target: "terminal.zmodem",
+                bytes = ?data,
+                "zmodem 传输期间收到用户输入，取消本次传输"
+            );
+            self.zmodem.cancel();
+            return;
+        }
         let _ = self.event_loop_sender.send(Msg::Input(Cow::Owned(data)));
     }
 
@@ -298,7 +449,7 @@ impl LocalPtyBackend {
 
 impl TerminalBackend for LocalPtyBackend {
     fn write(&self, data: Vec<u8>) {
-        let _ = self.event_loop_sender.send(Msg::Input(Cow::Owned(data)));
+        LocalPtyBackend::write(self, data);
     }
 
     fn resize(&self, size: TerminalSize) {

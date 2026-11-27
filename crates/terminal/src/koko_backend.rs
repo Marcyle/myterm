@@ -16,10 +16,14 @@ use jms::{KokoChannel, KokoConnectParams, KokoEvent};
 
 use crate::osc::{OscEvent, extract_osc_events};
 use crate::pty_backend::{GpuiEventProxy, TerminalEvent};
+use crate::zmodem::{ZmodemEventFn, ZmodemScanner, ZmodemState, ZmodemWriteFn};
 use crate::{TerminalBackend, TerminalSize};
 
 enum KokoCommand {
+    /// 用户输入（传输期间会转为取消请求）
     Write(Vec<u8>),
+    /// 协议流字节（ZMODEM 等），不做取消判断
+    WriteBinary(Vec<u8>),
     Resize(TerminalSize),
     Shutdown,
 }
@@ -96,7 +100,25 @@ impl KokoBackend {
         let (pty_write_tx, mut pty_write_rx) = unbounded_channel::<Vec<u8>>();
         event_proxy.set_ssh_write_back(pty_write_tx);
 
+        // ZMODEM（rz/sz）：协议字节经同一条 WS 通道上行
+        let zmodem = {
+            let command_tx = command_tx.clone();
+            let write_fn: ZmodemWriteFn = Arc::new(move |data: &[u8]| {
+                let _ = command_tx.try_send(KokoCommand::WriteBinary(data.to_vec()));
+            });
+            let emit_fn: ZmodemEventFn = {
+                let event_tx = event_tx.clone();
+                Arc::new(move |event| {
+                    let _ = event_tx.send(TerminalEvent::Zmodem(event));
+                })
+            };
+            ZmodemState::new(write_fn, emit_fn, crate::zmodem::default_download_dir())
+        };
+        let zmodem_for_task = zmodem.clone();
+
         tokio::spawn(async move {
+            let zmodem = zmodem_for_task;
+            let mut zmodem_scanner = ZmodemScanner::new();
             let mut processor: Processor<StdSyncHandler> = Processor::new();
             // 每隔 30 秒发送一次应用层 PING 心跳，防止 NAT/防火墙/负载均衡因长时间
             // 空闲而静默断开 WebSocket，导致终端“有焦点但无响应”。
@@ -111,7 +133,22 @@ impl KokoBackend {
                         };
                         match cmd {
                             KokoCommand::Write(data) => {
+                                // 传输期间的按键会打断 ZMODEM 字节流，转为取消请求
+                                if zmodem.is_active() {
+                                    tracing::debug!(
+                                        target: "terminal.zmodem",
+                                        bytes = ?data,
+                                        "zmodem 传输期间收到用户输入，取消本次传输"
+                                    );
+                                    zmodem.cancel();
+                                    continue;
+                                }
                                 if channel.send_input(&data).await.is_err() {
+                                    break;
+                                }
+                            }
+                            KokoCommand::WriteBinary(data) => {
+                                if channel.send_input_binary(&data).await.is_err() {
                                     break;
                                 }
                             }
@@ -127,6 +164,9 @@ impl KokoBackend {
                         }
                     }
                     Some(data) = pty_write_rx.recv() => {
+                        if zmodem.is_active() {
+                            continue;
+                        }
                         if channel.send_input(&data).await.is_err() {
                             break;
                         }
@@ -141,6 +181,11 @@ impl KokoBackend {
                                 }
                             }
                             Some(KokoEvent::Output(data)) => {
+                                // ZMODEM 会话期间，输出字节交给协议线程，不再解析进终端
+                                let data = zmodem_scanner.scan(&zmodem, &data);
+                                if data.is_empty() {
+                                    continue;
+                                }
                                 // 解析 OSC 事件(工作目录/prompt 生命周期等)
                                 for osc_event in extract_osc_events(&data) {
                                     match osc_event {

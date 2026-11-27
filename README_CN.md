@@ -52,6 +52,12 @@ MyTerm 以与浏览器一致的方式向 JumpServer 认证——通过 Web 登�
 </details>
 
 <details>
+<summary><strong>MyTerm 支持 rz/sz 传文件吗？</strong></summary>
+
+支持。在 SSH / 本地 / JumpServer 终端里执行 `sz 文件名` 即可下载：MyTerm 会自动识别 ZMODEM 协议，把文件保存到系统「下载」目录，并在终端右下角显示进度。执行 `rz` 上传时，会弹出文件选择框，把选中的文件（支持多选）发送到远端。传输过程中按任意键可取消本次传输。
+</details>
+
+<details>
 <summary><strong>我的凭据安全吗？</strong></summary>
 
 连接凭据使用主密钥（AES-GCM）静态加密。设置仓库密码后，保存的连接在解锁前保持锁定。

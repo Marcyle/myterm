@@ -16,6 +16,7 @@ use crate::shell_integration::{
     embedded_shell_integration_script, normalized_shell_integration_script,
 };
 use crate::terminal::shell_escape_arg as shell_single_quote;
+use crate::zmodem::{ZmodemEventFn, ZmodemScanner, ZmodemState, ZmodemWriteFn};
 use crate::{TerminalBackend, TerminalSize};
 
 /// 整个 shell integration 安装流程的硬超时，避免远端受限或挂死卡住连接。
@@ -178,7 +179,10 @@ fn format_setup_failure_context(script: &str, stdout: &[u8], stderr: &[u8]) -> S
 }
 
 enum SshCommand {
+    /// 用户输入（传输期间会转为取消请求）
     Write(Vec<u8>),
+    /// 协议流字节（ZMODEM 等），不做取消判断
+    WriteProtocol(Vec<u8>),
     Resize(TerminalSize),
     Shutdown,
 }
@@ -220,8 +224,26 @@ impl SshBackend {
         let (pty_write_tx, mut pty_write_rx) = unbounded_channel::<Vec<u8>>();
         event_proxy.set_ssh_write_back(pty_write_tx);
 
+        // ZMODEM（rz/sz）：协议字节经同一条 SSH channel 回写
+        let zmodem = {
+            let command_tx = command_tx.clone();
+            let write_fn: ZmodemWriteFn = Arc::new(move |data: &[u8]| {
+                let _ = command_tx.send(SshCommand::WriteProtocol(data.to_vec()));
+            });
+            let emit_fn: ZmodemEventFn = {
+                let event_tx = event_tx.clone();
+                Arc::new(move |event| {
+                    let _ = event_tx.send(TerminalEvent::Zmodem(event));
+                })
+            };
+            ZmodemState::new(write_fn, emit_fn, crate::zmodem::default_download_dir())
+        };
+        let zmodem_for_task = zmodem.clone();
+
         tokio::spawn(async move {
             let mut shutdown = false;
+            let zmodem = zmodem_for_task;
+            let mut zmodem_scanner = ZmodemScanner::new();
             let mut processor: Processor<StdSyncHandler> = Processor::new();
             // 用来判断 shell 是否已经 ready（收到第一个 133;B 后才发 init_commands）
             let mut shell_ready = false;
@@ -233,6 +255,25 @@ impl SshBackend {
                     Some(cmd) = command_rx.recv() => {
                         match cmd {
                             SshCommand::Write(data) => {
+                                // 传输期间的按键会打断 ZMODEM 字节流，转为取消请求
+                                if zmodem.is_active() {
+                                    tracing::debug!(
+                                        target: "terminal.zmodem",
+                                        bytes = ?data,
+                                        "zmodem 传输期间收到用户输入，取消本次传输"
+                                    );
+                                    zmodem.cancel();
+                                    continue;
+                                }
+                                let send_result = tokio::time::timeout(
+                                    Duration::from_secs(30),
+                                    channel.send_data(&data)
+                                ).await;
+                                if send_result.is_err() || send_result.is_ok_and(|r| r.is_err()) {
+                                    break;
+                                }
+                            }
+                            SshCommand::WriteProtocol(data) => {
                                 let send_result = tokio::time::timeout(
                                     Duration::from_secs(30),
                                     channel.send_data(&data)
@@ -252,6 +293,9 @@ impl SshBackend {
                         }
                     }
                     Some(data) = pty_write_rx.recv() => {
+                        if zmodem.is_active() {
+                            continue;
+                        }
                         let send_result = tokio::time::timeout(
                             Duration::from_secs(30),
                             channel.send_data(&data)
@@ -261,69 +305,79 @@ impl SshBackend {
                         }
                     }
                     event = channel.recv() => {
-                        match event {
-                            Some(ChannelEvent::Data(data)) | Some(ChannelEvent::ExtendedData { data, .. }) => {
-                                // 解析所有 OSC 事件
-                                for osc_event in extract_osc_events(&data) {
-                                    tracing::debug!(
-                                        target: "terminal.history_prompt.osc",
-                                        event = ?osc_event,
-                                        "ssh backend observed osc event"
+                        // ZMODEM 会话期间，输出字节交给协议线程，不再解析进终端
+                        let data = match event {
+                            Some(ChannelEvent::Data(data)) => {
+                                let filtered = zmodem_scanner.scan(&zmodem, &data);
+                                if filtered.is_empty() {
+                                    continue;
+                                }
+                                filtered
+                            }
+                            Some(ChannelEvent::ExtendedData { data, .. }) => {
+                                if zmodem.is_active() {
+                                    continue;
+                                }
+                                data
+                            }
+                            Some(ChannelEvent::Eof) | Some(ChannelEvent::Close) | None => break,
+                            _ => continue,
+                        };
+                        // 解析所有 OSC 事件
+                        for osc_event in extract_osc_events(&data) {
+                            tracing::debug!(
+                                target: "terminal.history_prompt.osc",
+                                event = ?osc_event,
+                                "ssh backend observed osc event"
+                            );
+                            match osc_event {
+                                OscEvent::WorkingDirChanged(path) => {
+                                    let _ = event_tx.send(TerminalEvent::WorkingDirChanged(path));
+                                }
+                                OscEvent::PromptStart => {
+                                    let _ = event_tx.send(TerminalEvent::PromptStart);
+                                }
+                                OscEvent::InputStart => {
+                                    let _ = event_tx.send(TerminalEvent::InputStart);
+                                    // 133;B: prompt 渲染完，用户可以输入了
+                                    // 第一次收到时发送 init_commands
+                                    if !shell_ready {
+                                        shell_ready = true;
+                                    }
+                                }
+                                OscEvent::CommandStart { command } => {
+                                    let _ = event_tx.send(TerminalEvent::CommandStart { command });
+                                }
+                                OscEvent::CommandFinished { exit_code } => {
+                                    // 133;D: 命令执行完毕
+                                    let _ = event_tx.send(
+                                        TerminalEvent::CommandFinished { exit_code }
                                     );
-                                    match osc_event {
-                                        OscEvent::WorkingDirChanged(path) => {
-                                            let _ = event_tx.send(TerminalEvent::WorkingDirChanged(path));
-                                        }
-                                        OscEvent::PromptStart => {
-                                            let _ = event_tx.send(TerminalEvent::PromptStart);
-                                        }
-                                        OscEvent::InputStart => {
-                                            let _ = event_tx.send(TerminalEvent::InputStart);
-                                            // 133;B: prompt 渲染完，用户可以输入了
-                                            // 第一次收到时发送 init_commands
-                                            if !shell_ready {
-                                                shell_ready = true;
-                                            }
-                                        }
-                                        OscEvent::CommandStart { command } => {
-                                            let _ = event_tx.send(TerminalEvent::CommandStart { command });
-                                        }
-                                        OscEvent::CommandFinished { exit_code } => {
-                                            // 133;D: 命令执行完毕
-                                            let _ = event_tx.send(
-                                                TerminalEvent::CommandFinished { exit_code }
-                                            );
-                                        }
-                                        OscEvent::CommandRecorded(command) => {
-                                            let _ = event_tx.send(
-                                                TerminalEvent::CommandRecorded(command)
-                                            );
-                                        }
-                                    }
                                 }
-
-                                // shell ready 后发送 init_commands（只发一次）
-                                if shell_ready && !init_sent {
-                                    init_sent = true;
-                                    if let Some(commands) = pending_init.as_ref() {
-                                        for line in commands.lines() {
-                                            if !line.trim().is_empty() {
-                                                let mut cmd_data = line.as_bytes().to_vec();
-                                                cmd_data.push(b'\n');
-                                                let _ = channel.send_data(&cmd_data).await;
-                                            }
-                                        }
-                                    }
+                                OscEvent::CommandRecorded(command) => {
+                                    let _ = event_tx.send(
+                                        TerminalEvent::CommandRecorded(command)
+                                    );
                                 }
-
-                                processor.advance(&mut *term.lock(), &data);
-                                let _ = notify_tx.send(());
                             }
-                            Some(ChannelEvent::Eof) | Some(ChannelEvent::Close) | None => {
-                                break;
-                            }
-                            _ => {}
                         }
+
+                        // shell ready 后发送 init_commands（只发一次）
+                        if shell_ready && !init_sent {
+                            init_sent = true;
+                            if let Some(commands) = pending_init.as_ref() {
+                                for line in commands.lines() {
+                                    if !line.trim().is_empty() {
+                                        let mut cmd_data = line.as_bytes().to_vec();
+                                        cmd_data.push(b'\n');
+                                        let _ = channel.send_data(&cmd_data).await;
+                                    }
+                                }
+                            }
+                        }
+
+                        processor.advance(&mut *term.lock(), &data);
+                        let _ = notify_tx.send(());
                     }
                 }
             }

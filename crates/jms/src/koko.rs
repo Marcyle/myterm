@@ -244,7 +244,10 @@ impl KokoChannel {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
             .unwrap_or(0);
-        let mut query = format!("disableautohash=false&token={}&_={}", params.token_id, timestamp);
+        let mut query = format!(
+            "disableautohash=false&token={}&_={}",
+            params.token_id, timestamp
+        );
         if let Some(ref ticket) = params.ticket {
             query.push_str(&format!("&ticket={}", ticket));
         }
@@ -513,6 +516,25 @@ impl KokoChannel {
         }
     }
 
+    /// 发送非文本（二进制）输入，用于 ZMODEM 等协议流。
+    ///
+    /// 信封模式下与 [`Self::send_input`] 一致；旧版 JSON 模式的 `data` 字段本身是
+    /// base64（见模块文档），因此这里按 base64 编码，避免 `from_utf8_lossy` 把二进制
+    /// 字节替换成 U+FFFD。
+    pub async fn send_input_binary(&mut self, bytes: &[u8]) -> Result<(), JmsError> {
+        if self.is_envelope {
+            let frame = build_terminal_input_envelope(self.terminal_id, bytes);
+            self.stream
+                .send(Message::Binary(frame.into()))
+                .await
+                .map_err(|e| JmsError::NetworkError(format!("WS 发送二进制输入失败: {e}")))?;
+            return Ok(());
+        }
+
+        self.send_message(MSG_TERMINAL_DATA, B64.encode(bytes))
+            .await
+    }
+
     /// 发送 resize
     pub async fn resize(&mut self, cols: u16, rows: u16) -> Result<(), JmsError> {
         if self.is_envelope {
@@ -618,7 +640,8 @@ impl KokoChannel {
                         self.is_envelope = true;
                         match env.msg_type {
                             ENVELOPE_TERMINAL_OUTPUT => {
-                                if let Some((term_id, output)) = parse_terminal_output(env.payload) {
+                                if let Some((term_id, output)) = parse_terminal_output(env.payload)
+                                {
                                     if term_id > 0 {
                                         self.terminal_id = term_id;
                                     }
@@ -626,15 +649,16 @@ impl KokoChannel {
                                 }
                             }
                             ENVELOPE_TERMINAL_COMMAND => {
-                                if let Ok(val) = serde_json::from_slice::<serde_json::Value>(env.payload) {
+                                if let Ok(val) =
+                                    serde_json::from_slice::<serde_json::Value>(env.payload)
+                                {
                                     let cmd = val
                                         .get("command")
                                         .and_then(|v| v.as_str())
                                         .unwrap_or_default();
-                                    let term_id = val
-                                        .get("terminalId")
-                                        .and_then(|v| v.as_u64())
-                                        .unwrap_or(0) as u32;
+                                    let term_id =
+                                        val.get("terminalId").and_then(|v| v.as_u64()).unwrap_or(0)
+                                            as u32;
                                     if term_id > 0 {
                                         self.terminal_id = term_id;
                                     }
@@ -652,7 +676,10 @@ impl KokoChannel {
                                             return Some(KokoEvent::Connect(self.term_id.clone()));
                                         }
                                         "created" => {
-                                            tracing::info!("Koko v5 终端分配成功: terminal_id={}", self.terminal_id);
+                                            tracing::info!(
+                                                "Koko v5 终端分配成功: terminal_id={}",
+                                                self.terminal_id
+                                            );
                                         }
                                         MSG_CLOSE => {
                                             return Some(KokoEvent::Closed);
@@ -667,7 +694,9 @@ impl KokoChannel {
                                 }
                             }
                             ENVELOPE_ERROR => {
-                                if let Ok(val) = serde_json::from_slice::<serde_json::Value>(env.payload) {
+                                if let Ok(val) =
+                                    serde_json::from_slice::<serde_json::Value>(env.payload)
+                                {
                                     let err_msg = val
                                         .get("message")
                                         .and_then(|v| v.as_str())
